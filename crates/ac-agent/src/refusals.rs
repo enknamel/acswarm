@@ -41,6 +41,21 @@ pub enum Refusal<'a> {
     Summon { why: SummonRefusal },
     /// It would not hand an item to someone mid-emote: given again once the emote is over.
     Give,
+    /// `name` would not take what was handed to it.
+    Gift { name: &'a str, why: GiftRefusal },
+}
+
+/// Why a give was turned away (Player_Inventory.cs:3278-3494).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GiftRefusal {
+    /// A player with Allow Give off, or an NPC whose Give emote is off: its own setting.
+    NotAccepting,
+    /// A player busy with a use or a cast: over in the seconds those take.
+    Busy,
+    /// An NPC with no emote for it that does not take anything.
+    NotWanted,
+    /// An NPC's Refuse emote: it looked and handed it back.
+    Examined,
 }
 
 /// Why a container would not open.
@@ -383,6 +398,40 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
     if text == "AI refuse item during emote" {
         return Some(Refusal::Give);
     }
+    // WorldObjects/Player_Inventory.cs:3306-3308 (a player, AllowGive off), :3471-3472 (an NPC's
+    // Give emote, AllowGive off): WeenieErrorWithString._IsNotAcceptingGiftsRightNow (0x03EF)
+    if let Some(name) = text.strip_suffix(" is not accepting gifts right now") {
+        return Some(Refusal::Gift {
+            name,
+            why: GiftRefusal::NotAccepting,
+        });
+    }
+    // WorldObjects/Player_Inventory.cs:3321-3323: WeenieErrorWithString._IsTooBusyToAcceptGifts (0x001E)
+    if let Some(name) = text.strip_suffix(" is too busy to accept gifts") {
+        return Some(Refusal::Gift {
+            name,
+            why: GiftRefusal::Busy,
+        });
+    }
+    // WorldObjects/Player_Inventory.cs:3493: WeenieError.TradeAiDoesntWant (0x046A), with the name
+    if let Some(name) = text.strip_suffix(" doesn't know what to do with that") {
+        return Some(Refusal::Gift {
+            name,
+            why: GiftRefusal::NotWanted,
+        });
+    }
+    // WorldObjects/Player_Inventory.cs:3464, :3500 (an IOU at a Town Crier)
+    //   $"You allow {target.Name} to examine your {item.NameWithMaterial}."
+    if let Some((name, _item)) = text
+        .strip_prefix("You allow ")
+        .and_then(|s| s.strip_suffix('.'))
+        .and_then(|s| s.split_once(" to examine your "))
+    {
+        return Some(Refusal::Gift {
+            name,
+            why: GiftRefusal::Examined,
+        });
+    }
     // WorldObjects/PetDevice.cs:130, :140; WorldObjects/Pet.cs:133, :162
     //   $"{player.CurrentActivePet.Name} is already active"
     if text.ends_with(" is already active") {
@@ -497,7 +546,8 @@ pub const RECRUIT_HELD_OFF: Duration = Duration::from_secs(10);
 /// stays one while we stand there, and a fight given up on is left this long anyway.
 pub const ATTACK_AGAIN: Duration = Duration::from_secs(90);
 
-/// Give again to someone mid-emote this often: a giver's greeting runs a few lines a second apart.
+/// Give again to someone mid-emote or busy this often: a giver's greeting runs a few lines a second
+/// apart, and a player's busy ends with its use or cast.
 pub const GIVE_BUSY_AGAIN: Duration = Duration::from_secs(2);
 
 /// The decision for a refusal of this kind, and the whole of the policy: the systems that act on a
@@ -538,6 +588,13 @@ pub fn answer(refusal: &Refusal) -> Answer {
         },
         // The emote ends by itself; the item was never taken.
         Refusal::Give => Answer::Soon(GIVE_BUSY_AGAIN),
+        Refusal::Gift { why, .. } => match why {
+            GiftRefusal::Busy => Answer::Soon(GIVE_BUSY_AGAIN),
+            // The target's own setting or emotes: the same give gets the same answer.
+            GiftRefusal::NotAccepting | GiftRefusal::NotWanted | GiftRefusal::Examined => {
+                Answer::Never
+            }
+        },
     }
 }
 
@@ -786,6 +843,46 @@ mod tests {
         // Jilsaya bint Dah, greeted as the Stamped Lytelthorpe Lucky Gold Letter went over.
         assert_eq!(refused("AI refuse item during emote"), Some(Refusal::Give));
         assert_eq!(answer(&Refusal::Give), Answer::Soon(GIVE_BUSY_AGAIN));
+    }
+
+    #[test]
+    fn a_give_turned_away_names_who_and_why() {
+        let gift = |name, why| Some(Refusal::Gift { name, why });
+        // A mule with Allow Give off; a busy one; an NPC wanting none of it; a Refuse emote.
+        assert_eq!(
+            refused("+Mule is not accepting gifts right now"),
+            gift("+Mule", GiftRefusal::NotAccepting)
+        );
+        assert_eq!(
+            refused("+Mule is too busy to accept gifts"),
+            gift("+Mule", GiftRefusal::Busy)
+        );
+        assert_eq!(
+            refused("Terese doesn't know what to do with that"),
+            gift("Terese", GiftRefusal::NotWanted)
+        );
+        assert_eq!(
+            refused("You allow Town Crier to examine your IOU."),
+            gift("Town Crier", GiftRefusal::Examined)
+        );
+        let busy = Refusal::Gift {
+            name: "+Mule",
+            why: GiftRefusal::Busy,
+        };
+        assert_eq!(answer(&busy), Answer::Soon(GIVE_BUSY_AGAIN));
+        let off = Refusal::Gift {
+            name: "+Mule",
+            why: GiftRefusal::NotAccepting,
+        };
+        assert_eq!(answer(&off), Answer::Never);
+        // The words matched are the codes as `weenie_errors` renders them.
+        let said = |code, name| crate::weenie_errors::text_with(code, name).unwrap();
+        let off = said(0x03EF, "+Mule");
+        assert_eq!(refused(&off), gift("+Mule", GiftRefusal::NotAccepting));
+        let busy = said(0x001E, "+Mule");
+        assert_eq!(refused(&busy), gift("+Mule", GiftRefusal::Busy));
+        let unwanted = said(0x046A, "Terese");
+        assert_eq!(refused(&unwanted), gift("Terese", GiftRefusal::NotWanted));
     }
 
     #[test]

@@ -32,6 +32,7 @@ pub mod doorway;
 pub mod emotes;
 pub mod explore;
 mod gem_room;
+pub mod giving;
 // The vocabulary every system speaks now lives below this crate, in
 // `ac-agent`. Re-exported under its old names so that nothing which
 // says `crate::did` or `crate::pack` has to care where it went.
@@ -377,6 +378,10 @@ pub struct Client {
     /// An item to put into a world container (chest, hook, storage) once
     /// the server has opened it for us: (item, container, asked at).
     pub pending_store: Option<(u32, u32, Instant)>,
+    /// The run of gives under way (`Client::give_all`, autoplay's gives), one at a time.
+    pub giving: Option<giving::Giving>,
+    /// How the last run of gives ended, until its asker reads it.
+    pub gave: Option<giving::Gave>,
     pub selected: Option<u32>,
     /// What was selected before `selected`: clicking a kit in the pack
     /// selects the kit, and using it then applies it to the player or

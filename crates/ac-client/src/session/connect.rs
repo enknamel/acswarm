@@ -167,6 +167,8 @@ impl Client {
             sight: Default::default(),
             reappraise: Default::default(),
             pending_store: None,
+            giving: None,
+            gave: None,
             selected: None,
             previous_selected: None,
             salvage_open: false,

@@ -403,6 +403,9 @@ impl Api for Recorder {
     fn give(&mut self, _t: i64, _i: i64, _n: i64) -> bool {
         false
     }
+    fn give_all(&mut self, _t: i64, _w: i64, _n: i64) -> bool {
+        false
+    }
     fn put_in(&mut self, _i: i64, _c: i64) -> bool {
         false
     }

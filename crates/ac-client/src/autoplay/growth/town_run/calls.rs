@@ -28,14 +28,14 @@ const GIVE_PAUSE: Duration = Duration::from_secs(3);
 /// (Player_Inventory.cs:3422-3427), and the visit's own use sets one off.
 const GIVE_STALLS: u32 = 3;
 /// Visits begun to one giver on one call before it is given up.
-const GIVER_TRIES: u32 = 3;
+pub(super) const GIVER_TRIES: u32 = 3;
 /// Gives turned away mid-emote that count for nothing, at most; past that each is a stall.
-const GIVE_BUSY_TRIES: u32 = 10;
+pub(crate) const GIVE_BUSY_TRIES: u32 = 10;
 /// A giver used for a talk is waited on this long for a line of its own (guess): left at once,
 /// the journey on cancelled ACE's walk to it and Shoichi never spoke.
 const TALK_WAIT: Duration = Duration::from_secs(5);
 /// A giver this near (metres, 3D) is in reach of a give: the visit's talking reach, with slack.
-const GIVER_REACH: f32 = crate::visit::REACH + 1.0;
+pub(crate) const GIVER_REACH: f32 = crate::visit::REACH + 1.0;
 
 /// One stop of a town run.
 #[derive(Clone, Debug, PartialEq)]
@@ -51,6 +51,8 @@ pub(crate) enum CallOn {
     Counter { errand: Errand, vendor: String },
     /// A quest giver, for a hand-in ready.
     Giver { row: &'static Row },
+    /// An NPC a give rule names, for the items tagged to it (`gift_calls`).
+    Gift(super::gift_calls::GiftCall),
 }
 
 /// A ready hand-in a run may take: the giver's row, the placement called at, and the XP of
@@ -266,7 +268,7 @@ impl Client {
     }
 
     /// Where the run sets off from, as the journey planner is told it.
-    fn start_place(&mut self) -> Option<Place> {
+    pub(super) fn start_place(&mut self) -> Option<Place> {
         let pl = self.player.as_ref()?;
         let (at, cell) = (pl.world_position(), pl.cell);
         let underground = self.underground();
@@ -278,7 +280,7 @@ impl Client {
 
     /// The seconds of a journey from `from` to `to` (both as the planner is told them), planned
     /// as `set_off` plans one and not set off on; `None` with no way.
-    fn leg_seconds(&self, from: Place, to: Place) -> Option<f32> {
+    pub(super) fn leg_seconds(&self, from: Place, to: Place) -> Option<f32> {
         let prefs = self.travel_prefs().in_dungeon(from.is_indoors());
         let level = self.world.stats.level.max(1) as u32;
         let gems = self.carried_gems();
@@ -399,7 +401,7 @@ impl Client {
             .chain(&run.calls)
             .filter_map(|c| match &c.on {
                 CallOn::Giver { row } => Some(row.giver),
-                CallOn::Counter { .. } => None,
+                CallOn::Counter { .. } | CallOn::Gift(_) => None,
             })
             .collect();
         self.autoplay.note(
@@ -492,6 +494,7 @@ impl Client {
                 }
                 ok
             }
+            CallOn::Gift(gift) => self.make_gift_call(run, gift, call.at, now),
         }
     }
 
@@ -528,7 +531,7 @@ impl Client {
         self.autoplay.growth.giver_busy = Some((now + wait, tries));
     }
 
-    fn giver_done(&mut self, run: Run, now: Instant, cfg: &Growth) -> Turn {
+    pub(super) fn giver_done(&mut self, run: Run, now: Instant, cfg: &Growth) -> Turn {
         self.autoplay.growth.giver_busy = None;
         let Some(run) = self.next_call(run, now) else {
             return Turn::Acted;

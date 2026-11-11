@@ -434,6 +434,14 @@ pub const STEPS: &[Step] = &[
         run: claimed!(Client::autoplay_salvage),
     },
     Step {
+        name: "give",
+        layer: Layer::Goal,
+        base: 98.0,
+        why: "a mule in reach is handed its items between fights, after salvage made the bags",
+        worth: by_place,
+        run: claimed!(Client::autoplay_give),
+    },
+    Step {
         name: "read scrolls",
         layer: Layer::Goal,
         base: 97.0,

@@ -70,6 +70,7 @@ pub use raise::{batch_raise, choose_raise, Batch, Climb, Offer, Raise};
 #[cfg(doc)]
 use road::on_the_way;
 pub use sale::Salable;
+pub(crate) use town_run::calls::{GIVER_REACH, GIVE_BUSY_TRIES};
 #[cfg(doc)]
 use town_run::counter::on_opening;
 #[cfg(doc)]

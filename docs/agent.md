@@ -214,6 +214,11 @@ table, in the server's exact words with a name substituted.
 | `You cannot attack {name}` | `Player_Melee.cs:122`, `Player_Missile.cs:110` | `Attack` | the target is given up for 90 s |
 | `You must be a {mastery} to use the {essence}` | `PetDevice.cs:115` | `Summon NotForUs` | never |
 | `{pet} is already active` | `PetDevice.cs:130`, `Pet.cs:133` | `Summon OneIsOut` | the essence is left ready |
+| `AI refuse item during emote` | `Player_Inventory.cs:3422-3426` | `Give` | the give again in 2 s, same every time |
+| `{name} is too busy to accept gifts` | `Player_Inventory.cs:3321-3323` | `Gift Busy` | the give again in 2 s, same every time |
+| `{name} is not accepting gifts right now` | `Player_Inventory.cs:3306-3308, :3471-3472` | `Gift NotAccepting` | never: the gives end, the items held back an hour |
+| `{name} doesn't know what to do with that` | `Player_Inventory.cs:3493` | `Gift NotWanted` | never: the gives end, the items held back an hour |
+| `You allow {name} to examine your {item}.` | `Player_Inventory.cs:3464, :3500` | `Gift Examined` | never: the gives end, the items held back an hour |
 
 **Read, decided, and waited on by nothing yet** -- they reach the log as
 `the server refused (...)`, and the row is there to wire to the moment

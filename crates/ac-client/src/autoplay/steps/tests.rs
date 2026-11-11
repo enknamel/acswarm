@@ -94,8 +94,9 @@ fn every_goal_keeps_the_worth_it_had_when_tidying_moved() {
     // the contract. They are written in the table now, so a row may come
     // or go without moving them.
     let base = |name: &str| STEPS.iter().find(|s| s.name == name).expect(name).base;
-    assert_eq!(STEPS.len(), 21);
+    assert_eq!(STEPS.len(), 22);
     assert_eq!(base("read scrolls"), 97.0);
+    assert_eq!(base("give"), 98.0);
     assert_eq!(base("town run"), 95.0);
     assert_eq!(base("fight"), 80.0);
     assert_eq!(base("summon"), 90.0);

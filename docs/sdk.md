@@ -318,7 +318,8 @@ impl Plugin for Hunter {
 
 The verbs to know: `use_by_name` / `interact(guid)` (double-click),
 `pick_up`, `attack(guid)`, `toggle_combat`, `cast(spell)` / `cast_at`,
-`say`, `take(guid)` / `close_container`, `buy` / `sell`, `give`,
+`say`, `take(guid)` / `close_container`, `buy` / `sell`, `give`, `give_all(to, wcid,
+most)` (every one of a kind, a give at a time, walking into reach first; the end in `gave`),
 `use_on(item, target)`, `travel_to(goal)` (or `visit_landmark`, which
 goes to a shopkeeper or NPC where they really stand, upstairs included,
 and uses them on arriving, and `visit_portal`, which goes to a portal and

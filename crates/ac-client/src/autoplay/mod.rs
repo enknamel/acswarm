@@ -55,6 +55,7 @@ mod journey;
 mod ledger;
 mod loot;
 pub mod mana_stones;
+mod mule;
 mod scrolls;
 pub mod steps;
 pub mod summoning;

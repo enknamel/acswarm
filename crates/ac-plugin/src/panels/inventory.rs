@@ -135,6 +135,8 @@ pub(crate) struct InventoryView {
     /// Foci carried twice: a pack slot spent on nothing.
     pub spare_foci: Vec<(u32, String)>,
     pub unappraised: usize,
+    /// The selected NPC or player an item's "Give all" hands to, by guid and name.
+    pub give_to: Option<(u32, String)>,
 }
 
 /// The chips above the list: a label and the kinds it keeps.
@@ -269,7 +271,18 @@ pub(crate) fn view(c: &Client) -> Option<InventoryView> {
         burden_capacity: strength * 150,
         foci,
         unappraised,
+        give_to: give_target(c),
     })
+}
+
+/// Who "Give all" hands to: the selected NPC or player, never something carried or ourselves.
+fn give_target(c: &Client) -> Option<(u32, String)> {
+    let me = c.world.player_guid;
+    let guid = c
+        .selected
+        .filter(|g| Some(*g) != me && !c.world.is_carried(*g))?;
+    let o = c.world.objects.get(&guid)?;
+    (o.wielder.is_none() && o.container.is_none()).then(|| (guid, o.name.clone()))
 }
 
 /// What the player did in the panel this frame.
@@ -298,6 +311,8 @@ pub(crate) struct Actions {
     /// Packs to tip out into the main pack, so a bigger one can take
     /// the slot.
     pub empty_pack: Vec<u32>,
+    /// Every one carried of this item's kind, to the selected NPC or player: (wcid, to).
+    pub give_all: Vec<(u32, u32)>,
 }
 
 /// The panel's own state: search line, chip, sort, folded packs.
@@ -451,6 +466,13 @@ fn draw_row(
         if ui.button("Drop").clicked() {
             actions.drop.push(r.item.guid);
             ui.close();
+        }
+        // A give at a time, walking into reach first (`Client::give_all`).
+        if let Some((to, name)) = v.give_to.as_ref().filter(|_| !r.item.wielded) {
+            if ui.button(format!("Give all to {name}")).clicked() {
+                actions.give_all.push((r.item.wcid, *to));
+                ui.close();
+            }
         }
     });
     if row.clicked() {
@@ -1006,6 +1028,7 @@ impl Inventory {
                 foci: vec!["War".into()],
                 spare_foci: Vec::new(),
                 unappraised: 4,
+                give_to: None,
             }),
             show: true,
             state: State::default(),
@@ -1105,6 +1128,9 @@ impl Plugin for Inventory {
             for g in actions.drop {
                 c.drop_item(g);
             }
+            for (wcid, to) in actions.give_all {
+                c.give_all(to, wcid, None);
+            }
             for (item, container) in actions.moves {
                 let container = if container == 0 {
                     c.world.player_guid.unwrap_or(0)
@@ -1154,6 +1180,33 @@ mod tests {
             Source::Demo(v) => v,
             Source::Live => unreachable!(),
         }
+    }
+
+    #[test]
+    fn give_all_goes_to_the_selected_npc_never_to_something_carried() {
+        let mut c = Client::offline(std::rc::Rc::new(ac_scene::Assets::empty()));
+        let me = 0x5000_0001;
+        c.world.player_guid = Some(me);
+        let thing = |guid, name: &str, container| ac_world::WorldObject {
+            guid,
+            name: name.into(),
+            container,
+            ..Default::default()
+        };
+        c.world.objects.insert(me, thing(me, "Verity", None));
+        c.world
+            .objects
+            .insert(0x7000_0001, thing(0x7000_0001, "Terese", None));
+        c.world
+            .objects
+            .insert(0x8000_0001, thing(0x8000_0001, "Seeds", Some(me)));
+        assert_eq!(give_target(&c), None, "nothing selected");
+        c.selected = Some(0x7000_0001);
+        assert_eq!(give_target(&c), Some((0x7000_0001, "Terese".into())));
+        c.selected = Some(0x8000_0001);
+        assert_eq!(give_target(&c), None, "a carried thing is no receiver");
+        c.selected = Some(me);
+        assert_eq!(give_target(&c), None, "nor the character itself");
     }
 
     #[test]

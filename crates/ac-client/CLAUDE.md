@@ -9,7 +9,7 @@ checks the paths, entry fns, steps and modules named here, each system's entry f
 `Client::tick` (`session/apply.rs`), once a frame per session:
 1. drain the socket and `World::apply` each message; server chat goes to `chat_message()`
    (`session/chat.rs`), which hands refusals in words to `hear_refusal()` (`refused.rs`)
-2. manual-play timers: `tick_combat()`, `tick_loot()`, `tick_store()`, `tick_appraise()`
+2. manual-play timers: `tick_combat()`, `tick_loot()`, `tick_store()`, `tick_giving()`, `tick_appraise()`
 3. `tick_autoplay()` (`autoplay/mod.rs`), then `tick_retag()` (`autoplay/ledger/retag.rs`) and
    `save_ledger()` (`autoplay/ledger/store.rs`)
 4. `tick_player()` (`body/player_tick.rs`) runs `tick_visit()` (`visit.rs`), walks the journey's
@@ -49,16 +49,17 @@ the earlier row; reflexes run in table order, `base` unread. The fixed curves si
 | 9 | catch up | goal | 120 | `autoplay_follow` (urgent) |
 | 10 | team | goal | 110 | `autoplay_team` |
 | 11 | salvage | goal | 100 | `autoplay_salvage` |
-| 12 | read scrolls | goal | 97 | `autoplay_read_scrolls` |
-| 13 | town run | goal | `worth_town_run` | `autoplay_town_run` |
-| 14 | summon | goal | `worth_fighting` | `autoplay_summon` |
-| 15 | fight | goal | `worth_fighting` | `autoplay_fight` |
-| 16 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
-| 17 | buffs | goal | 60 | `autoplay_buff` |
-| 18 | follow | goal | 50 | `autoplay_follow` |
-| 19 | resume the journey | goal | 40 | `autoplay_resume_journey` |
-| 20 | explore | goal | 20 | `autoplay_explore` |
-| 21 | grow | goal | 10 | `autoplay_grow` |
+| 12 | give | goal | 98 | `autoplay_give` |
+| 13 | read scrolls | goal | 97 | `autoplay_read_scrolls` |
+| 14 | town run | goal | `worth_town_run` | `autoplay_town_run` |
+| 15 | summon | goal | `worth_fighting` | `autoplay_summon` |
+| 16 | fight | goal | `worth_fighting` | `autoplay_fight` |
+| 17 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
+| 18 | buffs | goal | 60 | `autoplay_buff` |
+| 19 | follow | goal | 50 | `autoplay_follow` |
+| 20 | resume the journey | goal | 40 | `autoplay_resume_journey` |
+| 21 | explore | goal | 20 | `autoplay_explore` |
+| 22 | grow | goal | 10 | `autoplay_grow` |
 
 Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_mana_stones`, `autoplay_refill_essences`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
 
@@ -93,6 +94,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | played by hand | `autoplay_by_hand`, `autoplay_assist` | `autoplay/team/by_hand.rs` | `Team.follow`, `Team.focus_fire` | by_hand | autoplay::team::by_hand | assist |
 | quartermaster | `autoplay_quartermaster`, `autoplay_stock`, `decide`, `quartermaster`, `hand_out` | `autoplay/team/quartermaster.rs`, `logistics.rs`, `autoplay/growth/policy.rs` | `growth::State.mode`, `Team.restock` | quartermaster | autoplay::team::quartermaster | quartermaster |
 | town run | `autoplay_town_run`, `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `choose_stop`, `pick_vendor`, `plan_calls`, `giver_step` | `autoplay/growth/town_run/mod.rs`, `autoplay/growth/town_run/counter.rs`, `autoplay/growth/town_run/vendor.rs`, `autoplay/growth/town_run/panel.rs`, `autoplay/growth/town_run/calls.rs`, `crates/ac-world/src/tour.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth::town_run | town_run, counter |
+| giving | `give_all`, `tick_giving`, `hear_gift_refusal`, `may_give`, `gifts_tagged`, `autoplay_give`, `add_gift_calls`, `gift_step` | `giving.rs`, `autoplay/mule.rs`, `autoplay/growth/town_run/gift_calls.rs`, `crates/ac-world/src/takers.rs` | `Client.giving`, `Client.gave`, `Rule.give_to` (a `LootAction::Give` rule's receiver) | giv | giving | give |
 | supplies and sale | `grow_needs_with`, `supplies`, `sell_policy`, `offers_for_sale`, `burns` | `autoplay/growth/needs.rs`, `autoplay/growth/policy.rs`, `autoplay/growth/sale.rs`, `autoplay/growth/supplies.rs`, `crates/ac-loot/src/sale.rs` | `growth::State.needs`, `Profile.buy` (an `Ammunition` line: the launcher's rounds) | counter | autoplay::growth | need, sale |
 | XP spending | `autoplay_spend_xp`, `grow_spend_xp`, `raise_offers`, `batch_raise` | `autoplay/growth/xp.rs`, `autoplay/growth/raise.rs`, `advance.rs` | `growth::State.pending`, `growth::State.sulking` | experience | autoplay::growth::xp | raise |
 | hunting ground and area | `autoplay_grow`, `grow_hunt`, `autoplay_watch_the_ground`, `autoplay_keep_to_area` | `autoplay/growth/mod.rs`, `autoplay/growth/hunt.rs`, `autoplay/growth/quest_bonus.rs`, `hunt.rs` | `growth::State.bound`, `growth::State.quiet_since`, `Fight.area` | ground | autoplay::growth::hunt | ground, area |
@@ -133,6 +135,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | refusal | the server's no, by weenie error or in words | error, rejection |
 | plan, order | the leader's plan for the party, and one character's part in it | - |
 | assist | hit what the leader is hitting, picking nothing | help, support |
+| give, receiver, taker | hand a carried item over (GiveObjectRequest), a give at a time; whom to (`GiveTo`); an NPC that takes anything (`ac_world::takers`) | hand, donate, dump |
 | quest, giver, hand_in, pursuit | a quest in `ac_world::quests`, its rows sharing an id; the NPC who rewards it; giving it the items, or talking, for the reward; a quest the player asked autoplay to work before hunting for XP (`Quests.pursue`) | task, npc, turn-in, goal, order |
 
 ## Domain rules
@@ -185,14 +188,11 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `items.rs` | appraisal requests and answers; the item vocabulary is `ac_loot::items` |
 | `profile.rs`, `weapons.rs`, `daytime.rs`, `augmentations.rs` | shims re-exporting `ac_loot::profile` and `ac_loot::weapons`; Dereth's time of day; augmentation gems |
 | `holdings.rs` | every character's inventory snapshots, for the Items window |
-| `reconnect.rs`, `logoff.rs` | whether and when a dropped session logs back in; logging every session off on exit |
-| `options.rs`, `emotes.rs`, `position.rs` | character option bits; soul emotes; `my_position()`: the character's world position |
-| `tally.rs` | what the character did lately, for telemetry: this frame's walk (`WalkFrame`), blows traded (`Blows`), supplies short (`SupplyLine`) |
-| `advance.rs` | experience costs and raise messages |
+| `reconnect.rs`, `logoff.rs`, `options.rs`, `emotes.rs`, `position.rs` | whether and when a dropped session logs back in; logging every session off on exit; character option bits; soul emotes; `my_position()`: the character's world position |
+| `tally.rs`, `advance.rs` | what the character did lately, for telemetry: this frame's walk (`WalkFrame`), blows traded (`Blows`), supplies short (`SupplyLine`); experience costs and raise messages |
 | `recalls.rs`, `quest_flags.rs`, `quest_log.rs` | recall spells the journey planner can use; the portal quest flags it may plan through, earned by talking to whoever stamps one; each character's quest log |
-| `shopping.rs` | reads the pack into `ac_vendor`'s snapshot and carries out its act |
+| `shopping.rs`, `aim.rs` | reads the pack into `ac_vendor`'s snapshot and carries out its act; whether a projectile clears walls and hills on the way to its target |
 | `sight.rs` | what ACE counts as in view (`View`); what is out of it 35 s set aside (`tick_sight`), since the server sends no delete once it has let go, and asked about once back in view |
-| `aim.rs` | whether a projectile clears walls and hills on the way to its target |
 | `logistics.rs` | the party's mode (hunting or restocking) and money sharing, the same on every session |
 | `buffs.rs`, `hunt.rs` | which buffs a character should wear, from its skills and spells; hunting areas drawn on the map |
 | `testkit.rs`, `walk_trial.rs` | test-only: `Client::offline` sessions over `no_data()` or `game_data()`, `standing_at()`, `creature()`, `corpse()`, `mate()` builders; the route harness (`walk_trial::run`, `tests/route_harness.rs`) |

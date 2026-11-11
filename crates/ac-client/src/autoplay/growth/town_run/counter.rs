@@ -86,7 +86,9 @@ pub(crate) fn on_opening(
 /// casts that can wait do (see `Client::counter_holding_casts`).
 pub(super) fn counter_asked(phase: Option<&Phase>, window: Option<u32>) -> Option<u32> {
     match phase {
-        Some(Phase::Going | Phase::ToGiver { .. } | Phase::HandingIn { .. }) => None,
+        Some(
+            Phase::Going | Phase::ToGiver { .. } | Phase::HandingIn { .. } | Phase::Gift { .. },
+        ) => None,
         Some(Phase::Opening { guid, .. }) => Some(*guid),
         Some(Phase::Appraising | Phase::Selling { .. }) | None => window,
     }
@@ -119,6 +121,7 @@ impl Client {
         let elapsed = now.duration_since(run.since);
         match run.phase.clone() {
             Phase::ToGiver { .. } | Phase::HandingIn { .. } => self.giver_step(run, now, cfg),
+            Phase::Gift { .. } => self.gift_step(run, now, cfg),
             Phase::Going => {
                 let counter = crate::Goal::At {
                     place: counter_place(run.at),

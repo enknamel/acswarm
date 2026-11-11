@@ -380,6 +380,16 @@ impl Client {
                 None,
                 format!("handing {} to {} ({taken} taken)", row.title, row.giver),
             ),
+            Phase::Gift {
+                gift,
+                handing: false,
+                ..
+            } => ("Going", None, format!("going to {} to give", gift.name)),
+            Phase::Gift { gift, .. } => {
+                let given = self.giving.as_ref().map_or(0, |g| g.given);
+                let said = format!("giving to {} ({given} given)", gift.name);
+                ("Giving", None, said)
+            }
             Phase::Selling { .. } => {
                 let cfg = &self.autoplay.config.growth;
                 let snap = self.vendor_snapshot(cfg);

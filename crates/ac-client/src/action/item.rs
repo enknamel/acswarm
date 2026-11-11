@@ -58,6 +58,13 @@ pub(super) fn give(c: &mut Client, item: &Target, to: &Target, amount: Option<u3
     done(c.give(to, item, amount), "that cannot be given")
 }
 
+pub(super) fn give_all(c: &mut Client, item: &Target, to: &Target, most: Option<u32>) -> Outcome {
+    let item = resolve::pack_item(c, item).ok_or_else(|| nothing_named(item))?;
+    let to = resolve::object(c, to).ok_or_else(|| nothing_named(to))?;
+    let wcid = c.world.objects.get(&item).map_or(0, |o| o.weenie_class_id);
+    done(c.give_all(to, wcid, most), "none of that can be given")
+}
+
 pub(super) fn put_in(c: &mut Client, item: &Target, container: &Target) -> Outcome {
     let item = resolve::pack_item(c, item).ok_or_else(|| nothing_named(item))?;
     let container = resolve::object(c, container).ok_or_else(|| nothing_named(container))?;

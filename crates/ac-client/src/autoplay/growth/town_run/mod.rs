@@ -1,5 +1,6 @@
 pub(super) mod calls;
 pub(super) mod counter;
+pub(super) mod gift_calls;
 pub(super) mod panel;
 pub(super) mod vendor;
 
@@ -133,6 +134,13 @@ pub(super) enum Phase {
         taken: u32,
         last: Option<(Instant, u32)>,
         stalls: u32,
+    },
+    /// A call on an NPC a give rule names: on the way, the `tries`th time, then `handing` it over.
+    Gift {
+        gift: gift_calls::GiftCall,
+        at: ac_world::Place,
+        tries: u32,
+        handing: bool,
     },
 }
 
@@ -560,6 +568,7 @@ impl Client {
         match self.start_town_run(now, cfg, needs, reason, &errands, go_anyway) {
             Ok(()) => {
                 self.add_hand_ins(now);
+                self.add_gift_calls(now);
                 true
             }
             Err(why) => {

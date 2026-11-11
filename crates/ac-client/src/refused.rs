@@ -59,9 +59,17 @@ impl Client {
             }
             // A give to someone mid-emote: the hand-in gives again once it is over, no stall
             // counted (see `Client::hear_give_refusal`).
+            // The gives under way hear it too (see `Client::hear_gift_refusal`).
             Refusal::Give => {
                 let answer = crate::refusals::answer(&refusal);
                 self.hear_give_refusal(answer, now);
+                self.hear_gift_refusal(&refusal, answer);
+            }
+            // A receiver turning a give away: the gives under way wait or end on it.
+            Refusal::Gift { .. } => {
+                tracing::info!("the server refused ({refusal:?}): {text}");
+                let answer = crate::refusals::answer(&refusal);
+                self.hear_gift_refusal(&refusal, answer);
             }
             // Read, and waited on by nothing here yet. The item stays
             // where it lies and the loot rules pass it over

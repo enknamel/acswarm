@@ -23,6 +23,7 @@ impl Client {
         self.tick_combat();
         self.tick_loot(now);
         self.tick_store();
+        self.tick_giving(now);
         self.tick_appraise();
         // What the server has let go of out of view, set aside before autoplay reads the world.
         self.tick_sight(now);

@@ -288,6 +288,10 @@ pub trait Api {
     fn drop_item(&mut self, guid: i64) -> bool;
     /// Hand a carried item (amount 0 = whole stack) to a creature or player.
     fn give(&mut self, target: i64, item: i64, amount: i64) -> bool;
+    /// `give_all(target, what)` / `give_all(target, what, most)`: hand every one carried (or
+    /// `most`) of a kind -- `what` a carried item's guid or a weenie class -- a give at a time,
+    /// walking into reach first. False when none is carried or the target is not in view.
+    fn give_all(&mut self, target: i64, what: i64, most: i64) -> bool;
     /// Move a carried item into a pack (container 0 = main pack) or the open chest.
     fn put_in(&mut self, item: i64, container: i64) -> bool;
     /// Split `amount` off a stack into the main pack; merge one stack into another of the same kind.
@@ -664,6 +668,12 @@ pub fn register(engine: &mut Engine) {
     engine.register_fn("drop_item", |g: i64| with_api(|a| a.drop_item(g)));
     engine.register_fn("give", |t: i64, i: i64, n: i64| {
         with_api(|a| a.give(t, i, n))
+    });
+    engine.register_fn("give_all", |t: i64, w: i64| {
+        with_api(|a| a.give_all(t, w, 0))
+    });
+    engine.register_fn("give_all", |t: i64, w: i64, n: i64| {
+        with_api(|a| a.give_all(t, w, n))
     });
     engine.register_fn("put_in", |i: i64, c: i64| with_api(|a| a.put_in(i, c)));
     engine.register_fn("split", |i: i64, n: i64| with_api(|a| a.split(i, n)));

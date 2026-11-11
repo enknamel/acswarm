@@ -1181,6 +1181,16 @@ impl Api for CtxApi<'_, '_> {
         self.client().give(target as u32, item as u32, amount)
     }
 
+    fn give_all(&mut self, target: i64, what: i64, most: i64) -> bool {
+        let c = self.client();
+        // A carried item names its kind; anything else is taken for a weenie class.
+        let wcid = match c.world.objects.get(&(what as u32)) {
+            Some(o) if c.world.is_carried(o.guid) => o.weenie_class_id,
+            _ => what as u32,
+        };
+        c.give_all(target as u32, wcid, (most > 0).then_some(most as u32))
+    }
+
     fn put_in(&mut self, item: i64, container: i64) -> bool {
         let c = self.client();
         let me = c.world.player_guid;
@@ -1731,6 +1741,40 @@ mod tests {
         let pursue = &client.autoplay.config.quests.pursue;
         let ids: Vec<(&str, bool)> = pursue.iter().map(|p| (p.id.as_str(), p.again)).collect();
         assert_eq!(ids, [("engorgedeaterjaw", true)]);
+    }
+
+    #[test]
+    fn a_script_gives_all_of_a_kind_named_by_a_carried_item_or_its_weenie_class() {
+        let mut client = ac_client::testkit::character_of_level(ac_client::testkit::no_data(), 5);
+        ac_client::testkit::with_a_pack(&mut client, 50);
+        ac_client::testkit::thing_in_the_pack(&mut client, 0x8000_0001, "Little Green Seeds", 2);
+        client
+            .world
+            .objects
+            .get_mut(&0x8000_0001)
+            .unwrap()
+            .weenie_class_id = 11692;
+        let terese = ac_client::testkit::creature(0x7000_0001, "Terese");
+        client.world.objects.insert(0x7000_0001, terese);
+        let mut board = ac_plugin::Blackboard::default();
+        let mut settings = ac_plugin::Settings::new();
+        let mut icons = ac_plugin::IconCache::default();
+        let mut cx = ctx(&mut client, &mut board, &mut settings, &mut icons);
+        let mut api = CtxApi { cx: &mut cx };
+        assert!(
+            !api.give_all(0x7000_0001, 1, 0),
+            "none of weenie class 1 carried"
+        );
+        assert!(
+            api.give_all(0x7000_0001, 0x8000_0001, 0),
+            "named by the item"
+        );
+        assert!(
+            api.give_all(0x7000_0001, 11692, 1),
+            "named by its weenie class"
+        );
+        let g = client.giving.as_ref().expect("gives under way");
+        assert_eq!((g.to, g.left), (0x7000_0001, Some(1)));
     }
 
     #[test]

@@ -297,7 +297,7 @@ fn a_ready_talk_in_the_counters_town_joins_the_run_and_one_switched_off_does_not
         .map(String::as_str)
         .chain(run.calls.iter().filter_map(|k| match &k.on {
             CallOn::Giver { row } => Some(row.giver),
-            CallOn::Counter { .. } => None,
+            CallOn::Counter { .. } | CallOn::Gift(_) => None,
         }))
         .filter(|n| *n == "Alcott")
         .collect();

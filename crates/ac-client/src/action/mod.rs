@@ -228,6 +228,13 @@ pub enum Action {
         to: Target,
         amount: Option<u32>,
     },
+    /// Hand somebody every one carried of the item's kind (`most` of them), a give at a time,
+    /// walking into reach first.
+    GiveAll {
+        item: Target,
+        to: Target,
+        most: Option<u32>,
+    },
     /// Move it into a pack.
     PutIn {
         item: Target,
@@ -448,6 +455,7 @@ impl Client {
                 to,
                 amount,
             } => item::give(self, &i, &to, amount),
+            Action::GiveAll { item: i, to, most } => item::give_all(self, &i, &to, most),
             Action::PutIn { item: i, container } => item::put_in(self, &i, &container),
             Action::Split { item: i, amount } => item::split(self, &i, amount),
             Action::Merge { from, to } => item::merge(self, &from, &to),
