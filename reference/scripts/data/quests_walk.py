@@ -20,6 +20,8 @@ START_EVENT, CAST_INSTANT = 23, 19
 # ReceiveLocalSignal (EmoteCategory.cs), and a watcher's own counter: StampMyQuest and
 # InqMyQuestSolves (EmoteType.cs).
 RECEIVE_SIGNAL, STAMP_MY, INQ_MY_SOLVES = 37, 81, 82
+# LocalSignal, Generate (a generator's profiles made now) and StampFellowQuest (EmoteType.cs).
+LOCAL_SIGNAL, GENERATE, STAMP_FELLOW = 88, 72, 61
 # CastSpell, and TeleportTarget: the one it is run for moved to its position (EmoteType.cs).
 CAST_SPELL, TELEPORT = 14, 99
 # GameEventState.On: an event the server starts with (EventManager.cs:55-57).
@@ -212,6 +214,10 @@ class Data:
             self.portal_stamps[qname(flag)].add(int(portal))
             if cell:
                 self.portal_placed[int(portal)].append((int(cell, 16), x, y, z))
+        # Teleport spells' destinations, portals' relative destinations, and hearing radii.
+        self.spell_pos = {int(i): (int(c, 16), x, y, z) for i, c, x, y, z in rows(dump, "spellpos")}
+        self.rel_dest = {int(o): (num(x), num(y), num(z)) for o, x, y, z in rows(dump, "reldest")}
+        self.hearing = {int(o): num(v) for o, v in rows(dump, "hearing")}
 
     def gate_of(self, wcid, depth=0):
         """(made, event): whether anything puts `wcid` in the world, and when every way that does
@@ -1338,10 +1344,12 @@ def build(data, never):
             for c in sorted(data.stamps.get(want[5:], ())):
                 if data.spawns.get(c):
                     src.append((want, "kill", c, 1.0, ""))
-            # Or on whoever goes through a portal (its Portal set), where it stands or is made.
+            # Or on whoever goes through a portal (its Portal set): one placed, or one a
+            # generator makes when something reveals it (the Colosseum's Arena 3).
             for p in sorted(data.portal_stamps.get(want[5:], ())):
-                if portal_places(data, p):
-                    src.append((want, "portal", p, 1.0, ""))
+                if placed_at(data, p):
+                    kind = "portal" if standing(data, p) else "revealed"
+                    src.append((want, kind, p, 1.0, ""))
         else:
             for c in sorted(data.counter_of[want]):
                 if data.spawns.get(c):
@@ -1365,13 +1373,13 @@ def build(data, never):
         at, blocks, count = "", [], 1
         if kind == "combine":
             where = ""
-        elif kind in ("npc", "floor", "container", "use", "give", "portal"):
+        elif kind in ("npc", "floor", "container", "use", "give", "portal", "revealed"):
             if kind == "npc" or (kind == "give" and data.placed.get(c)):
                 spots = data.placed.get(c, [])
             elif kind == "give":
                 spots = sorted(set(data.made_on_ground(c)))
-            elif kind == "portal":
-                spots = portal_places(data, c)
+            elif kind in ("portal", "revealed"):
+                spots = placed_at(data, c)
             else:
                 spots = sorted(set(data.made_on_ground(c) if kind == "floor"
                                    else data.ground_places(c)))
@@ -1407,10 +1415,117 @@ def build(data, never):
     return rows_out, givers_out, src_out, reasons
 
 
-def portal_places(data, portal):
-    """Where `portal` stands: placed, or made by a generator (where that generator stands, as a
-    floor item's)."""
-    return sorted(set(data.portal_placed.get(portal, ())) | set(data.made_on_ground(portal)))
+def placed_at(data, wcid, depth=0):
+    """Where `wcid` stands: placed, or made by a generator where that stands, a Specific profile
+    with no cell at the generator's spot plus its offset (Spawn_Specific, GeneratorProfile.cs:320-344;
+    the cell stays the generator's)."""
+    out = list(data.ground.get(wcid, ())) + list(data.portal_placed.get(wcid, ()))
+    if depth < GEN_DEPTH:
+        for gen, _, where, spot in data.made_by.get(wcid, ()):
+            if where & (8 | 16 | 32 | 64):
+                continue
+            if where & 4 and spot[0]:
+                out.append(spot)
+                continue
+            off = [num(v) for v in spot[1:]] if where & 4 else [0.0, 0.0, 0.0]
+            for cell, *xyz in placed_at(data, gen, depth + 1):
+                out.append((cell,) + tuple("%g" % round(num(a) + b, 2) for a, b in zip(xyz, off)))
+    return sorted(set(out))
+
+
+def standing(data, wcid, depth=0):
+    """Whether `wcid` is in the world with nothing revealing it: placed, or made by a generator
+    that fills at load (regenerating, a container, or its event On: WorldObject_Generators.cs:
+    398-460, 487-491) and stands itself."""
+    if data.ground.get(wcid) or data.portal_placed.get(wcid):
+        return True
+    for gen, _, where, _ in data.made_by.get(wcid, ()) if depth < GEN_DEPTH else ():
+        kind, regen, _, _, _, event = data.spawning.genprops.get(gen, (0, 0.0, 0, 0, 0, "0"))
+        fills = event != "off" and (regen > 0 or kind in GEN_CONTAINERS or event == "1")
+        if not where & (8 | 16 | 32 | 64) and fills and standing(data, gen, depth + 1):
+            return True
+    return False
+
+
+def reach_all(data, obj, s):
+    """Each (set, action) set `s` of `obj` can come to, whatever its branches answer: its own and
+    those of every set its Gotos and branches run, keyed on their message (EmoteManager.cs:1512-1556)."""
+    seen, todo, out = {s["id"]}, [s], []
+    while todo:
+        cur = todo.pop()
+        for a in cur["acts"]:
+            out.append((cur, a))
+            if (a["type"] == GOTO or a["type"] in BRANCHING) and a["msg"]:
+                for nxt in data.outcomes(obj, None, a["msg"]):
+                    if nxt["id"] not in seen:
+                        seen.add(nxt["id"])
+                        todo.append(nxt)
+    return out
+
+
+def arena_rows(data):
+    """The Colosseum's arenas as their emote tables run them (docs in ARENAS_HEADER): each room's
+    bell, whose use starts the coordinator it makes, whose waves passed signal an exit generator in
+    hearing to make the room's portal; each way in, a teleport an NPC casts for a fellowship
+    holding its access quest; and who stamps that quest on the fellowship for an item handed."""
+    out = []
+    xyz = lambda p: " ".join("%g" % num(v) for v in p[1:])
+    away = lambda a, b: sum((num(x) - num(y)) ** 2 for x, y in zip(a[1:], b[1:])) ** 0.5
+    sends = lambda o, sig: any(a["type"] == LOCAL_SIGNAL and a["msg"].lower() == sig
+                               for s in data.by_obj.get(o, ()) for a in s["acts"])
+    for portal in sorted(p for p in data.rel_dest if data.kind.get(p) == 7):
+        flags = ";".join(sorted(f for f, ps in data.portal_stamps.items() if portal in ps))
+        for gen, _, _, _ in data.made_by.get(portal, ()):
+            reveals = {s["quest"] for s in data.by_obj.get(gen, ())
+                       if s["cat"] == RECEIVE_SIGNAL and any(a["type"] == GENERATE for a in s["acts"])}
+            coords = [o for o in sorted(data.by_obj) for r in reveals if sends(o, r)]
+            for coord in coords:
+                starts = {s["quest"] for s in data.by_obj[coord] if s["cat"] == RECEIVE_SIGNAL}
+                for bell, _, where, spot in data.made_by.get(coord, ()):
+                    rings = any(a["type"] == LOCAL_SIGNAL and a["msg"].lower() in starts
+                                for root in data.by_obj.get(bell, ()) if root["cat"] == USE
+                                for _, a in reach_all(data, bell, root))
+                    if not rings:
+                        continue
+                    off = [num(v) for v in spot[1:]] if where & 4 and not spot[0] else [0.0] * 3
+                    for pg in placed_at(data, gen):
+                        for pb in placed_at(data, bell):
+                            pc = (pb[0],) + tuple(num(a) + b for a, b in zip(pb[1:], off))
+                            if pb[0] >> 16 != pg[0] >> 16 or away(pc, pg) > data.hearing.get(gen, 0):
+                                continue
+                            to = (pg[0],) + tuple(num(a) + b for a, b in
+                                                  zip(pg[1:], data.rel_dest[portal]))
+                            out.append(("room", "%X" % (pg[0] >> 16), str(bell),
+                                        data.name.get(bell, ""), "%08X" % pb[0], xyz(pb),
+                                        str(portal), "%08X" % pg[0], xyz(pg), flags, xyz(to)))
+    arenas = {r[1] for r in out}
+    access = {}
+    for obj in sorted(data.placed):
+        for root in (s for s in data.by_obj[obj] if s["cat"] == USE):
+            for s, a in reach_all(data, obj, root):
+                land = data.spell_pos.get(a["spell"]) if a["type"] == CAST_INSTANT else None
+                if land is None or "%X" % (land[0] >> 16) not in arenas or not s["quest"]:
+                    continue
+                access["%X" % (land[0] >> 16)] = qname(s["quest"])
+                # The lowest level its use lets in (InqIntStat Level: the Advanced Arena's 80).
+                lowest = max([int(num(b["min"])) for _, b in reach_all(data, obj, root)
+                              if b["type"] == INQ_INT and num(b["stat"]) == LEVEL_STAT] or [0])
+                for cell, *at in data.placed[obj]:
+                    out.append(("way", "%X" % (land[0] >> 16), str(obj), data.name.get(obj, ""),
+                                "%08X" % cell, xyz((cell,) + tuple(at)), str(a["spell"]),
+                                "%08X" % land[0], xyz(land), qname(s["quest"]), str(lowest)))
+    for obj in sorted(data.placed):
+        for root in (s for s in data.by_obj[obj] if s["cat"] == GIVE and s["wcid"]):
+            stamped = {qname(a["msg"]) for _, a in reach_all(data, obj, root)
+                       if a["type"] == STAMP_FELLOW and a["msg"]}
+            for lb, quest in sorted(access.items()):
+                if quest not in stamped:
+                    continue
+                for cell, *at in data.placed[obj]:
+                    out.append(("ticket", lb, str(obj), data.name.get(obj, ""), "%08X" % cell,
+                                xyz((cell,) + tuple(at)), str(root["wcid"]), "", "", quest,
+                                str(data.quest.get(quest, (0, 0, ""))[0])))
+    return sorted(set(out))
 
 
 def respawn_of(data, wcid):
@@ -1588,6 +1703,9 @@ def main():
     with open(os.path.join(out_dir, "npc_ways.csv"), "w", encoding="utf-8", newline="") as f:
         f.write(NPC_WAYS_HEADER)
         write_rows(f, ways)
+    with open(os.path.join(out_dir, "arenas.csv"), "w", encoding="utf-8", newline="") as f:
+        f.write(ARENAS_HEADER)
+        write_rows(f, arena_rows(data))
     with open(os.path.join(out_dir, "pickups.csv"), "w", encoding="utf-8", newline="") as f:
         f.write(PICKUPS_HEADER)
         write_rows(f, pickup_rows(data))
@@ -1607,6 +1725,20 @@ def pickup_rows(data):
             delta, solves, _ = data.quest[stamp]
             out.append([str(wcid), stamp, str(delta), str(solves)])
     return out
+
+
+ARENAS_HEADER = """\
+# The Colosseum's arenas as their emote tables run them (EmoteManager.cs; quests_walk.arena_rows).
+# kind,landblock,wcid,name,cell,at,other_wcid,other_cell,other_at,quest,to
+# room: an arena room's bell (wcid, at): used, the coordinator it makes starts the room's waves
+# (its ReceiveLocalSignal set); once they pass it signals an exit generator in hearing, which makes
+# the room's portal (other: wcid, where); quest: the flags going through it stamps (Portal set);
+# to: where the portal sends (its RelativeDestination, Portal.cs:57-64). way: the NPC whose use
+# casts the teleport into the arena (other: spell, where it lands) for a fellowship holding
+# quest (InqFellowQuest, EmoteManager.cs:500-517); to: the lowest level it lets in. ticket: the NPC who, handed the item (other),
+# stamps that quest on the fellowship (StampFellowQuest); to: the quest's wait in seconds.
+# Cells hex, x y z local to the cell's landblock. Regenerate with reference/scripts/data/quests.sh.
+"""
 
 
 PICKUPS_HEADER = """\
@@ -1653,12 +1785,13 @@ SOURCES_HEADER = """\
 # on a creature's killer or a portal's user (both lower case). kind: drop (a corpse drop, chance
 # per kill), kill (a creature counting for the counter, or whose death starts the event, itself
 # or heard by a watcher there, or stamps the flag), give (an NPC handed its keys starts the
-# event), portal (going through it stamps the flag), npc (a placed NPC whose talk gives
+# event), portal (going through it stamps the flag), revealed (as portal, made by a generator
+# once something reveals it: the Colosseum's, arenas.csv), npc (a placed NPC whose talk gives
 # the item), floor (made on the ground by a
 # generator; wcid is the item's own), container (a chest that holds it, chance per fill), use
 # (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried
 # item a recipe makes it on; nowhere to go). landblocks: hex landblock:spawn entries;... (for
-# an npc, give, portal, floor, container or use, hex cell:1 per placement, with at the matching local
+# an npc, give, portal, revealed, floor, container or use, hex cell:1 per placement, with at the matching local
 # "x y z";...; for a drop or kill the encounter table alone spawns, each landblock's busiest
 # encounter corner, "x y 0";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a give, the item handed; for a
 # use, the items used on it; for a combine, the item used then the one used on;

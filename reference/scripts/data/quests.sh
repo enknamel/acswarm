@@ -1,7 +1,8 @@
 #!/bin/sh
 # Regenerate crates/ac-world/data/quests.csv, quest_givers.csv,
 # quest_sources.csv, summoned_portals.csv and npc_ways.csv (the portals and
-# teleports an NPC opens for an item handed or a use): every quest a placed
+# teleports an NPC opens for an item handed or a use) and arenas.csv (the
+# Colosseum's rooms, ways in and tickets): every quest a placed
 # NPC holds, XP or not (each path
 # that does anything for the character), what each asks and does, what
 # the client cannot check, where its givers stand, and where what it asks
@@ -61,7 +62,7 @@ q emote 'select id, object_Id, category, probability, coalesce(weenie_Class_Id, 
 from weenie_properties_emote
 where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select ev.object_Id
   from weenie_properties_emote ev join weenie_properties_emote_action ea on ea.emote_Id = ev.id
-  where ea.type in (23, 24) or (ev.category = 3 and ea.type = 22))
+  where ea.type in (23, 24, 88) or (ev.category = 3 and ea.type = 22) or ev.category = 37)
 order by object_Id, id;'
 
 q action 'select a.emote_Id, a.order, a.type, coalesce(a.message, ""), coalesce(a.min, ""),
@@ -74,7 +75,8 @@ from weenie_properties_emote_action a
 where a.emote_Id in (select id from weenie_properties_emote
   where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select
     ev.object_Id from weenie_properties_emote ev join weenie_properties_emote_action ea
-    on ea.emote_Id = ev.id where ea.type in (23, 24) or (ev.category = 3 and ea.type = 22)))
+    on ea.emote_Id = ev.id where ea.type in (23, 24, 88) or (ev.category = 3 and ea.type = 22)
+    or ev.category = 37))
 order by a.emote_Id, a.order;'
 
 # Server events (Managers/EventManager.cs): each generator's GeneratorEvent (String 34) and each
@@ -116,6 +118,19 @@ join weenie_properties_emote_action a on a.emote_Id = e.id
 join weenie w on w.class_Id = e.object_Id and w.type = 7
 left join landblock_instance li on li.weenie_Class_Id = e.object_Id
 where e.category = 4 and a.type = 22 and coalesce(a.message, "") <> "";'
+
+# Where a teleport spell sends whoever it is cast on (the Colosseum Arena's 4030: an arena's first
+# room), a portal's RelativeDestination (PositionType 26: its Location plus this, Portal.cs:57-64)
+# and how far an object hears a local signal (HearLocalSignalsRadius, PropertyInt 291:
+# Landblock.cs:985-999).
+q spellpos 'select id, hex(position_Obj_Cell_ID), round(position_Origin_X, 2),
+  round(position_Origin_Y, 2), round(position_Origin_Z, 2)
+from spell where coalesce(position_Obj_Cell_ID, 0) <> 0;'
+
+q reldest 'select object_Id, round(origin_X, 2), round(origin_Y, 2), round(origin_Z, 2)
+from weenie_properties_position where position_Type = 26;'
+
+q hearing 'select object_Id, value from weenie_properties_int where type = 291;'
 
 # Spells that hurt whoever they land on: a vital lowered (boost), a bolt (base_Intensity) or a
 # statistic lowered. A reply casting only these punishes the gift (Soul Dissolution, 3054).
@@ -286,7 +301,7 @@ group by landblock, weenie_Class_Id;'
 
 for t in placed emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
   gens chestlist locks keys stuck recipes combines encounters roots profiles genprops crit inst links \
-  encroots genevent summonspell linkportal deathsignals portalstamps; do
+  encroots genevent summonspell linkportal deathsignals portalstamps spellpos reldest hearing; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 
