@@ -3585,3 +3585,36 @@ fn an_aun_ralirea_ground_reached_over_its_landblock_s_edge_is_swept_not_walked_t
     let to = c.autoplay.growth.bound.map(|b| b.0);
     assert_ne!(to, Some(ground), "{}", c.autoplay.status);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_wait_at_a_ground_of_several_spawn_rooms_is_stood_not_walked_round() {
+    // The Silver Tusker's four rooms in the Tusker Pits, 7-18 m apart: the 90 s wait forgot the
+    // rooms gone round and the next tick walked them again, a round every 1.7 s for good.
+    let now = std::time::Instant::now();
+    let mut c = mage_pursuing("give:22431", "silver-tusk");
+    c.world.stats.level = 66;
+    c.refresh_quests(now);
+    assert!(
+        matches!(&c.pursuit[0].step, PursuitStep::Hunt { creature, .. } if creature == "Silver Tusker"),
+        "{:?}",
+        c.pursuit[0].step
+    );
+    crate::testkit::stand(&mut c, 0x5A4A_01A0, glam::Vec3::new(107.3, -86.5, -42.0));
+    again(&mut c, now);
+    let rooms = [0x5A4A_019A, 0x5A4A_019C, 0x5A4A_019E, 0x5A4A_01A0];
+    c.autoplay.growth.spawns_walked = rooms.to_vec();
+    let hunt =
+        |c: &mut Client, at| c.hunt_ground("Silver Tusker Tusk", "Silver Tusker", 0x5A4A, at);
+    assert_eq!(hunt(&mut c, now), Some(Some(true)));
+    assert!(c.autoplay.growth.staying.is_some(), "{}", c.autoplay.status);
+    for secs in [0.1, 30.0] {
+        let later = now + std::time::Duration::from_secs_f32(secs);
+        assert_eq!(hunt(&mut c, later), Some(Some(true)));
+        assert!(
+            c.autoplay.status.contains("waiting for the Silver Tusker") && !c.traveling(),
+            "walked round at {secs} s: {}",
+            c.autoplay.status
+        );
+    }
+}

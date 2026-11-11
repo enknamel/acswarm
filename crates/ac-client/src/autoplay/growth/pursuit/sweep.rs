@@ -199,7 +199,10 @@ impl Client {
         now: Instant,
     ) -> Option<Option<bool>> {
         let place = self.pursued_place(here)?;
-        if let Some(spot) = self.next_spawn_spot(here) {
+        // A wait held here is stood, not walked round: the round it forgets restarted at once.
+        let held =
+            (self.autoplay.growth.staying).is_some_and(|(lb, until)| lb == here && now < until);
+        if let Some(spot) = self.next_spawn_spot(here).filter(|_| !held) {
             if self.grow_travel(spot, super::super::hunt::ROOM_REACH) {
                 let st = &mut self.autoplay.growth;
                 st.bound = Some((here, spot.at.truncate(), creature.to_string()));
