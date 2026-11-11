@@ -99,6 +99,7 @@ mod tests {
             kind: Kind::Item,
             state,
             xp: 1_000,
+            xp_most: 1_000,
             givers: 1,
             giver: "San Ming".into(),
             on: true,

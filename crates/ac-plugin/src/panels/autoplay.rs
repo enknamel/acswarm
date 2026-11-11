@@ -1089,6 +1089,7 @@ fn demo_quests() -> Vec<ac_client::quest_log::QuestLine> {
         kind,
         state,
         xp,
+        xp_most: xp,
         givers,
         giver: giver.into(),
         on: id != "killtaskbloodshreth",

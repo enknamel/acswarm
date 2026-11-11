@@ -19,6 +19,7 @@ fn card(id: &str, title: &str, item: Option<&str>, giver: (&str, &str)) -> Quest
         easiest: None,
         entry: 0,
         xp: 0,
+        luminance: 0,
         gives: Vec::new(),
         repeat: Repeat::Any,
         flags: Vec::new(),
@@ -259,6 +260,7 @@ fn the_state_chip_reads_the_browse_board() {
         kind: Kind::Item,
         state,
         xp: 0,
+        xp_most: 0,
         givers: 1,
         giver: String::new(),
         on: true,
@@ -314,6 +316,47 @@ fn sorting_by_xp_puts_the_best_first() {
     sort_rows(&mut rows, &cards, &browse, by_title);
     assert_eq!(cards[rows[0]].title, "Augmentation Proving Ground Access");
     assert_eq!(cards[rows[3]].title, "Repugnant Eater Kill Task");
+}
+
+#[test]
+fn max_xp_sorts_by_the_most_at_any_level_and_lum_by_the_luminance() {
+    let mut cards = cards();
+    cards[3].luminance = 90_000;
+    let mut browse = Browse::default();
+    let line = |id: &str, xp, xp_most| QuestLine {
+        id: id.into(),
+        title: String::new(),
+        kind: Kind::Item,
+        state: QuestState::Ready,
+        xp,
+        xp_most,
+        givers: 1,
+        giver: String::new(),
+        on: true,
+        every_way: true,
+    };
+    // A level-proportional reward: small at this level, the most of all at the top.
+    browse.set(
+        cards
+            .iter()
+            .enumerate()
+            .map(|(i, c)| line(&c.id, 1_000 * (i as u64 + 1), 1_000 * (i as u64 + 1)))
+            .chain([line(&cards[0].id, 1, 718_000_000)])
+            .skip(1)
+            .collect(),
+        std::time::Instant::now(),
+    );
+    let mut rows: Vec<usize> = (0..cards.len()).collect();
+    let by = |col| Sort {
+        col,
+        descending: true,
+    };
+    sort_rows(&mut rows, &cards, &browse, by(Column::Xp));
+    assert_eq!(rows[3], 0, "lowest at this level");
+    sort_rows(&mut rows, &cards, &browse, by(Column::MostXp));
+    assert_eq!(rows[0], 0, "the most at any level");
+    sort_rows(&mut rows, &cards, &browse, by(Column::Luminance));
+    assert_eq!(rows[0], 3);
 }
 
 #[test]

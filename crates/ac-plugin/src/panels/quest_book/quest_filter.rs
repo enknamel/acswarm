@@ -384,18 +384,22 @@ pub(crate) enum Column {
     Levels,
     #[default]
     Xp,
+    MostXp,
+    Luminance,
     Repeat,
     State,
 }
 
 impl Column {
-    pub(crate) const ALL: [Column; 8] = [
+    pub(crate) const ALL: [Column; 10] = [
         Column::Title,
         Column::Kind,
         Column::Giver,
         Column::Where,
         Column::Levels,
         Column::Xp,
+        Column::MostXp,
+        Column::Luminance,
         Column::Repeat,
         Column::State,
     ];
@@ -408,6 +412,8 @@ impl Column {
             Column::Where => "Where",
             Column::Levels => "Levels",
             Column::Xp => "XP",
+            Column::MostXp => "Max XP",
+            Column::Luminance => "Lum",
             Column::Repeat => "Repeat",
             Column::State => "State",
         }
@@ -494,6 +500,11 @@ pub(crate) fn xp_of(card: &QuestCard, line: Option<&QuestLine>) -> u64 {
     line.map_or(card.xp, |l| l.xp)
 }
 
+/// The most XP it pays at any level its givers take.
+pub(crate) fn most_xp_of(card: &QuestCard, line: Option<&QuestLine>) -> u64 {
+    line.map_or(card.xp, |l| l.xp_most)
+}
+
 /// Any time first, then by wait, once last.
 pub(crate) fn repeat_rank(r: Repeat) -> u64 {
     match r {
@@ -534,6 +545,8 @@ pub(crate) fn sort_rows(rows: &mut [usize], cards: &[QuestCard], browse: &Browse
         match sort.col {
             Column::Levels => u64::from(quest_level(card)),
             Column::Xp => xp_of(card, line(i)),
+            Column::MostXp => most_xp_of(card, line(i)),
+            Column::Luminance => card.luminance,
             Column::Repeat => repeat_rank(card.repeat),
             _ => u64::from(state_rank(line(i).map(|l| &l.state))),
         }

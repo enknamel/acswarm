@@ -143,6 +143,8 @@ pub struct QuestLine {
     pub state: QuestState,
     /// The reward at the character's level.
     pub xp: u64,
+    /// The most XP it pays: at the top of its givers' level bands.
+    pub xp_most: u64,
     /// Giver placements that complete it.
     pub givers: usize,
     /// The nearest giver's name, by straight distance.
@@ -174,6 +176,8 @@ pub struct QuestFacts {
     pub level: u32,
     /// XP from the character's level to the next (`XpTable::xp_to_next_level`).
     pub to_next: u64,
+    /// XP from each level to the next, by level, up to the last level with a next.
+    pub to_next_by_level: Vec<u64>,
     /// Quest flags held (`Travel::quests_done`).
     pub held: Vec<String>,
     pub log: QuestLog,
@@ -190,6 +194,18 @@ pub struct QuestFacts {
     /// The spellbook, and the spells a scroll would teach now (`Client::learnable_spells`).
     pub spells: BTreeSet<u32>,
     pub learnable: std::sync::Arc<BTreeSet<u32>>,
+}
+
+/// The most `row` pays: its reward at the highest level its giver's band takes, the XP to the
+/// next level growing with level (Player_Xp.cs:441-455).
+fn most_xp(row: &Row, to_next_by_level: &[u64]) -> u64 {
+    let top = to_next_by_level.len().saturating_sub(1);
+    let level = match row.max_level as usize {
+        0 => top,
+        band => band.min(top),
+    };
+    row.reward
+        .xp_at(to_next_by_level.get(level).copied().unwrap_or(0))
 }
 
 /// Whether autoplay works `row` on its own: a talk that takes a quest up, or a way to complete one
@@ -343,6 +359,11 @@ fn board_of<'r>(
             xp: doing
                 .iter()
                 .map(|r| r.reward.xp_at(facts.to_next))
+                .max()
+                .unwrap_or(0),
+            xp_most: doing
+                .iter()
+                .map(|r| most_xp(r, &facts.to_next_by_level))
                 .max()
                 .unwrap_or(0),
             givers: doing.iter().map(|r| r.places.len()).sum(),
@@ -851,14 +872,18 @@ impl Client {
         for o in self.world.inventory() {
             *carried.entry(o.weenie_class_id).or_insert(0) += o.stack_size.max(1);
         }
+        let table = self.assets.xp_table().ok();
         QuestFacts {
             level,
-            to_next: self
-                .assets
-                .xp_table()
-                .ok()
+            to_next: table
+                .as_ref()
                 .and_then(|t| t.xp_to_next_level(level))
                 .unwrap_or(0),
+            to_next_by_level: table.as_ref().map_or_else(Vec::new, |t| {
+                (0..t.max_level())
+                    .map(|l| t.xp_to_next_level(l).unwrap_or(0))
+                    .collect()
+            }),
             held: self.travel.quests_done.clone(),
             log: self.quest_log.clone(),
             carried,

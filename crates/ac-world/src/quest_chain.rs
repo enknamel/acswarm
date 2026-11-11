@@ -101,6 +101,8 @@ pub struct QuestCard {
     pub entry: u32,
     /// The fixed XP (the board gives it at the character's level).
     pub xp: u64,
+    /// The most luminance a way to complete it awards.
+    pub luminance: u64,
     /// Reward items in words ("Trade Note (75,000) x1", "item 31606"); a random reply's are
     /// alternatives.
     pub gives: Vec<String>,
@@ -706,6 +708,7 @@ fn card_of(rows: &'static [Row]) -> QuestCard {
         easiest: src.easiest,
         entry: src.entry.unwrap_or(0),
         xp: rows.iter().map(|r| r.reward.xp).max().unwrap_or(0),
+        luminance: rows.iter().map(|r| r.luminance).max().unwrap_or(0),
         gives,
         repeat: main.repeat,
         flags,

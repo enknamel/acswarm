@@ -130,10 +130,11 @@ fn levels_words(card: &QuestCard) -> String {
     }
 }
 
-/// "2.5M", "75k", "900".
+/// "7.7B", "2.5M", "75k", "900".
 fn short_xp(xp: u64) -> String {
     match xp {
         0 => String::new(),
+        x if x >= 1_000_000_000 => format!("{:.1}B", x as f64 / 1e9),
         x if x >= 1_000_000 => format!("{:.1}M", x as f64 / 1e6),
         x if x >= 1_000 => format!("{}k", x / 1_000),
         x => x.to_string(),
@@ -295,7 +296,10 @@ pub(crate) fn draw(egui: &egui::Context, v: &BookView, st: &mut BookState) -> Op
         } else {
             Sort {
                 col,
-                descending: matches!(col, Column::Xp | Column::Levels),
+                descending: matches!(
+                    col,
+                    Column::Xp | Column::MostXp | Column::Luminance | Column::Levels
+                ),
             }
         };
     }
@@ -473,8 +477,8 @@ fn cell(ui: &mut egui::Ui, width: f32, text: egui::RichText) -> egui::Response {
 }
 
 /// Each column's width, the free ones sharing what the fixed ones leave of `width`.
-fn widths(width: f32) -> [f32; 9] {
-    let fixed = 18.0 + 34.0 + 46.0 + 50.0 + 44.0 + 78.0 + 9.0 * 4.0;
+fn widths(width: f32) -> [f32; 11] {
+    let fixed = 18.0 + 34.0 + 46.0 + 50.0 + 50.0 + 40.0 + 44.0 + 78.0 + 11.0 * 4.0;
     let free = (width - fixed).max(150.0);
     [
         18.0,
@@ -484,6 +488,8 @@ fn widths(width: f32) -> [f32; 9] {
         free * 0.27,
         46.0,
         50.0,
+        50.0,
+        40.0,
         44.0,
         78.0,
     ]
@@ -553,7 +559,7 @@ fn quest_row(
     card: &QuestCard,
     line: Option<&QuestLine>,
     asks: &mut Asks,
-    w: &[f32; 9],
+    w: &[f32; 11],
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -590,6 +596,8 @@ fn quest_row(
             small(at.into()),
             small(levels_words(card)),
             small(short_xp(xp_of(card, line))),
+            small(short_xp(most_xp_of(card, line))),
+            small(short_xp(card.luminance)),
             small(repeat_words(card.repeat)),
             small(state_text).color(state_colour),
         ];
@@ -722,6 +730,22 @@ fn detail_pane(
                 caption(
                     ui,
                     format!("Reward: {} XP", super::skills::thousands(xp as i64)),
+                );
+            }
+            let most = most_xp_of(card, line);
+            if most > xp {
+                caption(
+                    ui,
+                    format!("At most: {} XP", super::skills::thousands(most as i64)),
+                );
+            }
+            if card.luminance > 0 {
+                caption(
+                    ui,
+                    format!(
+                        "Luminance: {}",
+                        super::skills::thousands(card.luminance as i64)
+                    ),
                 );
             }
             let random = card.unread.iter().any(|u| u == "a random reply");

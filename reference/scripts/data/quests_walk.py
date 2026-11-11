@@ -25,6 +25,7 @@ QUEST_OK, QUEST_NO, TEST_OK, TEST_NO, GOTO_SET = 12, 13, 22, 23, 32
 # EmoteType (ACE.Entity/Enum/EmoteType.cs).
 AWARD_XP, GIVE_ITEM, INQ_QUEST, STAMP, INQ_SOLVES = 2, 3, 21, 22, 30
 INQ_INT, LEVEL_XP, NO_SHARE_XP, GOTO, SET_SOLVES, TAKE, INQ_OWNS = 36, 49, 62, 67, 70, 74, 76
+AWARD_LUMINANCE = 113
 # Every branching type (EmoteManager.EmoteIsBranchingType); the ones not read above end a path.
 BRANCHING = {20, 21, 30, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 51, 58, 59, 60, 67, 71,
              75, 76, 79, 80, 82, 89, 102, 103, 104, 105, 114, 121}
@@ -837,6 +838,11 @@ def xp_of(effects):
     return fixed, scaled, share
 
 
+def luminance_of(effects):
+    """Luminance a path awards (AwardLuminance: Amount64 ?? HeroXP64, EmoteManager.cs:135-140)."""
+    return sum(int(num(a["amount64"])) for a in effects if a["type"] == AWARD_LUMINANCE)
+
+
 def stamps_of(effects):
     out = []
     for a in effects:
@@ -962,7 +968,7 @@ def write_rows(f, out):
 
 # What must match for a path asking a flag not held to pay as one asking it held: then the flag
 # does not matter (Buckminster pays the same with ToTheBarkeep or without).
-SAME_PAY = ("obj", "kind", "want", "count", "fixed", "scaled", "timer", "repeat")
+SAME_PAY = ("obj", "kind", "want", "count", "fixed", "scaled", "luminance", "timer", "repeat")
 
 
 def same_pay(q):
@@ -1041,6 +1047,7 @@ def build(data, never):
                 if chance:
                     r["unread"].insert(0, "a random reply")
                 r.update(obj=obj, root=root, fixed=fixed, scaled=scaled, share=share,
+                         luminance=luminance_of(effects),
                          stamps=stamps_of(effects), does=does,
                          gives=[(int(num(a["wcid"])), max(int(num(a["stack"], 1)), 1))
                                 for a in effects if a["type"] == GIVE_ITEM and a["wcid"]])
@@ -1134,7 +1141,7 @@ def build(data, never):
                                                count=0, needs=[n for n in s["needs"]
                                                                if n != flag],
                                                item=None, timer="", repeat=0,
-                                               stamps=[flag], fixed=0, scaled=None,
+                                               stamps=[flag], fixed=0, scaled=None, luminance=0,
                                                share="none", gives=[]))
                         used.add(i)
                         break
@@ -1160,7 +1167,7 @@ def build(data, never):
                str(q["band"][0]), str(q["band"][1]), str(q["fixed"]), "%g" % pct, str(lo),
                str(hi), q["share"] or "none", ";".join("%d:%d" % g for g in q["gives"]),
                ";".join(q["stamps"]), str(q["repeat"]), q["timer"], ";".join(q["needs"]),
-               it_name, it_type, it_value, ";".join(q["does"]),
+               it_name, it_type, it_value, str(q["luminance"]), ";".join(q["does"]),
                "|".join(u.replace(",", ";") for u in dict.fromkeys(q["unread"])))
         key = row[:-1]  # rows differing only in what was unread are one row
         if key not in seen:
@@ -1350,7 +1357,7 @@ def learn_rows(data, learnt, had):
         out.append(("learn:%d" % spell, "item", data.recalls[spell].replace(",", ";"), "0",
                     "read", str(wcid), "1", "0", "0", "0", "0", "0", "0", "none", "", "", "-1",
                     "", "", data.name.get(wcid, ""), "%X" % (ints.get(1, 0) & 0xFFFFFFFF),
-                    str(ints.get(19, 0)), "spell", ""))
+                    str(ints.get(19, 0)), "0", "spell", ""))
     return out
 
 
@@ -1375,7 +1382,7 @@ def kept_uses(src, wants, sold, gate=lambda r: None):
 ENCOUNTER_BLOCKS = 64
 
 # Columns of a quests.csv row a random reply's alternatives may differ in and still be one row.
-COL_GIVES, COL_DOES, COL_UNREAD = 14, 22, 23
+COL_GIVES, COL_DOES, COL_UNREAD = 14, 23, 24
 
 
 def merge_random(rows_out):
@@ -1523,7 +1530,7 @@ QUESTS_HEADER = """\
 # Every quest a placed NPC holds: each Use, Give or Refuse path that does anything for the
 # character, XP or not, one row per way to complete one (giver and level band); the giver's
 # placements are in quest_givers.csv. And one per recall spell's scroll, had and read.
-# id,kind,title,giver_wcid,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,does,unread
+# id,kind,title,giver_wcid,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,luminance,does,unread
 # Rows sharing an id are alternatives. kind: kill, item, talk, or start (the talk that takes a
 # quest up: it stamps what the quest's rows need). hand: give (hand the item over), talk, or
 # read (a recall spell's scroll read: id learn:SPELL, giver_wcid 0, no giver).
@@ -1532,11 +1539,12 @@ QUESTS_HEADER = """\
 # xp_min/xp_max when not 0. share: all, none or allegiance. gives: wcid:count;..., and for a
 # random reply every alternative |-separated (an empty one gives nothing). stamps and needs:
 # quest flags. repeat: seconds before another solve, 0 any time, -1 once; timer: the quest its
-# wait is kept under. item, item_type (hex), item_value: the wanted item. does: what the path
-# does (xp, item, flag, spell, skill, luminance, title, teleport, takes, stat, contract,
-# enlightenment, type N). unread: conditions the client cannot check, |-separated ("a random
-# reply" among them). Regenerate with reference/scripts/data/quests.sh (reads the ACE world
-# database, the community's reconstruction of retail's server data).
+# wait is kept under. item, item_type (hex), item_value: the wanted item. luminance: what the
+# path awards. does: what the path does (xp, item, flag, spell, skill, luminance, title,
+# teleport, takes, stat, contract, enlightenment, type N). unread: conditions the client cannot
+# check, |-separated ("a random reply" among them). Regenerate with
+# reference/scripts/data/quests.sh (reads the ACE world database, the community's reconstruction
+# of retail's server data).
 """
 
 GIVERS_HEADER = """\

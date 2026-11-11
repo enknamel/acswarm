@@ -4,6 +4,31 @@ fn rows(id: &str) -> Vec<Row> {
     ac_world::quests::rows_of(id).cloned().collect()
 }
 
+#[test]
+fn the_most_xp_is_the_reward_at_the_top_of_the_band_and_its_cap() {
+    // Shard of the Curator of Torment's Mask: half the XP to the next level, capped at 718M
+    // (rtwcompleted_1013). At level 67 that is 7.7M; at the top the cap.
+    let row = rows("rtwcompleted_1013")
+        .into_iter()
+        .find(|r| r.hand == ac_world::quests::Handing::Give)
+        .unwrap();
+    let mut steps = vec![0u64; 275];
+    steps[67] = 15_350_441;
+    steps[274] = 2_000_000_000;
+    assert_eq!(row.reward.xp_at(steps[67]), 7_675_220);
+    assert_eq!(most_xp(&row, &steps), 718_000_000);
+    let banded = Row {
+        max_level: 67,
+        ..row.clone()
+    };
+    assert_eq!(
+        most_xp(&banded, &steps),
+        7_675_220,
+        "no higher than the band"
+    );
+    assert_eq!(row.luminance, 90_000);
+}
+
 fn on() -> QuestFacts {
     QuestFacts {
         level: 20,

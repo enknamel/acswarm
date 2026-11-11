@@ -139,6 +139,8 @@ pub struct Row {
     /// Flags held first; a kill row needs its own counter, which its start row stamps.
     pub needs: Vec<String>,
     pub item: Option<Item>,
+    /// Luminance the path awards (AwardLuminance, EmoteManager.cs:135-140).
+    pub luminance: u64,
     /// What the path does, in the data's words (`xp`, `item`, `flag`, `luminance`, `type N`...).
     pub does: Vec<&'static str>,
     /// Conditions the client cannot check, in words ("a random reply", "a check of stat 134").
@@ -435,7 +437,7 @@ fn want_of(kind: Kind, s: &str) -> Option<Want> {
 
 fn parse_row(line: &'static str) -> Option<Row> {
     let f: Vec<&'static str> = line.split(',').collect();
-    if f.len() != 24 {
+    if f.len() != 25 {
         return None;
     }
     let kind = match f[1] {
@@ -511,8 +513,9 @@ fn parse_row(line: &'static str) -> Option<Row> {
         timer: f[17],
         needs: words(f[18]),
         item,
-        does: split_on(f[22], ';'),
-        unread: split_on(f[23], '|'),
+        luminance: f[22].parse().ok()?,
+        does: split_on(f[23], ';'),
+        unread: split_on(f[24], '|'),
     })
 }
 
