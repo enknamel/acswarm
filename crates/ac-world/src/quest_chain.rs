@@ -21,6 +21,8 @@ pub enum FlagBy {
     Quest(&'static Row),
     /// A creature whose death stamps it on its killer (a `flag:` source).
     Kill(&'static Source),
+    /// A portal stamping it on whoever goes through (a `flag:` portal source).
+    Portal(&'static Source),
 }
 
 /// One place what a quest wants comes from.
@@ -215,10 +217,11 @@ pub fn flag_givers(flag: &str) -> Vec<FlagBy> {
         .filter(|u| u.flag.eq_ignore_ascii_case(flag))
         .map(FlagBy::Unlock);
     let want = Want::Flag(flag.to_ascii_lowercase());
-    let kills = crate::quests::sources_of(&want).filter(|s| s.kind == crate::quests::Yield::Kill);
+    let of = |kind| crate::quests::sources_of(&want).filter(move |s| s.kind == kind);
     unlocks
         .chain(crate::quests::stamped_by(flag).map(FlagBy::Quest))
-        .chain(kills.map(FlagBy::Kill))
+        .chain(of(crate::quests::Yield::Kill).map(FlagBy::Kill))
+        .chain(of(crate::quests::Yield::Portal).map(FlagBy::Portal))
         .collect()
 }
 

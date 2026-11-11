@@ -393,6 +393,23 @@ fn the_mire_witch_is_a_rare_spawn_and_the_key_moarsman_a_sure_one() {
 }
 
 #[test]
+fn a_portal_source_and_a_watched_kill_with_its_deaths_column_parse() {
+    let portal = "flag:accessboss3,portal,34518,Arena 3,0,1,00B00169:1,30 -1546 0,,,,,";
+    let s = parse_source(portal).expect("a portal row");
+    assert_eq!(
+        (s.kind, s.want),
+        (Yield::Portal, Want::Flag("accessboss3".into()))
+    );
+    assert_eq!(s.places.len(), 1);
+    let heard = "event:stonefistsbossstart,kill,199,Magma Golem,100,1,B6:2,,,1,4:0,,,8";
+    let s = parse_source(heard).expect("a watched kill with its deaths");
+    assert_eq!(
+        (s.kind, s.landblocks.as_slice()),
+        (Yield::Kill, &[(0xB6, 2)][..])
+    );
+}
+
+#[test]
 fn the_rates_column_is_read_beside_its_landblocks() {
     let s =
         parse_source("6876,drop,10815,Virindi Inquisitor,100,0.8,2AE:19;2AF:37,,,1,19:225;37:435")

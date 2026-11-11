@@ -165,6 +165,13 @@ pub(crate) fn flag_step(
             .say(" from killing ")
             .link(Facet::Creature, &s.name)
             .say(format!(" (level {})", s.level)),
+        Some(FlagBy::Portal(s)) => {
+            let cell = s.places.first().map_or(0, |p| p.cell);
+            step.say(" from going through ")
+                .link(Facet::Creature, &s.name)
+                .say(" in ")
+                .link(Facet::At, (k.place)(cell))
+        }
     };
     if by.len() > 1 {
         step = step.say(format!(" (or {} others)", by.len() - 1));
@@ -188,6 +195,7 @@ fn fetch_verb(kind: Yield) -> &'static str {
         Yield::Combine => "Use on ",
         Yield::Vendor => "Buy it from ",
         Yield::Give => "Hand it to ",
+        Yield::Portal => "Go through ",
         Yield::Drop | Yield::Kill | Yield::Npc => "Get it from ",
     }
 }

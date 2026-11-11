@@ -251,6 +251,9 @@ pub enum Yield {
     Vendor,
     /// An event started by handing one of its `keys` to this NPC.
     Give,
+    /// A portal stamping the flag on whoever goes through it (its Portal emote set: Portal.cs:287),
+    /// placed, or where the generator making it stands.
+    Portal,
 }
 
 impl Yield {
@@ -583,7 +586,7 @@ fn parse_rates(s: &str, entries: usize) -> Option<Vec<SpawnRate>> {
 /// hunted one's rates (the tenth, a creature's spawn share, is read by [`spawn_share`]).
 fn parse_source(line: &str) -> Option<Source> {
     let f: Vec<&str> = line.split(',').collect();
-    if ![7, 9, 10, 11, 12, 13].contains(&f.len()) {
+    if ![7, 9, 10, 11, 12, 13, 14].contains(&f.len()) {
         return None;
     }
     let kind = match f[1] {
@@ -595,6 +598,7 @@ fn parse_source(line: &str) -> Option<Source> {
         "use" => Yield::Use,
         "combine" => Yield::Combine,
         "give" => Yield::Give,
+        "portal" => Yield::Portal,
         _ => return None,
     };
     let landblocks = pairs(f[6], 16)?;
@@ -702,6 +706,27 @@ pub fn spawn_share(wcid: u32) -> f32 {
         m
     });
     shares.get(&wcid).copied().unwrap_or(1.0)
+}
+
+/// The deaths of creature `wcid` event `event`'s watcher must hear before it starts it (the
+/// sources' fourteenth column: the Stone Fists Event Watcher's eight golems); 1 for any other kill.
+pub fn deaths_heard(event: &str, wcid: u32) -> u32 {
+    static HEARD: OnceLock<BTreeMap<(String, u32), u32>> = OnceLock::new();
+    let heard = HEARD.get_or_init(|| {
+        let mut m = BTreeMap::new();
+        for f in lines(SOURCES).map(|l| l.split(',').collect::<Vec<_>>()) {
+            let (Some(e), Some(Ok(w)), Some(Ok(n))) = (
+                f[0].strip_prefix("event:"),
+                f.get(2).map(|w| w.parse::<u32>()),
+                f.get(13).map(|n| n.parse::<u32>()),
+            ) else {
+                continue;
+            };
+            m.insert((e.to_string(), w), n);
+        }
+        m
+    });
+    heard.get(&(event.to_string(), wcid)).copied().unwrap_or(1)
 }
 
 /// The rows of one quest, its start rows among them.
