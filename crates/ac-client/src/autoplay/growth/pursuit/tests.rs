@@ -2629,6 +2629,12 @@ fn a_quests_item_another_quest_rewards_is_had_by_that_hand_in_first() {
 /// The Bound scepter's pursuit with `c` stood at the middle of the Mire-Witch's nearest ground;
 /// that ground's landblock.
 fn at_a_mire_witch_ground(now: std::time::Instant) -> (Client, u32) {
+    at_the_nth_mire_witch_ground(now, 0)
+}
+
+/// [`at_a_mire_witch_ground`] on her `nth` ground on land: past the first, one left empty there
+/// leaves the hunt a camping one (a rotating hunt's grounds are never waited at).
+fn at_the_nth_mire_witch_ground(now: std::time::Instant, nth: usize) -> (Client, u32) {
     let mut c = mage_pursuing("give:27841", "chained-quests");
     // The essence had: else the chest's key is gone for first.
     in_the_pack(&mut c, 0x8000_0723, 9125, "Virindi Essence", 1);
@@ -2637,7 +2643,8 @@ fn at_a_mire_witch_ground(now: std::time::Instant) -> (Client, u32) {
     let grounds = c.autoplay.growth.pursuit_grounds.clone();
     let (lb, at) = *grounds
         .iter()
-        .find(|(_, p)| !c.is_at_sea(p.at.truncate()))
+        .filter(|(_, p)| !c.is_at_sea(p.at.truncate()))
+        .nth(nth)
         .expect("a ground on land");
     let origin = ac_world::landblock_origin(at.cell);
     crate::testkit::stand(&mut c, at.cell, at.at - origin);
@@ -2978,7 +2985,7 @@ fn a_ground_left_empty_is_rotated_when_unload_is_sooner_than_respawn() {
     // A ground whose one dropper stands there at load and never comes back while it is loaded,
     // the rest left lately: walked out of its reach to unload, and waited out there.
     let now = std::time::Instant::now();
-    let (mut c, here) = at_a_mire_witch_ground(now);
+    let (mut c, here) = at_the_nth_mire_witch_ground(now, 1);
     let grounds = c.autoplay.growth.pursuit_grounds.clone();
     for (lb, _) in grounds.iter().filter(|g| g.0 != here) {
         c.autoplay.growth.swept.mark(*lb, now);
@@ -2994,6 +3001,7 @@ fn a_ground_left_empty_is_rotated_when_unload_is_sooner_than_respawn() {
         },
     };
     c.autoplay.growth.pursuit_paces[i] = pace::Ground::of(vec![at_load]).unwrap();
+    assert!(!c.is_rotating_hunt());
     assert_eq!(c.grow_pursuit(now), Some(true), "looked over");
     let later = now + std::time::Duration::from_secs(16);
     assert_eq!(c.grow_pursuit(later), Some(true), "out of its reach");
@@ -3248,7 +3256,7 @@ fn a_ground_found_empty_again_on_return_is_not_rotated_to_again() {
     // Left to unload and come back to, its one dropper absent again (another player keeping it
     // loaded): its load counts as none for an hour, so it is not left to unload once more.
     let now = std::time::Instant::now();
-    let (mut c, here) = at_a_mire_witch_ground(now);
+    let (mut c, here) = at_the_nth_mire_witch_ground(now, 1);
     let grounds = c.autoplay.growth.pursuit_grounds.clone();
     for (lb, _) in grounds.iter().filter(|g| g.0 != here) {
         c.autoplay.growth.swept.mark(*lb, now);
@@ -3271,6 +3279,36 @@ fn a_ground_found_empty_again_on_return_is_not_rotated_to_again() {
     c.grow_pursuit(later);
     assert!(c.autoplay.growth.missed_back.since(&here).is_some());
     assert_eq!(c.autoplay.growth.rotating, None);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn aun_ralirea_s_grounds_are_walked_on_through_never_waited_at() {
+    // A peace generator's 0.2% pick at a landblock's load: stood 15 s looking at each ground,
+    // then recalled off to wait out its unload. Each ground reached is the look; on at once.
+    let now = std::time::Instant::now();
+    let mut c = mage_pursuing("championkillquest1", "aun-ralirea");
+    c.world.stats.level = 120;
+    c.autoplay.growth.proven_tier = 8;
+    c.refresh_quests(now);
+    assert!(
+        matches!(c.pursuit[0].step, PursuitStep::Hunt { .. }),
+        "{:?}",
+        c.pursuit[0].step
+    );
+    assert!(c.is_rotating_hunt());
+    let (here, at) = c.autoplay.growth.pursuit_grounds[0];
+    let origin = ac_world::landblock_origin(at.cell);
+    crate::testkit::stand(&mut c, at.cell, at.at - origin);
+    again(&mut c, now);
+    assert_eq!(c.grow_pursuit(now), Some(true));
+    assert!(c.autoplay.growth.swept.since(&here).is_some(), "left");
+    assert!(c.autoplay.growth.rotating.is_none(), "an unload waited out");
+    assert!(
+        c.autoplay.status.contains("on the way to hunt"),
+        "{}",
+        c.autoplay.status
+    );
 }
 
 /// Aerfalle's Token on the bundled data, `carried` and the events `on` as given: the working step.

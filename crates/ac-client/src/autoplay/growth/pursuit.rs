@@ -1247,6 +1247,10 @@ impl Client {
                     }
                     // Left for the next: it is gone back to once it has unloaded.
                     grounds.retain(|(lb, _)| *lb != here);
+                    // A rotating hunt's last ground left: on to those left longest ago.
+                    if grounds.is_empty() && self.is_rotating_hunt() {
+                        grounds = self.grounds_left_longest(here).unwrap_or_default();
+                    }
                 }
                 let every = grounds.clone();
                 // The item soonest first: the journey there and the seconds there. The most spawns

@@ -1,8 +1,9 @@
 //! A pursued hunt's ground with its creature absent: its spawn spots gone round (or, none known,
 //! looked over), then the soonest of waiting there and clearing what holds its generators' slots,
-//! leaving for it to unload and coming back to a fresh load, or the next ground (`pace`). A
-//! landblock nobody stands in, or outdoors beside, unloads after 5 minutes and rolls its
-//! generators afresh when it loads (Landblock.cs:118, 269-303, 1111-1124).
+//! leaving for it to unload and coming back to a fresh load, or the next ground (`pace`); a
+//! rotating hunt's grounds are walked on through, never waited at. A landblock nobody stands in,
+//! or outdoors beside, unloads after 5 minutes and rolls its generators afresh when it loads
+//! (Landblock.cs:118, 269-303, 1111-1124).
 
 use std::time::{Duration, Instant};
 
@@ -153,6 +154,9 @@ impl Client {
             .collect();
         if !left.is_empty() {
             *grounds = left;
+        } else if self.is_rotating_hunt() {
+            *grounds = self.grounds_left_longest(here)?;
+            return None;
         }
         if self.is_rotating_hunt() && grounds.len() > HUNT_GROUNDS {
             let me = self.my_position()?.truncate();
@@ -163,6 +167,24 @@ impl Client {
             grounds.truncate(HUNT_GROUNDS);
         }
         None
+    }
+
+    /// A rotating hunt's grounds with every one swept lately: the nearest few of those left
+    /// longest ago, the likeliest unloaded, never `here` while another is had.
+    pub(super) fn grounds_left_longest(&self, here: u32) -> Option<Vec<(u32, Place)>> {
+        let me = self.my_position()?.truncate();
+        let st = &self.autoplay.growth;
+        let mut grounds = st.pursuit_grounds.clone();
+        if grounds.len() > 1 {
+            grounds.retain(|(lb, _)| *lb != here);
+        }
+        let away = |p: &Place| p.at.truncate().distance(me);
+        grounds.sort_by(|a, b| {
+            let left = st.swept.since(&a.0).cmp(&st.swept.since(&b.0));
+            left.then(away(&a.1).total_cmp(&away(&b.1)))
+        });
+        grounds.truncate(HUNT_GROUNDS);
+        Some(grounds)
     }
 
     /// Hunt the pursued ground `here` stands on for `creature`: its spawn spots gone round,
@@ -204,6 +226,11 @@ impl Client {
             if let Some(answer) = self.look_over(here, place, title, creature, now) {
                 return Some(answer);
             }
+        }
+        // A rare spawn's grounds are swept, never waited at: on to the next (Aun Ralirea's).
+        if self.is_rotating_hunt() {
+            self.leave_ground(here, now);
+            return None;
         }
         let st = &mut self.autoplay.growth;
         let choice = match st.staying.filter(|(lb, _)| *lb == here) {
@@ -448,7 +475,12 @@ impl Client {
                 now
             }
         };
-        if now.duration_since(since) < LOOK_FOR {
+        // A rotating hunt's look is the walk there: its sweep never stands.
+        let look_for = match self.is_rotating_hunt() {
+            true => Duration::ZERO,
+            false => LOOK_FOR,
+        };
+        if now.duration_since(since) < look_for {
             let why = format!("for {title}: looking for {creature} in {to}");
             self.autoplay.say(Doing::Idle, why);
             return Some(Some(true));
