@@ -27,6 +27,9 @@ impl Client {
         // (a_journey_put_down_while_the_player_steers_is_walked_on_once_the_keys_are_let_go).
         let manual = input.forward != 0.0 || input.strafe != 0.0;
         self.hand_on_keys = manual;
+        if manual {
+            self.hand_off_giving();
+        }
         if manual && (self.traveling() || self.visiting().is_some()) {
             if self.autoplay.config.enabled {
                 self.interrupt_travel("the player is steering");

@@ -218,6 +218,31 @@ fn autoplay_gives_only_in_reach_and_a_player_walks_first() {
 }
 
 #[test]
+fn a_give_the_player_asked_for_ends_when_the_player_moves_and_autoplay_s_does_not() {
+    let now = Instant::now();
+    let keys = crate::player::Input {
+        forward: 1.0,
+        ..Default::default()
+    };
+    let mut c = in_holtburg();
+    beside(&mut c, MULE, "Mule", 0, 1.0);
+    stack_of(&mut c, 0x8000_0001, SEEDS, 1);
+    assert!(c.give_all(MULE, SEEDS, None));
+    c.tick_giving(now);
+    assert!(c.giving.is_some(), "the give is under way");
+    let _ = c.tick_player(keys, 0.05, now);
+    assert!(c.giving.is_none(), "a moving player's give went on");
+    assert!(
+        matches!(&c.gave.as_ref().unwrap().end, GiveEnd::Stopped(w) if w == "the player moved")
+    );
+    // Autoplay's give, from within reach, is not the player's to end.
+    c.gave = None;
+    assert!(c.give_items(MULE, vec![0x8000_0001]));
+    let _ = c.tick_player(keys, 0.05, now);
+    assert!(c.giving.is_some(), "autoplay's give ended by the keys");
+}
+
+#[test]
 fn an_attuned_item_to_a_player_is_skipped_and_the_rest_go() {
     let now = Instant::now();
     let mut c = in_holtburg();

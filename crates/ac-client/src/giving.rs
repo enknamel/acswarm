@@ -61,8 +61,9 @@ pub struct Giving {
     /// How many still to give in all; `None` for every one.
     pub left: Option<u32>,
     pub given: u32,
-    /// Walk into reach first (a player's ask); autoplay asks only from within reach.
-    pub walk: bool,
+    /// A player's ask: walks into reach first, and ends when the player moves. Autoplay asks
+    /// only from within reach.
+    pub by_hand: bool,
     sent: Option<Sent>,
     /// A busy answer's wait: the same give goes again after it.
     again_at: Option<Instant>,
@@ -118,7 +119,7 @@ impl Client {
         self.start_giving(to, items, None, false)
     }
 
-    fn start_giving(&mut self, to: u32, items: Vec<u32>, left: Option<u32>, walk: bool) -> bool {
+    fn start_giving(&mut self, to: u32, items: Vec<u32>, left: Option<u32>, by_hand: bool) -> bool {
         let Some(name) = self.world.objects.get(&to).map(|o| o.name.clone()) else {
             return false;
         };
@@ -132,13 +133,20 @@ impl Client {
             items,
             left,
             given: 0,
-            walk,
+            by_hand,
             sent: None,
             again_at: None,
             busy: 0,
             heard: None,
         });
         true
+    }
+
+    /// The player taking the controls ends a give they asked for; autoplay's gives stand.
+    pub(crate) fn hand_off_giving(&mut self) {
+        if self.giving.as_ref().is_some_and(|g| g.by_hand) {
+            self.stop_giving("the player moved");
+        }
     }
 
     /// Stop the gives under way, saying `why`.
@@ -299,7 +307,7 @@ impl Client {
             within: crate::visit::REACH,
         };
         if me.distance(there) > GIVE_REACH {
-            if !g.walk {
+            if !g.by_hand {
                 return Some(GiveEnd::Stopped(format!("{} is out of reach", g.to_name)));
             }
             let did = self.go(Owner::Hand, toward, now);

@@ -62,7 +62,7 @@ fn a_mule_is_given_its_items_only_in_view_and_in_reach() {
     assert!(c.autoplay_give(now));
     let g = c.giving.as_ref().expect("gives under way");
     assert_eq!((g.to, g.items.clone()), (MULE, vec![0x8000_0001]));
-    assert!(!g.walk);
+    assert!(!g.by_hand);
     // It waits on its own gives, and stands aside in a fight.
     assert!(c.autoplay_give(now));
     c.giving = None;
