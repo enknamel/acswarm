@@ -6,6 +6,7 @@
 pub mod academy;
 pub mod allegiance;
 mod apply;
+pub mod arenas;
 pub mod buffs;
 pub mod elements;
 pub mod fletching;
