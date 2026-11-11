@@ -295,6 +295,8 @@ pub struct Source {
     /// The server event (lower case) whose generator alone puts the creature or NPC out: it comes
     /// only once that event is started, and its rates are those it then has.
     pub event: Option<String>,
+    /// For a floor item, seconds its generator takes to put it back once taken.
+    pub respawn: Option<f32>,
 }
 
 impl Source {
@@ -578,7 +580,7 @@ fn parse_rates(s: &str, entries: usize) -> Option<Vec<SpawnRate>> {
 /// hunted one's rates (the tenth, a creature's spawn share, is read by [`spawn_share`]).
 fn parse_source(line: &str) -> Option<Source> {
     let f: Vec<&str> = line.split(',').collect();
-    if ![7, 9, 10, 11, 12].contains(&f.len()) {
+    if ![7, 9, 10, 11, 12, 13].contains(&f.len()) {
         return None;
     }
     let kind = match f[1] {
@@ -611,6 +613,7 @@ fn parse_source(line: &str) -> Option<Source> {
         landblocks,
         keys: parse_keys(keys)?,
         event: f.get(11).filter(|e| !e.is_empty()).map(|e| e.to_string()),
+        respawn: f.get(12).and_then(|r| r.parse().ok()),
     })
 }
 
@@ -644,6 +647,7 @@ fn vendor_sources(parsed: &[Source]) -> Vec<Source> {
                 keys: Vec::new(),
                 rates: Vec::new(),
                 event: None,
+                respawn: None,
             });
         }
     }

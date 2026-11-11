@@ -1307,10 +1307,30 @@ def build(data, never):
             rates = ";".join("%s:%s%s" % (figure(n, 2), figure(h, 1),
                                           ":%g" % round(o) if round(o) else "")
                              for n, h, o in figures)
+        back = respawn_of(data, c) if kind == "floor" else None
         src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
                         "%g" % round(p, 4), where, at, keys, spawn, rates,
-                        ev or ""))
+                        ev or "", "" if back is None else "%g" % round(back)))
     return rows_out, givers_out, src_out, reasons
+
+
+def respawn_of(data, wcid):
+    """Seconds a generator takes to put `wcid` back on the ground once it is taken: its profile's
+    delay (a linked placement's is profile[0]'s: WorldObject_Generators.cs:589-625) and a
+    regeneration interval for its tick to come round (GeneratorProfile.cs:526-564); the soonest
+    of its generators, None when none is known."""
+    sp = data.spawning
+    out = []
+    gens = [(g, None) for g in sp.link_parent.get(wcid, ())]
+    gens += [(g, wcid) for g, _, where, _ in data.made_by.get(wcid, ()) if not where & 120]
+    for g, made in gens:
+        profs = sp.profiles.get(g, [])
+        if not profs or g not in sp.genprops:
+            continue
+        mine = [p for p in profs if made is None or p["wcid"] == made] or profs
+        delay = mine[0]["delay"] if mine[0]["delay"] is not None else profs[0]["delay"]
+        out.append((delay or 0.0) + sp.genprops[g][1])
+    return min(out) if out else None
 
 
 def figure(x, places):
@@ -1527,7 +1547,7 @@ GIVERS_HEADER = """\
 
 SOURCES_HEADER = """\
 # Where what a quest wants comes from, and what each source itself needs.
-# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event
+# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn
 # want: an item wcid or a kill counter, as quests.csv names it, a key a container or use
 # below needs, or event:NAME, a server event a source below needs, or flag:NAME, a flag stamped
 # on a creature's killer (both lower case). kind: drop (a corpse drop, chance per kill), kill (a
@@ -1548,6 +1568,8 @@ SOURCES_HEADER = """\
 # its slots held, the others an hour that clearing kills; from a seeded simulation of ACE's
 # generators, with its event on when it has one. event: the Off event (EventManager.cs) whose
 # generator alone puts the creature or NPC out: it comes only once that event is started.
+# respawn: for a floor item, seconds its generator takes to put it back once taken (profile delay
+# and a regeneration interval); blank when unknown.
 # Regenerate with reference/scripts/data/quests.sh.
 """
 

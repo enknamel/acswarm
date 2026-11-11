@@ -32,6 +32,17 @@ const LOCK_ALREADY_UNLOCKED: u32 = 0x04AF;
 /// ACE's YoureTooBusy: the key use turned away for an act of ours (`Player_Use.cs:152-156`).
 const YOURE_TOO_BUSY: u32 = 0x001D;
 
+/// How long a fetch's look at its source's spot waits for it: a floor item taken lately is put
+/// back by its generator in its respawn (the Sacrificial Dagger's 180 s), else [`ANSWER_WAIT`].
+fn look_for(key: (u32, u32)) -> Duration {
+    let floor = ac_world::quests::sources_of(&Want::Item(key.0))
+        .find(|s| s.kind == Yield::Floor && s.wcid == key.1)
+        .and_then(|s| s.respawn);
+    floor.map_or(ANSWER_WAIT, |secs| {
+        ANSWER_WAIT.max(Duration::from_secs_f32(secs.max(0.0)))
+    })
+}
+
 /// What the pursued fetch last did and when, for its answer.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Fetching {
@@ -294,6 +305,13 @@ impl Client {
             }
             _ => return None,
         };
+        // What a look waited for has come back: the look is over, and it is taken.
+        let looking = self.autoplay.growth.fetching.as_ref();
+        if looking.is_some_and(|f| f.key == key && f.act == Act::Look)
+            && self.lying_near(source, place).is_some()
+        {
+            self.autoplay.growth.fetching = None;
+        }
         if let Some(f) = self.autoplay.growth.fetching.clone() {
             if f.key != key {
                 self.autoplay.growth.fetching = None;
@@ -563,7 +581,9 @@ impl Client {
         let waited = now.duration_since(f.at) >= ANSWER_WAIT;
         let has_item = self.carried_count(f.key.0) > 0;
         match f.act {
-            Act::Look if waited => Heard::Refused("not there".to_string()),
+            Act::Look if now.duration_since(f.at) >= look_for(f.key) => {
+                Heard::Refused("not there".to_string())
+            }
             Act::Look => Heard::Waiting,
             Act::Take | Act::Talk if has_item => Heard::Done,
             Act::Take | Act::Talk if waited => Heard::Again,

@@ -67,6 +67,7 @@ fn dropper(want: Want, wcid: u32, name: &str, level: u32) -> &'static Source {
         keys: Vec::new(),
         rates: Vec::new(),
         event: None,
+        respawn: None,
     })
 }
 
@@ -795,6 +796,7 @@ fn necklace_from(kind: Yield, wcid: u32, name: &str, at: Place) -> Source {
         keys: Vec::new(),
         rates: Vec::new(),
         event: None,
+        respawn: None,
     }
 }
 
@@ -1519,6 +1521,7 @@ fn vortex(at: Place) -> PursuitStep {
         keys: vec![(8903, "Focusing Stone".into())],
         rates: Vec::new(),
         event: None,
+        respawn: None,
     };
     PursuitStep::UseOn {
         source: leak(source),
@@ -2423,6 +2426,47 @@ fn the_sacrificial_dagger_on_aerlinthe_is_reached_by_a_note_handed_to_an_emissar
     // The note is the way, not money the town run cashes.
     let cfg = crate::autoplay::growth::config::Growth::default();
     assert!(c.vendor_snapshot(&cfg).notes.is_empty());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_floor_item_taken_lately_is_waited_for_its_generator_s_respawn() {
+    // At the Sacrificial Dagger's spot, Garaena's note spent to get there: no dagger, and it was
+    // given up as "not there" in 5 s. Its generator puts it back 180 s after it is taken.
+    let mut c = mage_pursuing("give:40913", "dagger-respawn");
+    c.world.stats.level = 66;
+    let at = ac_world::landblock_origin(0x02EE_025B) + Vec3::new(147.65, -77.56, -41.93);
+    crate::testkit::stand(&mut c, 0x02EE_025B, Vec3::new(147.0, -77.0, -41.93));
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let line = c.pursuit[0].clone();
+    assert!(
+        matches!(&line.step, PursuitStep::PickUp { name, .. } if name == "Sacrificial Dagger"),
+        "{:?}",
+        line.step
+    );
+    assert_eq!(c.grow_fetch(&line, now), Some(true), "looked for");
+    let later = now + Duration::from_secs(60);
+    assert_eq!(
+        c.grow_fetch(&line, later),
+        Some(true),
+        "given up before its respawn"
+    );
+    // Put back: taken at once.
+    let mut dagger = crate::testkit::creature(0x8000_0751, "Sacrificial Dagger");
+    dagger.weenie_class_id = 28065;
+    dagger.position = crate::testkit::placed(0x02EE_025B, at);
+    c.world.objects.insert(dagger.guid, dagger);
+    let back = later + Duration::from_secs(1);
+    assert_eq!(c.grow_fetch(&line, back), Some(true));
+    let act = c.autoplay.growth.fetching.as_ref().map(|f| f.act);
+    assert_eq!(act, Some(fetch::Act::Take), "not taken once back");
+    // Never back: dropped once its respawn is out.
+    c.world.objects.remove(&0x8000_0751);
+    c.autoplay.growth.fetching = None;
+    assert_eq!(c.grow_fetch(&line, back), Some(true), "looked for again");
+    let out = back + Duration::from_secs(181);
+    assert_eq!(c.grow_fetch(&line, out), Some(false), "kept waiting");
 }
 
 /// `mage_pursuing`'s mage with autoplay on, town runs and grounds on, no buy list of its own, and
