@@ -3525,3 +3525,25 @@ fn an_event_is_taken_for_on_twice_its_creatures_spawn_wait_and_one_gating_npcs_t
         "the Smithing Golem: till missed"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_aun_ralirea_ground_reached_over_its_landblock_s_edge_is_swept_not_walked_to_again() {
+    // Its walk ends 30 m from the ground's place, here in the landblock east of it: planned again
+    // every tick, "arrived" every tick, while a Kithless Siraluun hit him (Timaru, 0x19B6).
+    let now = std::time::Instant::now();
+    let mut c = mage_pursuing("championkillquest1", "aun-ralirea");
+    c.world.stats.level = 120;
+    c.autoplay.growth.proven_tier = 8;
+    c.refresh_quests(now);
+    assert!(c.is_rotating_hunt());
+    let ground = 0x19B6;
+    let grounds = &c.autoplay.growth.pursuit_grounds;
+    assert!(grounds.iter().any(|g| g.0 == ground), "{grounds:x?}");
+    crate::testkit::stand(&mut c, 0x1AB6_0004, glam::Vec3::new(4.6, 87.8, 76.0));
+    again(&mut c, now);
+    assert_eq!(c.grow_pursuit(now), Some(true));
+    assert!(c.autoplay.growth.swept.since(&ground).is_some(), "left");
+    let to = c.autoplay.growth.bound.map(|b| b.0);
+    assert_ne!(to, Some(ground), "{}", c.autoplay.status);
+}
