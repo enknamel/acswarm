@@ -432,19 +432,31 @@ impl Client {
             let why = format!("a {creature} ({wcid}) in sight, not the one {title} wants");
             self.autoplay.note(why, now);
         }
-        let (guid, it) = seen?;
+        let Some((guid, it)) = seen else {
+            self.autoplay.growth.chased = None;
+            return None;
+        };
         let radius = self.autoplay.config.fight.radius;
         let near = it.distance(me) <= radius * 0.8;
-        if near || self.grow_travel(self.place_at(it), radius * 0.5) {
+        // Its journey over (arrived or refused, not put down for a fight) and it still out of
+        // reach: given up as one with no way is, or a Done short of it is set off again each tick.
+        let ended = self.autoplay.growth.chased == Some(guid)
+            && !self.traveling()
+            && !self.journey_broken_off()
+            && !self.is_planning_held(now);
+        if near || (!ended && self.grow_travel(self.place_at(it), radius * 0.5)) {
             self.autoplay.growth.looking = None;
             self.autoplay.growth.rotating = None;
             if near {
+                self.autoplay.growth.chased = None;
                 return Some(None);
             }
+            self.autoplay.growth.chased = Some(guid);
             let why = format!("for {title}: to the {creature} in sight");
             self.autoplay.say(Doing::Traveling, why);
             return Some(Some(true));
         }
+        self.autoplay.growth.chased = None;
         let why = format!("no way to the {creature} in sight: hunting on");
         self.autoplay.note(why, now);
         self.autoplay.given_up.expire(now, GIVE_UP_FOR);

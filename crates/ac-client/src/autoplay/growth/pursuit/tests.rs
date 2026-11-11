@@ -2861,7 +2861,8 @@ fn a_rare_spawn_seen_on_the_way_between_grounds_is_gone_to() {
     witch.position = crate::testkit::placed(cell, far);
     c.world.objects.insert(witch.guid, witch);
     assert!(c.grow_hunt(later, &cfg), "gone to her");
-    assert!(c.autoplay.growth.bound.is_none(), "the ground walk let go");
+    assert!(c.autoplay.growth.bound.is_some(), "the ground walk kept");
+    assert_eq!(c.autoplay.growth.chased, Some(0x5000_0901));
     let goal = c.travel_goal_xy().expect("travelling");
     assert!(
         goal.distance(far.truncate()) <= radius,
@@ -3210,11 +3211,15 @@ fn a_sought_dropper_seen_from_the_road_is_gone_to_only_when_worth_the_plan() {
     c.autoplay.growth.plan_secs = Some(secs / chance * 0.5);
     c.keep_road_droppers();
     assert!(c.grow_hunt(later, &cfg));
-    assert!(c.autoplay.growth.bound.is_some(), "gone to, the plan near");
+    assert_eq!(c.autoplay.growth.chased, None, "gone to, the plan near");
     c.autoplay.growth.plan_secs = Some(secs / chance * 2.0);
     c.keep_road_droppers();
     assert!(c.grow_hunt(later, &cfg));
-    assert!(c.autoplay.growth.bound.is_none(), "walked by, the plan far");
+    assert_eq!(
+        c.autoplay.growth.chased,
+        Some(0x5000_0905),
+        "walked by, the plan far"
+    );
 }
 
 #[test]
@@ -3617,4 +3622,72 @@ fn a_wait_at_a_ground_of_several_spawn_rooms_is_stood_not_walked_round() {
             c.autoplay.status
         );
     }
+}
+
+/// Blargerton on the Tusker Guard Kill Counter, stood by the Tusker Barracks portal (F07F0039),
+/// set off for its dungeon, with a Tusker Guard (`guid`) 83 m off and 9 m down in F17E.
+fn at_the_tusker_barracks_portal(now: Instant, guid: u32) -> Client {
+    let mut c = mage_pursuing("tuskergkillcount", "tusker-guards");
+    c.world.stats.level = 100;
+    c.autoplay.growth.proven_tier = 6;
+    c.travel.quests_done.push("tuskergkillcount".into());
+    c.quest_log.note_taken("tuskerg");
+    c.quest_log.note_taken("tuskergkillcount");
+    crate::testkit::stand(&mut c, 0xF07F_0039, Vec3::new(178.7, 12.0, 12.0));
+    again(&mut c, now);
+    assert!(
+        matches!(&c.pursuit[0].step, PursuitStep::Hunt { .. }),
+        "{:?}",
+        c.pursuit[0].step
+    );
+    assert_eq!(c.grow_pursuit(now), Some(true), "{}", c.autoplay.status);
+    assert!(c.autoplay.growth.bound.is_some(), "{}", c.autoplay.status);
+    let wcid = c.autoplay.growth.pursuit_sought[0];
+    let mut guard = crate::testkit::creature(guid, "Tusker Guard");
+    guard.weenie_class_id = wcid;
+    guard.position = crate::testkit::placed(0xF17E_000E, Vec3::new(46303.4, 24330.3, 2.8));
+    c.world.objects.insert(guid, guard);
+    c.autoplay.growth.plan_secs = Some(1e9);
+    c.keep_road_droppers();
+    c
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_chase_from_the_road_is_asked_again_not_the_ground_s_plan_every_other_tick() {
+    // 29 minutes by the Tusker Barracks portal: the chase let the ground's walk go, the ground's
+    // plan replaced the chase's walk, and each walk's give-up clock started again every 4.5 s.
+    let now = Instant::now();
+    let guid = 0x5000_0907;
+    let mut c = at_the_tusker_barracks_portal(now, guid);
+    let cfg = crate::autoplay::growth::config::Growth::default();
+    let guard = Vec3::new(46303.4, 24330.3, 2.8).truncate();
+    let radius = c.autoplay.config.fight.radius;
+    for secs in [1, 2, 3] {
+        let later = now + Duration::from_secs(secs);
+        assert!(c.grow_hunt(later, &cfg), "{}", c.autoplay.status);
+        let goal = c.travel_goal_xy().expect("travelling");
+        assert!(
+            goal.distance(guard) <= radius,
+            "at {secs} s not to the guard but {goal:?}: {}",
+            c.autoplay.status
+        );
+    }
+    // The chase's journey over with the guard still out of reach: given up, and the ground's
+    // journey walked on.
+    c.end_trip();
+    let later = now + Duration::from_secs(4);
+    c.grow_hunt(later, &cfg);
+    assert!(c.autoplay.given_up.since(&guid).is_some(), "not given up");
+    assert!(c.grow_hunt(later, &cfg), "{}", c.autoplay.status);
+    let goal = c.travel_goal_xy().expect("travelling");
+    assert!(
+        goal.distance(guard) > radius,
+        "still to the guard: {}",
+        c.autoplay.status
+    );
+    assert!(
+        c.autoplay.growth.bound.is_some(),
+        "the ground's walk let go"
+    );
 }

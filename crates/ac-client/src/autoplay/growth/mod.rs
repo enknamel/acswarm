@@ -276,6 +276,8 @@ pub struct State {
     pub(crate) clearing: Option<u32>,
     /// Where and when a pursued hunt's creature fell: its body is stood by till emptied.
     pub(crate) sought_kill: Option<(glam::Vec3, Instant)>,
+    /// The sought creature a journey was set off to (`Client::chase_in_sight`), by guid.
+    pub(crate) chased: Option<u32>,
 }
 
 /// A few names, and how many more there are. A caster short of every
