@@ -338,9 +338,6 @@ impl Client {
     pub(crate) fn autoplay_vitals(&mut self, now: Instant) -> bool {
         use ac_world::vitals::vital;
         let cfg = self.autoplay.config.survive.clone();
-        if !cfg.manage_mana {
-            return false;
-        }
         // Same again: the next draught or cast waits on the server
         // answering for the last, not on a clock; a step waiting on the slot has it first.
         if self.autoplay.cast_in_flight(now) || self.autoplay.is_slot_wanted(now) {
@@ -399,15 +396,11 @@ impl Client {
     }
 
     /// The cast that gets mana back now, and whether it is the transfer: stamina into mana while
-    /// stamina is at its slider, else Revitalize to pour after. `None` when neither can go, or
-    /// `manage_mana` is off.
+    /// stamina is at its slider, else Revitalize to pour after. `None` when neither can go.
     pub(super) fn mana_round(&self) -> Option<(u32, bool)> {
         use crate::magic::CastCheck;
         use ac_world::vitals::vital;
         let cfg = &self.autoplay.config.survive;
-        if !cfg.manage_mana {
-            return None;
-        }
         let castable = |s: u32| matches!(self.can_cast_well(s), CastCheck::Ok);
         let transfer = self.best_transfer(vital::STAMINA, vital::MANA)?;
         let stamina = self.bars()[1];

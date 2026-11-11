@@ -251,11 +251,6 @@ pub(crate) fn draw(
                 );
                 ui.checkbox(&mut cfg.survive.use_kits, "use healing kits")
                     .on_hover_text("Spend a carried healing kit before casting");
-                ui.checkbox(&mut cfg.survive.manage_mana, "keep mana up from stamina")
-                    .on_hover_text(
-                        "Pour stamina into mana when mana runs low and Revitalize \
-                         when stamina does, with the strongest spells known",
-                    );
                 ui.add_space(6.0);
 
                 title(ui, "Buffs");

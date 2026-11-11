@@ -11,10 +11,6 @@ pub struct Survive {
     pub heal_below: f32,
     /// Use a carried healing kit.
     pub use_kits: bool,
-    /// Keep mana up by pouring stamina into it, and stamina up with
-    /// Revitalize, the way a caster does: the transfer gives more mana
-    /// than the Revitalize costs, so the round is a gain.
-    pub manage_mana: bool,
     /// Pour stamina into mana under this fraction; no attack, debuff or buff starts under it.
     pub mana_below: f32,
     /// Revitalize under this fraction, whatever the mana; no transfer, attack, debuff or buff starts under it.
@@ -41,7 +37,6 @@ impl Default for Survive {
         Survive {
             heal_below: 0.6,
             use_kits: true,
-            manage_mana: true,
             mana_below: 0.4,
             stamina_below: 0.3,
             recover_corpse: true,

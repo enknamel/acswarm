@@ -625,7 +625,6 @@ fn vitals_wait_at_the_counter() {
     // window in: the measured failure, one reflex over.
     let now = Instant::now();
     let (mut c, _) = a_caster_knowing(now, &["Revitalize Self I"]);
-    c.autoplay.config.survive.manage_mana = true;
     // The stamina is gone.
     c.world.stats.vitals[1].current = 0;
     // Away from any counter the top-up goes out.

@@ -178,20 +178,18 @@ impl Client {
                     .filter(known),
             );
         }
-        if cfg.survive.manage_mana {
-            out.extend(
-                boosts_of(vital::STAMINA)
-                    .iter()
-                    .map(|b| b.spell)
-                    .filter(known),
-            );
-            out.extend(
-                transfers_between(vital::STAMINA, vital::MANA)
-                    .iter()
-                    .map(|t| t.spell)
-                    .filter(known),
-            );
-        }
+        out.extend(
+            boosts_of(vital::STAMINA)
+                .iter()
+                .map(|b| b.spell)
+                .filter(known),
+        );
+        out.extend(
+            transfers_between(vital::STAMINA, vital::MANA)
+                .iter()
+                .map(|t| t.spell)
+                .filter(known),
+        );
         // The recalls a journey is planned over (see `castable_recalls`).
         out.extend(
             self.world
