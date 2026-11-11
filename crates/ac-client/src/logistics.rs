@@ -252,9 +252,11 @@ pub struct Supplies {
 }
 
 impl Supplies {
-    /// Whether this character alone is reason enough to go shopping.
+    /// Whether this character alone is reason enough to go shopping. Short of supplies while
+    /// broke is not: the trip it just ended said a counter cannot help (`settled`), and counting it
+    /// flipped the party's mode every tick. A full or laden pack still is: selling earns the coin.
     fn wants_town(&self, cfg: &Restock) -> bool {
-        self.pack_full || self.laden || self.level < cfg.go_at
+        self.pack_full || self.laden || (self.level < cfg.go_at && !self.broke)
     }
 
     /// Whether the party need wait for it any longer.
@@ -1030,5 +1032,22 @@ mod tests {
             decide(SHOPPING, &party, &cfg, 0).map(|s| s.mode),
             Some(GroupMode::Hunting)
         );
+    }
+
+    #[test]
+    fn a_broke_member_short_of_supplies_does_not_send_the_party_back_to_town() {
+        // The trip ended for it (`settled`), and its supplies alone started the next one the tick
+        // after: Hunting and Restocking flipped every tick.
+        let cfg = qm_cfg();
+        let mut party = [mate("Aldric", 0.2), mate("Bryn", 1.0)];
+        party[0].broke = true;
+        assert_eq!(
+            decide(SHOPPING, &party, &cfg, 0).map(|s| s.mode),
+            Some(GroupMode::Hunting)
+        );
+        assert_eq!(decide(GroupMode::Hunting, &party, &cfg, 0), None);
+        // Its pack full, the counter is how it earns what it lacks: the party goes.
+        party[0].pack_full = true;
+        assert!(decide(GroupMode::Hunting, &party, &cfg, 0).is_some());
     }
 }
