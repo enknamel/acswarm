@@ -8,8 +8,11 @@
   tools/telemetry.py --setup [FILE]      each character's autoplay settings, as last written
 
 A stall is a stretch of samples, SAMPLE_GAP apart, where the character meant to move (a walk being
-steered, or a status that says it is going somewhere) and got less than a metre from where it was,
-for STALL_AFTER or more; each says what the steering and the body were doing through it.
+steered, or a status that says it is going somewhere) and stayed within STALL_REACH of where the
+stretch began, for STALL_AFTER or more; a reflex between (a heal, a vital, an urgent buff) carries
+it on rather than ending it. Each says what the steering and the body were doing through it.
+A cycle is one status line re-entered CYCLE_LEAST times or more, other lines between, with no xp,
+kill or item gained meanwhile: a loop that moves, or one a heal breaks up, shows there.
 Kills and deaths are the server's own words, matched by the templates tools/fleet-score.py reads
 from the ACE checkout (kills show as "?" without it).
 """
@@ -25,6 +28,9 @@ HERE = Path(__file__).resolve().parent
 DIR = Path.home() / ".cache" / "acswarm" / "telemetry"
 SAMPLE_GAP = 2.0  # seconds between samples (SAMPLE_EVERY in crates/ac-plugin/src/telemetry.rs)
 STALL_AFTER = 10.0  # seconds without a metre of progress while meaning to move
+STALL_REACH = 5.0  # metres from a stall's first sample that still count as no progress (a step aside)
+REFLEXES = {"survive", "dodge", "recover", "urgent buffs", "vitals"}  # steps::reflexes() that act in place
+CYCLE_LEAST = 10  # re-entries of one status, nothing gained between, reported as a cycle
 SPELL_HIT = re.compile(r"^You \w+ .+ for (\d+) points? with ")
 MOVING = re.compile(r"going to|walking|on the way|heading|following|back to|travel|approach", re.I)
 
@@ -88,6 +94,7 @@ def summarise(path):
         bought = sum(int(m.group(1)) for t in texts for m in [re.match(r"buying (\d+) ", t)] if m)
         gave_up = sum(1 for t in texts if re.search(r"giving up|gave up|could not get to|would not trade", t))
         stalls = find_stalls(s)
+        cycles = find_cycles(s, d["status"], chat_kills(d["chat"]))
         out[who] = {
             "hours": hours,
             "level": (s[0].get("lvl"), s[-1].get("lvl")),
@@ -108,6 +115,7 @@ def summarise(path):
             "spell_points": sum(int(m.group(1)) for t in chat for m in [SPELL_HIT.match(t)] if m),
             "wield": Counter(", ".join(x.get("wield") or []) or "nothing" for x in s).most_common(1)[0][0],
             "stalls": stalls,
+            "cycles": cycles,
             "marks": d["marks"],
             "setup": d["setup"],
         }
@@ -194,10 +202,11 @@ def walk_detail(run):
 
 
 def find_stalls(samples):
+    """Stretches meant to move that stayed within STALL_REACH of where each began, longest first."""
     stalls, run = [], []
 
     def close():
-        if run and (run[-1]["t"] - run[0]["t"]) / 1000 + SAMPLE_GAP >= STALL_AFTER:
+        if len(run) > 1 and (run[-1]["t"] - run[0]["t"]) / 1000 + SAMPLE_GAP >= STALL_AFTER:
             stalls.append({
                 "secs": (run[-1]["t"] - run[0]["t"]) / 1000 + SAMPLE_GAP,
                 "cell": run[0].get("cell"),
@@ -207,19 +216,64 @@ def find_stalls(samples):
                 "why": walk_detail(run),
             })
 
-    for a, b in zip(samples, samples[1:]):
-        pa, pb = a.get("pos"), b.get("pos")
-        meaning = b.get("walk") is not None or MOVING.search(b.get("status") or "") is not None
-        still = pa and pb and sum((x - y) ** 2 for x, y in zip(pa, pb)) ** 0.5 < 1.0
-        if meaning and still:
-            if not run:
-                run.append(a)
-            run.append(b)
-        else:
+    def meaning(x):
+        return x.get("walk") is not None or MOVING.search(x.get("status") or "") is not None
+
+    for x in samples:
+        if run:
+            p0, p = run[0].get("pos"), x.get("pos")
+            near = p0 and p and sum((a - b) ** 2 for a, b in zip(p0, p)) ** 0.5 < STALL_REACH
+            if near and (meaning(x) or x.get("step") in REFLEXES):
+                run.append(x)
+                continue
             close()
             run = []
+        if meaning(x) and x.get("pos"):
+            run = [x]
     close()
     return sorted(stalls, key=lambda x: -x["secs"])
+
+
+def chat_kills(chat):
+    """When each kill the server told of came (ms), by fleet-score.py's templates."""
+    if KILLER is None:
+        return []
+    return [c["t"] for c in chat if any(rx.search(c.get("text", "")) for rx in KILLER)]
+
+
+def find_cycles(samples, status, kills):
+    """Status lines re-entered CYCLE_LEAST times or more with no xp, kill or item gained between:
+    each with its count and span, most re-entered first. Digits are read as one, so a distance
+    counting down is the same line."""
+    gains = set(kills)
+    for a, b in zip(samples, samples[1:]):
+        if (b.get("xp") or 0) > (a.get("xp") or 0) or (b.get("slots") or 0) < (a.get("slots") or 0):
+            gains.add(b["t"])
+    gains = sorted(gains)
+    out, seen, last, g = [], {}, None, 0
+
+    def close():
+        for text, (n, t0, t1) in seen.items():
+            if n >= CYCLE_LEAST:
+                out.append({"status": text, "times": n, "secs": (t1 - t0) / 1000, "t": t0})
+
+    for r in status:
+        if r.get("k") != "status":
+            continue
+        t = r["t"]
+        if g < len(gains) and gains[g] <= t:
+            while g < len(gains) and gains[g] <= t:
+                g += 1
+            close()
+            seen, last = {}, None
+        text = re.sub(r"\d+(\.\d+)?", "#", r.get("text", ""))
+        if text == last:
+            continue
+        last = text
+        n, t0, _ = seen.get(text, (0, t, t))
+        seen[text] = (n + 1, t0, t)
+    close()
+    return sorted(out, key=lambda x: -x["times"])
 
 
 def per_hour(v, hours):
@@ -257,6 +311,10 @@ def show(path):
                 at = ", ".join(f"{v:.1f}" for v in st["pos"]) if st.get("pos") else "?"
                 print(f"    {st['secs']:5.0f} s at {st['cell']} ({at})  {st['status']}")
                 print(f"          {st['why']}")
+        if m["cycles"]:
+            print(f"  cycles (a status re-entered, nothing gained): {len(m['cycles'])}; most:")
+            for cy in m["cycles"][:5]:
+                print(f"    {cy['times']:5}x over {cy['secs']:5.0f} s  {cy['status'][:100]}")
 
 
 def brief(setup):
