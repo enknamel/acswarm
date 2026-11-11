@@ -272,6 +272,21 @@ fn salvage_on_its_way(c: &Client) -> Option<Vec<u32>> {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn nothing_is_salvaged_while_the_character_is_hit() {
+    // Salvage asked only whether a target was held: hit with none picked yet, it went to peace
+    // mode and salvaged batch after batch under the blows.
+    let mut c = a_salvager(game_data(), "salvage test");
+    let me = c.world.player_guid;
+    a_mace_to_salvage(&mut c, 0x8000_0101, 10.0, me);
+    let now = Instant::now();
+    c.autoplay.attacked_by("Drudge Skulker", now);
+    assert!(c.under_attack() && c.attack_target.is_none());
+    assert!(!c.autoplay_salvage(now), "salvaged under blows");
+    assert_eq!(salvage_on_its_way(&c), None);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn what_the_team_hands_the_salvager_is_salvaged_a_band_at_a_time() {
     // Teammates hand salvage over one item at a time, and the
     // salvager salvages it along with its own: that is where a 10

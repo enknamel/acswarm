@@ -317,7 +317,8 @@ impl Client {
             return false;
         };
         let cfg = profile.looting.clone();
-        if self.attack_target.is_some() || self.autoplay.corpse.is_some() {
+        // Between fights, as the scroll reader reads it: hit, or a target alive in reach.
+        if self.in_a_fight() || self.autoplay.corpse.is_some() {
             return false;
         }
         // A batch on its way: wait for the items to go, and count a
