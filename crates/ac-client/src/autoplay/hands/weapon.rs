@@ -251,10 +251,16 @@ impl Client {
             ..self.wielder()
         };
         let free_choice = cfg.style == Style::Auto;
+        // One whose wield the server refused is left out while the refusal holds.
+        let open: Vec<crate::items::ItemStats> = carried
+            .iter()
+            .filter(|i| i.wielded || !self.wield_held_off(i.guid))
+            .cloned()
+            .collect();
         let picked = if free_choice {
-            crate::weapons::best_any(&carried, Some(known), &wielder).map(|(_, c)| c)
+            crate::weapons::best_any(&open, Some(known), &wielder).map(|(_, c)| c)
         } else {
-            crate::weapons::best(&carried, stance, Some(known), &wielder)
+            crate::weapons::best(&open, stance, Some(known), &wielder)
         };
         // A bow's choice comes with the arrows to shoot from it.
         self.autoplay.wanted_ammo = picked

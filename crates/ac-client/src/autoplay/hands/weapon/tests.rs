@@ -523,3 +523,56 @@ fn an_archer_out_of_arrows_takes_up_a_carried_axe() {
         .or(c.autoplay.pending_wield);
     assert_eq!(asked, Some(AXE), "the axe is taken up");
 }
+
+#[test]
+fn a_weapon_whose_wield_the_server_refused_is_not_chosen_while_held_off() {
+    // arm_for read no refusal: the server's no left the choice the same, and take_up put the
+    // working weapon away for one that could not be wielded, again each fight.
+    const AXE: u32 = 0x8000_0202;
+    const SKULKER: u32 = 0x8000_0203;
+    let arm = |refused: bool| {
+        let mut c = crate::testkit::character_of_level(no_data(), 20);
+        a_weapon(
+            &mut c,
+            AXE,
+            ac_world::item_type::MELEE_WEAPON,
+            "Battle Axe",
+            false,
+        );
+        crate::testkit::in_view(&mut c, SKULKER, 7, "Drudge Skulker");
+        // Looked at: a slashing axe of Heavy Weapons (44), which the character is trained in.
+        let weapon = ac_net::messages::WeaponProfile {
+            damage_type: 1,
+            speed: 40,
+            skill: 44,
+            damage: 20,
+            variance: 0.5,
+            ..Default::default()
+        };
+        let looked = ac_net::messages::Appraisal {
+            guid: AXE,
+            success: true,
+            weapon: Some(weapon),
+            ..Default::default()
+        };
+        c.appraisals.insert(AXE, looked);
+        crate::testkit::trained_in(&mut c, 44, 150);
+        if refused {
+            // Asked for and turned away by the server.
+            c.autoplay.wield_asked = Some((AXE, Instant::now()));
+            c.wield_refused(AXE, Instant::now());
+            c.autoplay.wield_asked = None;
+            assert!(c.wield_held_off(AXE));
+        }
+        let mut cfg = c.autoplay.config.fight.clone();
+        cfg.pick_weapon = true;
+        cfg.style = crate::autoplay::Style::Auto;
+        c.arm_for(SKULKER, crate::Stance::Melee, &cfg);
+        c.autoplay
+            .wield_asked
+            .map(|(g, _)| g)
+            .or(c.autoplay.pending_wield)
+    };
+    assert_eq!(arm(false), Some(AXE), "the axe is taken up");
+    assert_eq!(arm(true), None, "the refused axe taken up again");
+}
