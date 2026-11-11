@@ -2985,6 +2985,37 @@ fn a_sought_kill_s_body_the_looting_will_not_open_is_not_stood_by() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_sought_kill_s_body_a_mate_is_opening_is_not_stood_by() {
+    // The wait asked only whether the body waited, the looting whose turn it was too: a body a
+    // mate was opening was stood by for up to five minutes.
+    let now = std::time::Instant::now();
+    let (mut c, _) = at_a_mire_witch_ground(now);
+    let cfg = crate::autoplay::growth::config::Growth::default();
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    let mut witch = crate::testkit::creature(0x5000_0901, "Mosswart Mire-Witch");
+    witch.weenie_class_id = 9163;
+    witch.position = crate::testkit::placed(cell, me);
+    c.world.objects.insert(witch.guid, witch);
+    c.note_sought_kill(me, now);
+    c.world.objects.remove(&0x5000_0901);
+    let body = 0x5000_0903;
+    let mut corpse = crate::testkit::corpse(body, "Corpse of Mosswart Mire-Witch");
+    corpse.position = crate::testkit::placed(cell, me);
+    c.world.objects.insert(body, corpse);
+    let held = std::time::Duration::from_secs(5);
+    let mate = crate::testkit::looter(0x5000_0002, me, Some(body), held);
+    c.autoplay.team = crate::testkit::view_of(vec![mate]);
+    c.grow_hunt(now, &cfg);
+    assert!(
+        c.autoplay.growth.sought_kill.is_none(),
+        "stood by a mate's body: {}",
+        c.autoplay.status
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_sought_kill_s_body_is_opened_under_blows() {
     // By the key Putrid Moarsman's body a room of its namesakes and wisps hit him: fought as
     // guarding the body (nothing was opened under blows), two minutes, before the body opened.

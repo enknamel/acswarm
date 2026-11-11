@@ -352,6 +352,22 @@ impl Client {
         now: Instant,
         room: Room,
     ) -> bool {
+        let owed = o
+            .world_pos()
+            .is_some_and(|at| self.autoplay.corpse_owed(o.guid, at, me, now, room));
+        owed && self.can_open_corpse(o, me, now, room)
+    }
+
+    /// The whose half of [`Self::corpse_for_us`], wherever the body lies: a corpse waiting to be
+    /// emptied ([`Autoplay::corpse_waiting`]), this character's turn to open
+    /// ([`Autoplay::ours_to_open`]), not another player's remains. `me` is where it stands.
+    pub(crate) fn can_open_corpse(
+        &self,
+        o: &ac_world::WorldObject,
+        me: glam::Vec3,
+        now: Instant,
+        room: Room,
+    ) -> bool {
         if o.object_desc_flags & ac_world::object_desc_flags::CORPSE == 0 {
             return false;
         }
@@ -359,7 +375,7 @@ impl Client {
             return false;
         };
         let my_guid = self.world.player_guid.unwrap_or(0);
-        self.autoplay.corpse_owed(o.guid, at, me, now, room)
+        self.autoplay.corpse_waiting(o.guid, now, room)
             && self.autoplay.ours_to_open(o.guid, at, my_guid, me, now)
             && !self.corpse_is_someone_elses(&o.name)
     }

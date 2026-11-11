@@ -1143,13 +1143,16 @@ impl Client {
         let (at, fell) = self.autoplay.growth.sought_kill?;
         let since = now.saturating_duration_since(fell);
         let body = self.sought_body();
+        let me = self.my_position()?;
         let waiting = match body {
             // The body comes a moment after the blow (twice that allowed).
             None => since < CORPSE_APPEARS * 2,
-            // Only a body the looting would open: one it will not (a pack low on room) is no wait.
+            // Only a body the looting would open, whose its reach aside: one it will not (a pack
+            // low on room, a mate's turn) is no wait; its reach is the walk back below.
             Some(g) => {
                 let room = self.room_for_loot();
-                since < CORPSE_LIFE && self.autoplay.corpse_waiting(g, now, room)
+                let body = self.world.objects.get(&g);
+                since < CORPSE_LIFE && body.is_some_and(|o| self.can_open_corpse(o, me, now, room))
             }
         };
         if !waiting {
@@ -1157,7 +1160,6 @@ impl Client {
             return None;
         }
         self.autoplay.growth.drop_ground_walk();
-        let me = self.my_position()?;
         if me.truncate().distance(at.truncate()) > LOOT_NEAR * 0.5 {
             if self.grow_travel(self.place_at(at), 2.0) {
                 self.autoplay
