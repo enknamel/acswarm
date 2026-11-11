@@ -270,6 +270,16 @@ fn a_run_under_way_keeps_its_old_place() {
 }
 
 #[test]
+fn autoplay_switched_off_says_no_step_acted() {
+    // Telemetry's `step` kept the last row that acted for as long as autoplay stayed off.
+    let mut c = in_the_field();
+    c.autoplay.step = Some("grow");
+    c.autoplay.config.enabled = false;
+    c.tick_autoplay(Instant::now());
+    assert_eq!(c.autoplay.step, None);
+}
+
+#[test]
 fn a_caster_s_fight_in_hand_keeps_its_place_over_follow() {
     // Only the swing's target was read: a caster's, held in `casting_at` alone, scored as a fight
     // to walk to (40) beyond reach, and follow (50) took the tick from its casts.

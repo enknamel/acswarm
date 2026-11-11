@@ -653,7 +653,8 @@ impl Client {
             // The team rules a character keeps while its player steers
             // it: after the leader, and onto what the leader is hitting
             // (see [`Client::autoplay_by_hand`]). None of the rest runs:
-            // the player has the legs and the hands.
+            // the player has the legs and the hands. No row ran, so none is said to have acted.
+            self.autoplay.step = None;
             let helping = self.autoplay_by_hand(now);
             // The status goes with autoplay -- unless one of those wrote
             // it, or the vendoring panel is running a town run with
