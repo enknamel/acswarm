@@ -1147,9 +1147,10 @@ impl Client {
         let waiting = match body {
             // The body comes a moment after the blow (twice that allowed).
             None => since < CORPSE_APPEARS * 2,
+            // Only a body the looting would open: one it will not (a pack low on room) is no wait.
             Some(g) => {
-                let ap = &self.autoplay;
-                since < CORPSE_LIFE && !ap.looted.contains(&g) && !ap.shelved.held(&g, now)
+                let room = self.room_for_loot();
+                since < CORPSE_LIFE && self.autoplay.corpse_waiting(g, now, room)
             }
         };
         if !waiting {

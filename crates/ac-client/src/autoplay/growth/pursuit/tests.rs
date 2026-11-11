@@ -2917,6 +2917,35 @@ fn a_sought_kill_s_body_is_stood_by() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_sought_kill_s_body_the_looting_will_not_open_is_not_stood_by() {
+    // Aun Ralirea's body, his packs down to the slots kept for a counter's money: the looting
+    // never opened it and he stood by it, waiting on it.
+    let now = std::time::Instant::now();
+    let (mut c, _) = at_a_mire_witch_ground(now);
+    let cfg = crate::autoplay::growth::config::Growth::default();
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    let mut witch = crate::testkit::creature(0x5000_0901, "Mosswart Mire-Witch");
+    witch.weenie_class_id = 9163;
+    witch.position = crate::testkit::placed(cell, me);
+    c.world.objects.insert(witch.guid, witch);
+    c.note_sought_kill(me, now);
+    c.world.objects.remove(&0x5000_0901);
+    let mut body = crate::testkit::corpse(0x5000_0903, "Corpse of Mosswart Mire-Witch");
+    body.position = crate::testkit::placed(cell, me);
+    c.world.objects.insert(body.guid, body);
+    c.autoplay.config.team.restock.money_slots = 10_000;
+    assert!(c.pack_low_on_room());
+    c.grow_hunt(now, &cfg);
+    assert!(
+        c.autoplay.growth.sought_kill.is_none(),
+        "stood by a body the looting will not open: {}",
+        c.autoplay.status
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_sought_kill_s_body_is_opened_under_blows() {
     // By the key Putrid Moarsman's body a room of its namesakes and wisps hit him: fought as
     // guarding the body (nothing was opened under blows), two minutes, before the body opened.
