@@ -3863,6 +3863,66 @@ fn played_over_an_aun_ralirea_ground_s_edge_the_ground_is_swept_not_walked_to() 
     }
 }
 
+/// The Stone Fists Token (give:34454) on the bundled data: the working step for a level 150
+/// character holding `held`, the events `on` as given, killing what `kills` says it can.
+fn stone_fists_step(held: &[&str], on: &[&str], kills: &dyn Fn(u32) -> bool) -> PursuitStep {
+    let mut f = facts(150, &[("give:34454", true)]);
+    f.held = held.iter().map(|h| h.to_string()).collect();
+    let on = |e: &str| on.contains(&e);
+    let secs = |w: u32| kills(w).then_some(20.0);
+    let p = work_events(&f, &ChainData, None, &|_| false, &secs, &on);
+    p.lines[0].step.clone()
+}
+
+#[test]
+fn stone_fists_a_character_who_cannot_kill_the_boss_is_told_so_and_not_sent_for_its_event() {
+    // The boss is level 125 and comes only once eight golems die before its watcher: no golem
+    // is worth killing, nor a flag worth earning, for a boss this character cannot kill.
+    let step = stone_fists_step(&[], &[], &|w| w != 34607);
+    assert_eq!(
+        step,
+        PursuitStep::Stuck {
+            why: "Stone Fists Token drops only from creatures this character cannot kill yet"
+                .into()
+        }
+    );
+}
+
+#[test]
+fn stone_fists_the_arena_flag_is_named_with_the_portal_that_stamps_it() {
+    // AccessBoss3 is stamped only by going through the Colosseum's Arena 3 portal (its Portal
+    // emote set, Portal.cs:287): no NPC, kill or quest gives it, so nobody was known to.
+    let PursuitStep::Stuck { why } = stone_fists_step(&[], &[], &|_| true) else {
+        panic!("not stuck");
+    };
+    assert_eq!(
+        why,
+        "Stone Fists Token needs the stonefistsbossstart event first: the AccessBoss3 flag is \
+         stamped going through Arena 3 in dungeon 00B0: autoplay does not go there for it yet"
+    );
+}
+
+#[test]
+fn stone_fists_with_the_flag_the_golems_are_hunted_then_the_boss_once_its_event_is_on() {
+    let hunt = |s: &PursuitStep| match s {
+        PursuitStep::Hunt {
+            landblock,
+            creature,
+            ..
+        } => (*landblock, creature.clone()),
+        other => panic!("{other:?}"),
+    };
+    let (lb, golem) = hunt(&stone_fists_step(&["AccessBoss3"], &[], &|_| true));
+    assert_eq!(lb, 0xB6);
+    assert!(
+        ["Magma Golem", "Crystal Golem"].contains(&golem.as_str()),
+        "{golem}"
+    );
+    let on = ["stonefistsbossstart"];
+    let (lb, boss) = hunt(&stone_fists_step(&["AccessBoss3"], &on, &|_| true));
+    assert_eq!((lb, boss.as_str()), (0xB6, "Stone Fists"));
+}
+
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn played_at_the_silver_tuskers_rooms_the_wait_is_stood_till_it_ends() {
@@ -3894,4 +3954,47 @@ fn played_at_the_silver_tuskers_rooms_the_wait_is_stood_till_it_ends() {
             f.secs
         );
     }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn blargerton_at_67_is_told_the_stone_fists_token_waits_on_the_arena_3_flag() {
+    // He pursued give:34454 and stood "nobody known yields the stonefistsbossstart event": the
+    // golems its watcher counts and the portal stamping the arena's flag were not in the data.
+    let mut c = mage_pursuing("give:34454", "stone-fists");
+    c.world.stats.level = 67;
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    assert!(
+        c.killing().secs(34607).is_some(),
+        "his kill reckoning takes the boss on"
+    );
+    assert_eq!(
+        c.pursuit[0].words(0),
+        "Stone Fists Token: passed over: Stone Fists Token needs the stonefistsbossstart event \
+         first: the AccessBoss3 flag is stamped going through Arena 3 in dungeon 00B0: autoplay \
+         does not go there for it yet"
+    );
+}
+
+#[test]
+fn the_stone_fists_watcher_is_taken_for_started_only_after_eight_of_our_golem_kills() {
+    // Its watcher stamps a counter per golem death it hears and starts the boss at eight
+    // (InqMyQuestSolves StoneFistsCrittersKilled@8-8: EmoteManager.cs:666-676, 1287-1290).
+    let mut c = crate::testkit::offline_client();
+    let now = std::time::Instant::now();
+    for i in 0..8u32 {
+        assert!(
+            !c.is_event_on("stonefistsbossstart", now),
+            "after {i} kills"
+        );
+        let mut golem = crate::testkit::creature(0x5000_0A00 + i, "Magma Golem");
+        golem.weenie_class_id = if i % 2 == 0 { 199 } else { 14800 };
+        golem.position = crate::testkit::placed(0x00B6_010A, glam::Vec3::new(30.0, -30.0, -11.8));
+        let at = golem.world_pos().unwrap();
+        c.world.objects.insert(golem.guid, golem);
+        c.note_event_kill(at, now);
+        c.world.objects.remove(&(0x5000_0A00 + i));
+    }
+    assert!(c.is_event_on("stonefistsbossstart", now));
 }

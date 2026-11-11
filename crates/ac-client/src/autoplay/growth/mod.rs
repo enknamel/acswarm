@@ -257,6 +257,8 @@ pub struct State {
     /// Server events taken for on, by name, and when started or last seen at work
     /// (`pursuit::events`).
     pub(crate) events_on: Recent<String>,
+    /// Kills of ours an event's watcher heard while it was not taken for on, by event.
+    pub(crate) event_deaths: std::collections::BTreeMap<String, u32>,
     /// Pursued grounds left for the next or to unload, and when the character was last in or
     /// beside each (`pursuit::sweep`).
     pub(crate) swept: Recent<u32>,

@@ -725,15 +725,28 @@ impl Ask<'_> {
         let mut blocks: Vec<(&SourceGround, Place, Vec<pace::Dropper>)> = Vec::new();
         let mut droppers: Vec<(u32, f32, f32)> = Vec::new();
         let mut unkillable = false;
+        // The flag of a way in shut only by it, to a creature this character can kill.
+        let mut shut: Option<&str> = None;
         for g in grounds.iter().filter(|g| g.source.kind.is_hunted()) {
-            // One only an event puts out is hunted once the event is on.
+            // One only an event puts out is hunted once the event is on; never started for a
+            // creature this character cannot kill.
             if let Some(e) = g.source.event.as_deref().filter(|e| !(self.event_on)(e)) {
-                if !events.contains(&e) {
+                if (self.kill_secs)(g.source.wcid).is_none() {
+                    unkillable = true;
+                } else if !events.contains(&e) {
                     events.push(e);
                 }
                 continue;
             }
             let Some(place) = g.place.filter(|_| level_fits(g) && flag_held(g)) else {
+                let flag = g.way_in.map(|p| p.quest.as_str()).filter(|q| !q.is_empty());
+                if let Some(flag) = flag.filter(|_| g.place.is_some() && level_fits(g)) {
+                    if (self.kill_secs)(g.source.wcid).is_some() {
+                        shut.get_or_insert(flag);
+                    } else {
+                        unkillable = true;
+                    }
+                }
                 continue;
             };
             let Some(kill) = (self.kill_secs)(g.source.wcid) else {
@@ -805,11 +818,8 @@ impl Ask<'_> {
             };
             return (step, Some(hunting));
         }
-        let shut = grounds
-            .iter()
-            .filter(|g| g.place.is_some() && level_fits(g));
-        if let Some(p) = shut.filter_map(|g| g.way_in).find(|p| !p.quest.is_empty()) {
-            return self.flag_step(&p.quest, depth);
+        if let Some(flag) = shut {
+            return self.flag_step(flag, depth);
         }
         let lowest = grounds
             .iter()

@@ -81,7 +81,7 @@ impl Client {
 
 impl Ask<'_> {
     /// The step for a flag a way on asks: earned from an unlock NPC the level earns, else by a
-    /// kill that stamps it ([`OBTAIN_DEPTH`] deep, as a key), else why not.
+    /// kill that stamps it ([`OBTAIN_DEPTH`] deep, as a key), else why not (a portal's, named).
     pub(super) fn flag_step(&self, flag: &str, depth: usize) -> (PursuitStep, Option<Hunting>) {
         let by = self.chains.givers(flag);
         let unlocks = || {
@@ -118,8 +118,12 @@ impl Ask<'_> {
             FlagBy::Quest(row) => Some(*row),
             _ => None,
         });
-        match (quest, killed) {
-            (Some(row), _) => {
+        let portal = by.iter().find_map(|b| match b {
+            FlagBy::Portal(s) => Some(*s),
+            _ => None,
+        });
+        match (quest, killed, portal) {
+            (Some(row), _, _) => {
                 let why = format!(
                     "the {flag} flag comes first, from {} ({})",
                     row.giver,
@@ -127,8 +131,19 @@ impl Ask<'_> {
                 );
                 (stuck(why), None)
             }
-            (None, Some(got)) => got,
-            (None, None) => (stuck(format!("nobody known gives the {flag} flag")), None),
+            (None, Some(got), _) => got,
+            // Going through a portal for its stamp is no step autoplay takes (the Colosseum's
+            // Arena 3 opens only once a fellowship has cleared two arena rooms).
+            (None, None, Some(s)) => {
+                let place = s.places.first().map_or(0, |p| p.cell);
+                let why = format!(
+                    "the {flag} flag is stamped going through {} in {}: autoplay does not go there for it yet",
+                    s.name,
+                    ac_world::quest_chain::place_name(place)
+                );
+                (stuck(why), None)
+            }
+            (None, None, None) => (stuck(format!("nobody known gives the {flag} flag")), None),
         }
     }
 }

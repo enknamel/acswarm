@@ -98,20 +98,30 @@ impl Client {
         }
     }
 
-    /// The events a kill at `at` started: a creature lying there whose death starts one.
+    /// The events a kill at `at` started: a creature lying there whose death starts one, once its
+    /// watcher has heard as many of our kills as it counts (`quests::deaths_heard`).
     pub(crate) fn note_event_kill(&mut self, at: glam::Vec3, now: Instant) {
         let kills = started_by_kill();
-        let started: Vec<String> = self
+        let heard: Vec<(String, u32)> = self
             .world
             .objects
             .values()
             .filter(|o| o.world_pos().is_some_and(|p| p.distance(at) < 1.0))
-            .filter_map(|o| kills.get(&o.weenie_class_id))
-            .flatten()
-            .cloned()
+            .filter_map(|o| Some((o.weenie_class_id, kills.get(&o.weenie_class_id)?)))
+            .flat_map(|(w, es)| es.iter().map(move |e| (e.clone(), w)))
             .collect();
-        for e in started {
-            self.note_event(&e, now);
+        for (e, wcid) in heard {
+            let deaths = self
+                .autoplay
+                .growth
+                .event_deaths
+                .entry(e.clone())
+                .or_default();
+            *deaths += 1;
+            if *deaths >= ac_world::quests::deaths_heard(&e, wcid) {
+                self.autoplay.growth.event_deaths.remove(&e);
+                self.note_event(&e, now);
+            }
         }
     }
 
