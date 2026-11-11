@@ -218,6 +218,7 @@ impl Creature {
 const CREATURES: &str = include_str!("../data/creatures.csv");
 const SPELLS: &str = include_str!("../data/spell_elements.csv");
 const DAMAGE: &str = include_str!("../data/spell_damage.csv");
+const SPEEDS: &str = include_str!("../data/spell_speeds.csv");
 
 fn parse_creatures(text: &str) -> Vec<Creature> {
     let mut out = Vec::with_capacity(6500);
@@ -387,6 +388,29 @@ pub fn spell_damage(spell_id: u32) -> Option<(u32, u32)> {
         .map(|i| (all[i].1, all[i].2))
 }
 
+/// How fast `spell_id`'s projectile flies, m/s: its weenie's MaximumVelocity, launched at that
+/// (WorldObject_Magic.cs:1695-1756, 1898-1921); `None` for a spell that throws none.
+pub fn spell_speed(spell_id: u32) -> Option<f32> {
+    static ALL_SPEEDS: OnceLock<Vec<(u32, f32)>> = OnceLock::new();
+    let all = ALL_SPEEDS.get_or_init(|| {
+        let mut out: Vec<(u32, f32)> = SPEEDS
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+            .filter_map(|l| {
+                let mut f = l.split(',');
+                let id = f.next()?.trim().parse().ok()?;
+                let speed = f.next()?.trim().parse().ok()?;
+                Some((id, speed))
+            })
+            .collect();
+        out.sort_by_key(|(id, _)| *id);
+        out
+    });
+    all.binary_search_by_key(&spell_id, |(id, _)| *id)
+        .ok()
+        .map(|i| all[i].1)
+}
+
 /// What a spell does about an element, and which.
 pub fn spell_role(spell_id: u32) -> Option<(Role, Element)> {
     spell_row(spell_id).map(|r| (r.1, r.2))
@@ -481,6 +505,14 @@ mod tests {
         assert_eq!(spell_damage(2720), Some((42, 84)), "Force Arc III");
         assert_eq!(spell_damage(64), Some((16, 31)), "Shock Wave I");
         assert_eq!(spell_damage(24), None, "Armor Self I deals none");
+    }
+
+    #[test]
+    fn a_streak_flies_three_times_as_fast_as_a_bolt() {
+        assert_eq!(spell_speed(85), Some(15.0), "Flame Bolt VI");
+        assert_eq!(spell_speed(1801), Some(45.0), "Flame Streak VI");
+        assert_eq!(spell_speed(2744), Some(40.0), "Flame Arc VI");
+        assert_eq!(spell_speed(24), None, "Armor Self I throws none");
     }
 
     #[test]

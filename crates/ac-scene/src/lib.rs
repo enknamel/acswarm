@@ -135,6 +135,8 @@ pub struct Assets {
     /// in the process (see [`blockcache`]).
     pub blocks: blockcache::BlockCache,
     world_grid: RefCell<Option<Rc<worldgrid::WorldGrid>>>,
+    /// [`Assets::motion_seconds`] by table, style and motion; the turn rate under style 0.
+    motion_seconds: RefCell<HashMap<(u32, u32, u32), f32>>,
 }
 
 /// How many assembled landblocks [`Assets::landblock`] keeps.
@@ -205,6 +207,7 @@ impl Assets {
             landblock_order: Default::default(),
             blocks: Default::default(),
             world_grid: RefCell::new(None),
+            motion_seconds: Default::default(),
         }
     }
 
@@ -232,6 +235,31 @@ impl Assets {
         )?);
         *self.world_grid.borrow_mut() = Some(g.clone());
         Ok(g)
+    }
+
+    /// Seconds MotionTable `table` plays `motion` in `style` at speed 1 ([`anim::motion_length`]),
+    /// worked out once a process; 0 for a table or animation the archives do not hold.
+    pub fn motion_seconds(&self, table: u32, style: u32, motion: u32) -> f32 {
+        let key = (table, style, motion);
+        if let Some(s) = self.motion_seconds.borrow().get(&key) {
+            return *s;
+        }
+        let secs = anim::motion_table(self, table)
+            .and_then(|t| anim::motion_length(self, &t, style, motion))
+            .unwrap_or(0.0);
+        self.motion_seconds.borrow_mut().insert(key, secs);
+        secs
+    }
+
+    /// How fast MotionTable `table` turns, rad/s ([`anim::turn_rate`]); 0 when it is not held.
+    pub fn turn_rate(&self, table: u32) -> f32 {
+        let key = (table, 0, anim::motion::TURN_RIGHT);
+        if let Some(s) = self.motion_seconds.borrow().get(&key) {
+            return *s;
+        }
+        let rate = anim::motion_table(self, table).map_or(0.0, |t| anim::turn_rate(&t));
+        self.motion_seconds.borrow_mut().insert(key, rate);
+        rate
     }
 
     cached!(gfxobj, gfxobjs, GfxObj, portal);

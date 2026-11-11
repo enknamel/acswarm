@@ -17,6 +17,8 @@ pub mod motion {
     pub const STANCE_HAND_COMBAT: u32 = 0x8000_003C;
     pub const STANCE_NON_COMBAT: u32 = 0x8000_003D;
     pub const STANCE_SWORD_COMBAT: u32 = 0x8000_003E;
+    /// The stance every spell is wound up and cast in (ACE `MotionStance.Magic`).
+    pub const STANCE_MAGIC: u32 = 0x8000_0049;
     pub const READY: u32 = 0x4100_0003;
     pub const WALK_FORWARD: u32 = 0x4500_0005;
     pub const WALK_BACKWARDS: u32 = 0x4500_0006;
@@ -24,6 +26,7 @@ pub mod motion {
     /// Doors and switches: open / closed.
     pub const ON: u32 = 0x4000_000B;
     pub const OFF: u32 = 0x4000_000C;
+    pub const TURN_RIGHT: u32 = 0x6500_000D;
     pub const SIDE_STEP_RIGHT: u32 = 0x6500_000F;
     pub const SIDE_STEP_LEFT: u32 = 0x6500_0010;
     pub const DEAD: u32 = 0x4000_0011;
@@ -215,6 +218,46 @@ fn load_clips(assets: &Assets, anims: &[AnimData]) -> Result<Vec<Clip>> {
         }
     }
     Ok(out)
+}
+
+/// Seconds `motion` plays at speed 1 when issued in `style` from that style's default motion: each
+/// linked animation's frames over its framerate, a high frame past its end cut to the end (ACE
+/// `GetAnimData`, `GetAnimationLength`: DatLoader MotionTable.cs:130-182). 0 with no link.
+pub fn motion_length(assets: &Assets, table: &MotionTable, style: u32, motion: u32) -> Result<f32> {
+    let Some(current) = table.default_motion(style) else {
+        return Ok(0.0);
+    };
+    let Some(link) = table.link(style, current, motion) else {
+        return Ok(0.0);
+    };
+    let mut secs = 0.0;
+    for a in &link.anims {
+        let bytes = assets.portal.read(a.anim_id)?;
+        let frames = Animation::parse(a.anim_id, &bytes)
+            .map_err(|source| crate::Error::Format {
+                id: a.anim_id,
+                source,
+            })?
+            .num_frames as i32;
+        // ACE's own note: the level VI windup's high frame runs past its animation.
+        let high = if a.high_frame < 0 {
+            frames
+        } else {
+            a.high_frame.min(frames)
+        };
+        if a.framerate != 0.0 {
+            secs += (high - a.low_frame) as f32 / a.framerate.abs();
+        }
+    }
+    Ok(secs)
+}
+
+/// How fast `table` turns, rad/s: its TurnRight cycle's spin about z in the default style (ACE
+/// `MotionTable.GetTurnSpeed`, MotionTable.cs:524-537).
+pub fn turn_rate(table: &MotionTable) -> f32 {
+    table
+        .cycle(table.default_style, motion::TURN_RIGHT)
+        .map_or(0.0, |m| m.omega.z.abs())
 }
 
 /// Load a MotionTable by id.
