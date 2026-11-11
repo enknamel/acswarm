@@ -410,6 +410,22 @@ fn a_portal_source_and_a_watched_kill_with_its_deaths_column_parse() {
 }
 
 #[test]
+fn the_stone_fists_watcher_hears_eight_golem_deaths_in_its_own_arena() {
+    // Each Magma and Crystal Golem signals as it dies; the watcher in 0xB6 starts the boss once
+    // it has heard eight (EmoteManager.cs:666-676, 1287-1290). Golems elsewhere are not heard.
+    let want = Want::Event("stonefistsbossstart".into());
+    let mut heard: Vec<(u32, Vec<u32>)> = sources_of(&want)
+        .filter(|s| s.kind == Yield::Kill)
+        .map(|s| (s.wcid, s.landblocks.iter().map(|l| l.0).collect()))
+        .collect();
+    heard.sort();
+    assert_eq!(heard, [(199, vec![0xB6]), (14800, vec![0xB6])]);
+    assert_eq!(deaths_heard("stonefistsbossstart", 199), 8);
+    assert_eq!(deaths_heard("stonefistsbossstart", 14800), 8);
+    assert_eq!(deaths_heard("aerfallegen", 199), 1);
+}
+
+#[test]
 fn the_rates_column_is_read_beside_its_landblocks() {
     let s =
         parse_source("6876,drop,10815,Virindi Inquisitor,100,0.8,2AE:19;2AF:37,,,1,19:225;37:435")

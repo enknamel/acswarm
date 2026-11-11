@@ -337,6 +337,21 @@ fn aun_ralirea_is_about_at_a_fresh_load_however_rare() {
 }
 
 #[test]
+fn the_accessboss3_flag_is_stamped_by_going_through_arena_3() {
+    // The Stone Fists statue asks it; only the Colosseum's Arena 3 portal stamps it, on whoever
+    // goes through (its Portal emote set: Portal.cs:287), made in each arena by a generator.
+    let by = flag_givers("AccessBoss3");
+    let portals: Vec<(u32, usize)> = by
+        .iter()
+        .filter_map(|b| match b {
+            FlagBy::Portal(s) => Some((s.wcid, s.places.len())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(portals, [(34518, 5)], "{by:?}");
+}
+
+#[test]
 fn the_virindiisland_flag_is_had_by_killing_the_guardian_of_the_singularity() {
     // The portals onto the island over the Singularity Caul ask it; only the Guardian's death
     // stamps it, on its killer, so nobody was known to give it.
