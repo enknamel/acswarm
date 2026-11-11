@@ -78,6 +78,8 @@ const FACE_REACH: f32 = 0.3;
 /// the next.
 #[derive(Default)]
 struct StepState {
+    /// The step's walk had no way on foot and is flown (`flown::fly_step`).
+    flown: bool,
     /// The landblock stood in as a portal, recall or gem step began; done once somewhere else.
     portal_from: Option<u32>,
     /// When the character first stood at the portal's mouth.

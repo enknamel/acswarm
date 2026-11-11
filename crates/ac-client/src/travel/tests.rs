@@ -2163,3 +2163,59 @@ fn an_emissary_who_opens_nothing_is_left_out_of_the_next_plan() {
     assert!(c.is_npc_way_refused(7403));
     assert!(c.travel.replan_due);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_coral_tunnels_ledge_is_flown_to_the_western_isle_portal() {
+    // Through the Coral Tunnels from Aerlinthe's eastern half: a 3.3 m ledge (z 2.7 to 6.0 by
+    // 0x02EC0230) had no way on foot, the step to the Western Aerlinthe Island portal was refused,
+    // and the journey went back out east and round again for ever. A journey flown already, its
+    // last resort, flies such a step though a hop is behind it.
+    let o = |cell: u32| ac_world::landblock_origin(cell);
+    let mut c =
+        crate::testkit::standing_in_the_field(66, 0x02EC_031F, Vec3::new(260.0, -27.765, 6.01));
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.movement_rules = crate::player::MovementRules::Unrestricted;
+    let mouth = Place {
+        at: o(0x02EC_02B9) + Vec3::new(50.0, -1.7, 6.0),
+        cell: 0x02EC_02B9,
+    };
+    let west = Place {
+        at: o(0xB8E8_0103) + Vec3::new(175.8, 132.1, -1.8),
+        cell: 0xB8E8_0103,
+    };
+    let trip = Trip {
+        steps: vec![
+            Step::Portal {
+                name: "Western Aerlinthe Island".into(),
+                mouth,
+                exit: west,
+            },
+            Step::Walk(west),
+        ],
+        seconds: 120.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(west));
+    // Flown, with no way left on foot, and carried in by the Coral Tunnels portal since.
+    c.travel.fly_to = Some(west.at.truncate());
+    c.travel.hopped = true;
+    c.refuse_step("no way there: Planner(Unreached)");
+    assert!(c.is_journey_flown(), "the step was not flown");
+    assert!(
+        c.travel.refused.is_empty(),
+        "the western portal was left out"
+    );
+    let t0 = Instant::now();
+    let dt = 0.05;
+    let mut closest = f32::MAX;
+    for frame in 0..120 * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        c.pathfinder.settle(Duration::from_secs(5));
+        closest = closest.min(c.my_position().unwrap().distance(mouth.at));
+        if closest <= 1.5 {
+            break;
+        }
+    }
+    assert!(closest <= 1.5, "{closest:.1} m short of the western portal");
+}

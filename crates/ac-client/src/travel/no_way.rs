@@ -1,5 +1,6 @@
-//! A step or journey with no way on foot: a portal's left out and the journey planned again, a
-//! walk carried into a region left out from where it starts, or the journey refused.
+//! A step or journey with no way on foot: flown where the body may fly, else a portal's left out
+//! and the journey planned again, a walk carried into a region left out from where it starts, or
+//! the journey refused.
 
 use ac_world::trip::{NoWalk, Step};
 
@@ -9,6 +10,9 @@ impl Client {
     /// The step's walk has no way: a portal is left out and the journey planned again next frame,
     /// and so is the walk to its end once carried into this region; else the journey is refused.
     pub(super) fn refuse_step(&mut self, why: &str) {
+        if self.fly_step(why) {
+            return;
+        }
         let n = self.travel.step;
         match self.travel_step().cloned() {
             Some(Step::Portal { name, mouth, .. }) => {

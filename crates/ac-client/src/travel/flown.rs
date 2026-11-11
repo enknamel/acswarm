@@ -1,7 +1,8 @@
 //! A journey flown as the last resort, when the body may fly: one that hops (a portal, recall or
 //! gem) with no way left on foot, flown to its next hop over what the walk graph cannot cross
-//! (Ithaenc's ruins), then walked; and one within the dungeon stood in, clipped through whatever
-//! wall or shaft the graph has no way past (the Catacombs of Ithaenc's key room).
+//! (Ithaenc's ruins), then walked, and any later step with no way on foot flown too (the Coral
+//! Tunnels' 3.3 m ledge); and one within the dungeon stood in, clipped through whatever wall or
+//! shaft the graph has no way past (the Catacombs of Ithaenc's key room).
 
 use std::time::Instant;
 
@@ -56,12 +57,29 @@ impl Client {
     /// the flight set off afresh (`hopped` cleared).
     pub(crate) fn is_journey_flown(&self) -> bool {
         let to = self.travel_goal_xy();
-        self.movement_rules.limits().noclip
-            && !self.travel.hopped
+        let before_hop = !self.travel.hopped
             && self
                 .travel
                 .fly_to
-                .is_some_and(|f| to.is_some_and(|g| g.distance(f) <= 1.0))
+                .is_some_and(|f| to.is_some_and(|g| g.distance(f) <= 1.0));
+        self.movement_rules.limits().noclip && (before_hop || self.travel.state.flown)
+    }
+
+    /// The step under way has no way on foot (`why`): flown when the journey was flown already,
+    /// its last resort, though a hop is behind it (the Coral Tunnels' ledge past the portal in);
+    /// `false` leaves it to be refused.
+    pub(super) fn fly_step(&mut self, why: &str) -> bool {
+        let to = self.travel_goal_xy();
+        let flown = self
+            .travel
+            .fly_to
+            .is_some_and(|f| to.is_some_and(|g| g.distance(f) <= 1.0));
+        if !self.movement_rules.limits().noclip || !flown || self.travel.state.flown {
+            return false;
+        }
+        tracing::info!("travel: step {}: {why}; flown", self.travel.step);
+        self.travel.state.flown = true;
+        true
     }
 
     /// The journey to `goal` set off flown, `owner`'s refusals forgotten; blocked when
