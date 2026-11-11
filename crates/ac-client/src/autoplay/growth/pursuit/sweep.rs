@@ -405,6 +405,37 @@ impl Client {
         Some(Some(true))
     }
 
+    /// A pursued hunt's creature in sight on the road between its grounds, a rare camp's or one
+    /// the road rule finds worth its kill ([`super::pace::road_droppers`]): gone to, the ground
+    /// walk kept so this is asked again, not its plan; `Some` is the hunt row's answer (false:
+    /// left to the fight rule, in its reach). In reach or the chase over, the ground is planned
+    /// afresh.
+    pub(crate) fn chase_sought_on_road(&mut self, now: Instant) -> Option<bool> {
+        let line = self.working_pursuit()?.clone();
+        let super::PursuitStep::Hunt { creature, .. } = &line.step else {
+            return None;
+        };
+        let st = &self.autoplay.growth;
+        let mut chased = st.pursuit_sought.clone();
+        if !self.is_rotating_hunt() {
+            chased.retain(|w| st.pursuit_road.contains(w));
+        }
+        let chasing = self.autoplay.growth.chased.is_some();
+        match self.chase_in_sight(&line.title, creature, &chased, now) {
+            Some(Some(walking)) => Some(walking),
+            Some(None) => {
+                self.autoplay.growth.bound = None;
+                Some(false)
+            }
+            None => {
+                if chasing {
+                    self.autoplay.growth.bound = None;
+                }
+                None
+            }
+        }
+    }
+
     /// A creature of the classes `sought` in sight walked to (or fought, `Some(None)`); `None`
     /// when none is. One with no way to it is given up on a while, like the fight's, and the
     /// hunt goes on. A namesake is noted: the common Mosswart Mire-Witch (7102) is not Martine's

@@ -1177,36 +1177,6 @@ impl Client {
         Some(true)
     }
 
-    /// A pursued hunt's creature in sight on the road between its grounds, a rare camp's or one
-    /// the road rule finds worth its kill ([`pace::road_droppers`]): gone to, the ground walk kept
-    /// so this is asked again, not its plan; `Some` is the hunt row's answer (false: left to the
-    /// fight rule, in its reach). In reach or the chase over, the ground is planned afresh.
-    pub(super) fn chase_sought_on_road(&mut self, now: Instant) -> Option<bool> {
-        let line = self.working_pursuit()?.clone();
-        let PursuitStep::Hunt { creature, .. } = &line.step else {
-            return None;
-        };
-        let st = &self.autoplay.growth;
-        let mut chased = st.pursuit_sought.clone();
-        if !self.is_rotating_hunt() {
-            chased.retain(|w| st.pursuit_road.contains(w));
-        }
-        let chasing = self.autoplay.growth.chased.is_some();
-        match self.chase_in_sight(&line.title, creature, &chased, now) {
-            Some(Some(walking)) => Some(walking),
-            Some(None) => {
-                self.autoplay.growth.bound = None;
-                Some(false)
-            }
-            None => {
-                if chasing {
-                    self.autoplay.growth.bound = None;
-                }
-                None
-            }
-        }
-    }
-
     pub(super) fn grow_pursuit(&mut self, now: Instant) -> Option<bool> {
         let line = self.working_pursuit()?.clone();
         // Handed in and not yet answered: the item gone, the board would have another made.
