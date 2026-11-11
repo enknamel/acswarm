@@ -17,6 +17,8 @@ REFUSE, GIVE, USE = 1, 6, 7
 DEATH = 3
 # StartEvent, and CastSpellInstant (a creature's portal summon at its death).
 START_EVENT, CAST_INSTANT = 23, 19
+# CastSpell, and TeleportTarget: the one it is run for moved to its position (EmoteType.cs).
+CAST_SPELL, TELEPORT = 14, 99
 # GameEventState.On: an event the server starts with (EventManager.cs:55-57).
 EVENT_ON = 4
 QUEST_OK, QUEST_NO, TEST_OK, TEST_NO, GOTO_SET = 12, 13, 22, 23, 32
@@ -89,7 +91,10 @@ class Data:
             s["acts"].append({"type": int(f[2]), "msg": f[3], "min": f[4], "max": f[5],
                               "amount": f[6], "amount64": f[7], "percent": f[8], "min64": f[9],
                               "max64": f[10], "stat": f[11], "wcid": f[12], "stack": f[13],
-                              "spell": int(num(f[14])) if len(f) > 14 else 0})
+                              "spell": int(num(f[14])) if len(f) > 14 else 0,
+                              "cell": f[15] if len(f) > 18 else "",
+                              "at": tuple(f[16:19]) if len(f) > 18 else (),
+                              "delay": num(f[19]) if len(f) > 19 else 0.0})
         self.harm = {int(i) for (i,) in rows(dump, "harm")}
         # The scrolls teaching each spell: spell -> scroll wcids.
         self.scrolls_of = defaultdict(list)
@@ -183,8 +188,9 @@ class Data:
         self.gen_event = {int(g): (name, int(state)) for g, name, state in rows(dump, "genevent")}
         self.summon_link = {int(i): int(link) for i, link in rows(dump, "summonspell")}
         self.link_portal = {}
-        for obj, t, portal, cell, x, y, z in rows(dump, "linkportal"):
-            self.link_portal[(int(obj), int(t))] = (int(portal), int(cell, 16), x, y, z)
+        for obj, t, portal, cell, x, y, z, lo, hi, quest in rows(dump, "linkportal"):
+            self.link_portal[(int(obj), int(t))] = (int(portal), int(cell, 16), x, y, z,
+                                                    int(lo), int(hi), quest)
         self.event_name = {}
         self.starts, self.summons, self.stamps = event_starts(self)
 
@@ -761,6 +767,57 @@ def event_starts(data):
                     elif a["type"] == STAMP and kind == "kill" and a["msg"]:
                         stamps[a["msg"].lower()].add(obj)
     return starts, summons, stamps
+
+
+def way_of(data, obj, effects):
+    """Where a path's effects send whoever it runs for, and the seconds of its emotes' delays till
+    then (each before its action: EmoteManager.cs): a portal its owner summons ((portal, cell, x,
+    y, z, min level, max level, flag), secs) or a teleport ((0, cell, x, y, z, 0, 0, ""), secs)."""
+    secs = 0.0
+    for a in effects:
+        secs += a["delay"]
+        if a["type"] == TELEPORT and a["cell"]:
+            return (0, int(a["cell"], 16)) + a["at"] + (0, 0, ""), secs
+        if a["type"] in (CAST_SPELL, CAST_INSTANT) and a["spell"] in data.summon_link:
+            did = 31 if data.summon_link[a["spell"]] <= 1 else 48
+            if (obj, did) in data.link_portal:
+                return data.link_portal[(obj, did)], secs
+    return None
+
+
+def npc_ways(data, never):
+    """Each way a placed NPC opens for whoever hands it an item or uses it: a portal it summons
+    (Faladha the Emissary's to Aerlinthe for a 10,000 note) or a teleport. Rows: npc, name, cell,
+    x, y, z, item handed (0: a use), flags held first, level band (0: open), portal (0: a teleport),
+    to cell, x, y, z, seconds of emote delays first. Paths asking what the client cannot read, a
+    wait or a kill count are out."""
+    out = set()
+    for obj, places in sorted(data.placed.items()):
+        for root in data.by_obj.get(obj, ()):
+            if root["cat"] not in (GIVE, USE) or (root["cat"] == GIVE and not root["wcid"]):
+                continue
+            for branches, effects in walk(data, root):
+                found = way_of(data, obj, effects)
+                if found is None:
+                    continue
+                way, secs = found
+                r = read_path(data, root, branches, effects, never)
+                if r["unread"] or r["kill"] or r["timer"] or r["start"] or r["unneeds"]:
+                    continue
+                if r.get("waiting") or len(r["items"]) > (root["cat"] == GIVE):
+                    continue
+                portal, cell, x, y, z, lo, hi, flag = way
+                band_lo = max(r["band"][0], lo)
+                band_hi = min(h for h in (r["band"][1], hi, MAX_LEVEL) if h)
+                if band_hi >= MAX_LEVEL:
+                    band_hi = 0
+                needs = sorted(set(r["needs"]) | ({flag.lower()} if flag else set()))
+                item = root["wcid"] if root["cat"] == GIVE else 0
+                for pc, px, py, pz in places:
+                    out.add((str(obj), data.name.get(obj, ""), "%08X" % pc, px, py, pz, str(item),
+                             ";".join(needs), str(band_lo), str(band_hi), str(portal),
+                             "%08X" % cell, x, y, z, "%g" % round(secs, 1)))
+    return sorted(out)
 
 
 def xp_of(effects):
@@ -1398,12 +1455,20 @@ def main():
               newline="") as f:
         f.write(SOURCES_HEADER)
         write_rows(f, src_out)
+    ways = npc_ways(data, asked - stamped)
+    summoned = {(c,) + w for c, w in data.summons.items()}
+    summoned |= {(int(r[0]),) + data.link_portal[(int(r[0]), d)]
+                 for r in ways if r[10] != "0" for d in (31, 48)
+                 if data.link_portal.get((int(r[0]), d), (0,))[0] == int(r[10])}
     with open(os.path.join(out_dir, "summoned_portals.csv"), "w", encoding="utf-8",
               newline="") as f:
         f.write(SUMMONS_HEADER)
         write_rows(f, [(str(c), data.name.get(c, ""), str(p), data.name.get(p, ""),
-                        "%08X" % cell, x, y, z)
-                       for c, (p, cell, x, y, z) in sorted(data.summons.items())])
+                        "%08X" % cell, x, y, z, str(lo), str(hi), quest)
+                       for c, p, cell, x, y, z, lo, hi, quest in sorted(summoned)])
+    with open(os.path.join(out_dir, "npc_ways.csv"), "w", encoding="utf-8", newline="") as f:
+        f.write(NPC_WAYS_HEADER)
+        write_rows(f, ways)
     with open(os.path.join(out_dir, "pickups.csv"), "w", encoding="utf-8", newline="") as f:
         f.write(PICKUPS_HEADER)
         write_rows(f, pickup_rows(data))
@@ -1487,9 +1552,21 @@ SOURCES_HEADER = """\
 """
 
 SUMMONS_HEADER = """\
-# Portals a creature's death opens: its death emote casts a portal summon (WorldObject_Magic.cs:
-# 1185-1266) of its linked portal, 3 m in front of it, for the spell's lifetime.
-# creature_wcid,creature,portal_wcid,portal,to_cell,to_x,to_y,to_z (local to the cell's landblock)
+# Portals a creature's death, or an NPC handed an item or used, opens: its emote casts a portal
+# summon (WorldObject_Magic.cs:1185-1266) of its linked portal, 3 m in front of it, for the
+# spell's lifetime.
+# by_wcid,by,portal_wcid,portal,to_cell,to_x,to_y,to_z,min_level,max_level,quest
+# (x/y/z local to the cell's landblock; the portal's own level band and flag, 0 and blank: none)
+# Regenerate with reference/scripts/data/quests.sh.
+"""
+
+NPC_WAYS_HEADER = """\
+# Ways a placed NPC opens for whoever hands it an item or uses it: a portal it summons in front
+# of it (Faladha the Emissary's to Aerlinthe, for a 10,000 note) or a teleport (EmoteType 99).
+# npc_wcid,npc,cell,x,y,z,item,needs,min_level,max_level,portal_wcid,to_cell,to_x,to_y,to_z,secs
+# item: what is handed, 0 for a use. needs: flags held first, ;-separated. Level band 0: open.
+# portal_wcid 0: a teleport. x/y/z local to the cell's landblock. secs: the NPC's emote delays
+# before the portal is summoned or the teleport made.
 # Regenerate with reference/scripts/data/quests.sh.
 """
 

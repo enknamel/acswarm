@@ -139,6 +139,18 @@ pub enum Step {
         mouth: Place,
         exit: Place,
     },
+    /// Walk to this NPC, hand it `item` (or use it), and come out at `exit`: through the portal
+    /// it summons in front of it, or carried there (a teleport).
+    Npc {
+        npc: u32,
+        name: String,
+        item: Option<u32>,
+        portal: Option<u32>,
+        /// Seconds of the NPC's emotes before the way opens.
+        secs: f32,
+        mouth: Place,
+        exit: Place,
+    },
     /// Stand still, cast this spell, and come out at its destination.
     Recall {
         spell: u32,
@@ -152,7 +164,10 @@ impl Step {
     pub fn end(&self) -> Place {
         match self {
             Step::Walk(p) => *p,
-            Step::Portal { exit, .. } | Step::Recall { exit, .. } | Step::Gem { exit, .. } => *exit,
+            Step::Portal { exit, .. }
+            | Step::Npc { exit, .. }
+            | Step::Recall { exit, .. }
+            | Step::Gem { exit, .. } => *exit,
         }
     }
 
@@ -160,17 +175,19 @@ impl Step {
     pub fn exit(&self) -> Option<Place> {
         match self {
             Step::Walk(_) => None,
-            Step::Portal { exit, .. } | Step::Recall { exit, .. } | Step::Gem { exit, .. } => {
-                Some(*exit)
-            }
+            Step::Portal { exit, .. }
+            | Step::Npc { exit, .. }
+            | Step::Recall { exit, .. }
+            | Step::Gem { exit, .. } => Some(*exit),
         }
     }
 
-    /// Where the step walks to: a walk's place, a portal's mouth; a recall or gem walks nowhere.
+    /// Where the step walks to: a walk's place, a portal's mouth, an NPC's spot; a recall or gem
+    /// walks nowhere.
     pub fn walk_end(&self) -> Option<Place> {
         match self {
             Step::Walk(p) => Some(*p),
-            Step::Portal { mouth, .. } => Some(*mouth),
+            Step::Portal { mouth, .. } | Step::Npc { mouth, .. } => Some(*mouth),
             Step::Recall { .. } | Step::Gem { .. } => None,
         }
     }
@@ -486,10 +503,11 @@ pub fn plan_with_recalls_and_gems(
 }
 
 /// What a trip may take besides the fixed portals: portals standing in view for a while (one a
-/// creature's death opened: `portals::Summoned`).
+/// creature's death opened: `portals::Summoned`), and NPCs that open a way, their item had.
 #[derive(Clone, Debug, Default)]
 pub struct Ways {
     pub portals: Vec<Portal>,
+    pub npcs: Vec<portals::NpcWay>,
 }
 
 /// [`plan_with_recalls_and_gems`], the portals of `ways` taken too.
@@ -534,15 +552,25 @@ pub fn plan_with_ways(
     let flag_asked = |p: &&Portal| {
         prefs.flag_seconds.is_some() && p.usable_by(level, std::slice::from_ref(&p.quest))
     };
+    let npc_portals: Vec<Portal> = ways.npcs.iter().map(portals::NpcWay::as_portal).collect();
     let usable: Vec<&Portal> = portals::all()
         .iter()
         .chain(&ways.portals)
+        .chain(&npc_portals)
         .filter(|p| p.works() && p.admits(prefs.who))
         .filter(|p| flags_held(p) || flag_asked(p))
         .filter(|p| !avoid.iter().any(|a| a.distance(p.from_xy()) < 2.0))
         .filter(|p| p.exit_outdoors() || has_portal.contains(&(p.to_cell & 0xFFFF_0000)))
         .collect();
     let portals = &usable[..];
+    // Which NPC way each usable portal stands for: it is a step of its own.
+    let npc_of: Vec<Option<&portals::NpcWay>> = portals
+        .iter()
+        .map(|p| {
+            let i = npc_portals.iter().position(|n| std::ptr::eq(n, *p))?;
+            ways.npcs.get(i)
+        })
+        .collect();
     let flag_cost: Vec<f32> = portals
         .iter()
         .map(|p| match flags_held(p) {
@@ -678,10 +706,21 @@ pub fn plan_with_ways(
         steps.push(match how {
             Edge::Portal(pi) => {
                 let p: &Portal = portals[pi];
-                Step::Portal {
-                    name: p.name.clone(),
-                    mouth: mouth_of(p),
-                    exit: exit_of(p),
+                match npc_of[pi] {
+                    Some(n) => Step::Npc {
+                        npc: n.npc,
+                        name: n.name.clone(),
+                        item: n.item,
+                        portal: n.portal,
+                        secs: n.secs,
+                        mouth: mouth_of(p),
+                        exit: exit_of(p),
+                    },
+                    None => Step::Portal {
+                        name: p.name.clone(),
+                        mouth: mouth_of(p),
+                        exit: exit_of(p),
+                    },
                 }
             }
             Edge::Recall(ri) => {
@@ -1215,6 +1254,7 @@ mod tests {
         };
         let standing = Ways {
             portals: vec![summoned.standing_at(0xB8EB_0016, town + Vec3::new(3.0, 0.0, 0.0))],
+            ..Ways::default()
         };
         let trip = plan(&standing).expect("through the Watchman's portal");
         let first = trip.steps.first();
@@ -1230,6 +1270,40 @@ mod tests {
                     s, Step::Portal { name, .. } if name == "Aerfalle Keep Portal"
                 ))),
             "{without:?}"
+        );
+    }
+
+    #[test]
+    fn aerlinthe_is_reached_from_chalicmere_by_handing_faladha_a_note() {
+        // No fixed portal reaches the island from the mainland: an emissary handed a trade note
+        // summons one (Faladha the Emissary in Chalicmere, a 10,000 note).
+        let island = Place {
+            at: crate::landblock_origin(0xBAE8_001D) + Vec3::new(84.0, 105.0, 26.0),
+            cell: 0xBAE8_001D,
+        };
+        let faladha = portals::npc_ways()
+            .iter()
+            .find(|w| w.name == "Faladha the Emissary" && w.item == Some(2625))
+            .expect("Faladha's way for a 10,000 note")
+            .clone();
+        let ways = Ways {
+            npcs: vec![faladha],
+            ..Ways::default()
+        };
+        // Beside her in Chalicmere, the island an ocean away: the note is the way over.
+        let by = Place {
+            at: ways.npcs[0].at + Vec3::new(10.0, 0.0, 0.0),
+            cell: ways.npcs[0].cell,
+        };
+        let prefs = Prefs::default();
+        let trip = plan_with_ways(by, island, 66, &[], &[], &[], &[], &[], prefs, &ways)
+            .expect("a way to Aerlinthe");
+        assert!(
+            trip.steps.iter().any(|s| matches!(s,
+                Step::Npc { name, item: Some(2625), portal: Some(7413), .. }
+                    if name == "Faladha the Emissary")),
+            "{:?}",
+            trip.steps
         );
     }
 }

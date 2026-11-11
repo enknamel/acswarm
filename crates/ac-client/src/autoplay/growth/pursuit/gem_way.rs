@@ -1,7 +1,8 @@
 //! A portal gem had first when only its exit leads on to a pursued ground: Ithaenc's island has
 //! no portal from the mainland (the Wedding Planner sells the invitation), and Corcima Castle's
-//! wards are reached only by the gems their captains drop. The gem is a wanted item like any
-//! other: bought, hunted or fetched; carried, the trip planner takes it.
+//! wards are reached only by the gems their captains drop. So too what an NPC is handed to open
+//! a way (`portals::npc_ways`: a 10,000 note for Faladha's portal to Aerlinthe). Either is a
+//! wanted item like any other: bought, hunted or fetched; carried, the trip planner takes it.
 
 use ac_world::quests::{Want, Yield};
 use ac_world::trip::Prefs;
@@ -25,9 +26,10 @@ pub(crate) struct GemWanted {
 }
 
 impl Client {
-    /// The gem, not carried, whose exit a journey goes on from to one of `grounds` and that
-    /// something gives: one a shop this character reaches sells first, then one hunted or
-    /// fetched, each the one landing nearest in time; `None` when none does.
+    /// The gem, or item an NPC way takes, not carried, whose exit a journey goes on from to one
+    /// of `grounds` and that something gives: one a shop this character reaches sells first, then
+    /// one hunted or fetched, each the one landing nearest in time; `None` when none does. An NPC
+    /// way's time counts the journey to its NPC too.
     pub(super) fn gem_way(
         &mut self,
         grounds: &[(u32, Place)],
@@ -36,24 +38,52 @@ impl Client {
         let here = self.my_position()?.truncate();
         let level = self.world.stats.level.max(1) as u32;
         let goals: Vec<Place> = grounds.iter().map(|g| self.planning_place(g.1)).collect();
-        // (hunted or fetched, seconds on from the exit), the gem
+        // Each way an item opens: the item, its name, where it lands, and the journey first.
+        let mut ways: Vec<(u32, String, Place, f32)> = ac_world::gems::all()
+            .iter()
+            .map(|g| {
+                (
+                    g.wcid,
+                    g.name.clone(),
+                    Place {
+                        at: g.at,
+                        cell: g.cell,
+                    },
+                    0.0,
+                )
+            })
+            .collect();
+        let npcs = ac_world::portals::npc_ways()
+            .iter()
+            .filter(|w| w.usable_by(level, quests) && !self.is_npc_way_refused(w.npc));
+        for w in npcs.collect::<Vec<_>>() {
+            let Some((item, name)) = w.item.zip(w.item.and_then(item_name)) else {
+                continue;
+            };
+            let npc = Place {
+                at: w.at,
+                cell: w.cell,
+            };
+            if let Some(t) = self.journey_plan(npc, quests) {
+                let exit = Place {
+                    at: w.to,
+                    cell: w.to_cell,
+                };
+                ways.push((item, name, exit, t.seconds));
+            }
+        }
+        // (hunted or fetched, seconds on from the exit), the item
         let mut best: Option<((bool, f32), GemWanted)> = None;
-        for gem in ac_world::gems::all() {
-            if self.carried_count(gem.wcid) > 0 {
+        for (wcid, name, exit, first) in ways {
+            if self.carried_count(wcid) > 0 {
                 continue;
             }
-            let want = Want::Item(gem.wcid);
-            let sold = ac_world::shops::selling_wcid(gem.wcid, here)
-                .into_iter()
-                .next();
+            let want = Want::Item(wcid);
+            let sold = ac_world::shops::selling_wcid(wcid, here).into_iter().next();
             let given = ac_world::quests::sources_of(&want).any(|s| s.kind != Yield::Vendor);
             if sold.is_none() && !given {
                 continue;
             }
-            let exit = Place {
-                at: gem.at,
-                cell: gem.cell,
-            };
             let prefs: Prefs = self.travel_prefs().in_dungeon(exit.is_indoors());
             let on = goals
                 .iter()
@@ -72,7 +102,9 @@ impl Client {
                 })
                 .map(|t| t.seconds)
                 .min_by(f32::total_cmp);
-            let Some(secs) = on else { continue };
+            let Some(secs) = on.map(|s| s + first) else {
+                continue;
+            };
             // A shop reached buys it on a run; else it is hunted or fetched.
             let bought = sold.is_some_and(|shop| {
                 let counter = Place {
@@ -93,8 +125,8 @@ impl Client {
             }
             let wanted = GemWanted {
                 quest: String::new(),
-                wcid: gem.wcid,
-                name: gem.name.clone(),
+                wcid,
+                name,
                 had: false,
             };
             best = Some((key, wanted));
@@ -218,4 +250,20 @@ pub(super) fn gem_entries(gem: &GemWanted, who: &str) -> (Rule, Option<Buy>) {
         ..b
     });
     (rule, buy)
+}
+
+/// An item's name, as a shop or a quest source has it.
+fn item_name(wcid: u32) -> Option<String> {
+    let sold = ac_world::shops::all()
+        .iter()
+        .flat_map(|s| &s.sells)
+        .find(|w| w.wcid == wcid)
+        .map(|w| w.name.clone());
+    sold.or_else(|| {
+        let want = Want::Item(wcid);
+        let named = ac_world::quests::all().iter().find(|r| r.want == want);
+        named
+            .and_then(|r| r.item.as_ref())
+            .map(|i| i.name.to_string())
+    })
 }

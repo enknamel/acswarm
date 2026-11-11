@@ -1,38 +1,54 @@
-# Portals a creature's death opens: its death emote casts a portal summon (WorldObject_Magic.cs:
-# 1185-1266) of its linked portal, 3 m in front of it, for the spell's lifetime.
-# creature_wcid,creature,portal_wcid,portal,to_cell,to_x,to_y,to_z (local to the cell's landblock)
+# Portals a creature's death, or an NPC handed an item or used, opens: its emote casts a portal
+# summon (WorldObject_Magic.cs:1185-1266) of its linked portal, 3 m in front of it, for the
+# spell's lifetime.
+# by_wcid,by,portal_wcid,portal,to_cell,to_x,to_y,to_z,min_level,max_level,quest
+# (x/y/z local to the cell's landblock; the portal's own level band and flag, 0 and blank: none)
 # Regenerate with reference/scripts/data/quests.sh.
-7348,Lesser Acolyte,7343,Soul-Fearing Vestry Dungeon (Area 2),02EF0244,160,-150,-6
-7349,Lesser Acolyte,7344,Soul-Fearing Vestry Dungeon (Area 3),02EF0254,180,-110,-6
-7350,High Acolyte,7347,Soul-Fearing Vestry Dungeon (Area 4),02EF028E,30,-70,0
-7372,Relic Watchman,7417,Aerfalle Keep Portal,01F50229,50,-180,0
-10956,Virindi Observer,10983,Habitat Tower Portal,029302B4,80,-59.6,0.1
-21383,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18
-21386,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18
-21388,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18
-21390,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18
-22001,Coral Golem Viceroy,21403,Citadel Valley,BCC7000C,35,85,95
-22002,Diamond Golem Suzerain,21406,Citadel Valley,BBC80012,60,35,120
-22003,Glacial Golem Margrave,21405,Citadel Valley,BBC60026,105,130,90
-22004,Magma Golem Exarch,21404,Citadel Valley,BAC7001A,76.66,43.87,160
-22598,Mowen Udaun,22705,Antechamber,5E430109,120,-33.23,0
-24856,Harbinger,24861,Surface,B96F0025,118.81,116.08,10.01
-24857,Harbinger,24863,Surface,B96F0025,118.81,116.08,10.01
-27427,Shadow Nightmare Leader,27560,Consumed Wraith's Tower,1F2A0035,151.1,102.9,200
-27428,Shadow Phantom Leader,27559,Second Tower,1F290008,7.5,175.1,148
-30834,Shadow Lugian Portal,30844,Purple Portal Template,1A8E010A,-332.11,-14.92,88.4
-31876,Bur Lizk,70099,Water Island Access,1E090007,1.94,157.72,48.01
-33231,Harbinger,71240,Surface,B96F0025,118.81,116.08,10.01
-33536,Dark Crystal Spire,70110,Dark Isle,C8E9000B,38.07,60.31,0.34
-36178,Harbinger,87777,Surface,B96F0025,118.81,116.08,10.01
-43262,Apostate Nexus Guardian,87499,Gateway,F93B0413,179.05,91.2,-45.99
-46928,Obsidian Golem Noble,21406,Citadel Valley,BBC80012,60,35,120
-46930,Gaerlan,72890,Gaerlan's Inner Sanctum,58540106,10,-20,18
-51700,Apparition of Spite,72098,Gateway,58780158,300.92,-328.69,-59.99
-51701,Apparition of Bloodlust,72095,Gateway,5878029F,130,-350,-17.9
-51702,Apparition of Envy,72097,Gateway,5878014A,170,-240,-59.9
-51703,Apparition of Apathy,72096,Gateway,58780206,290,-20,-35.9
-71239,Harbinger,71240,Surface,B96F0025,118.81,116.08,10.01
-72530,Spectral Samurai Daimyo,72533,Enchanted Mnemosyne Portal 1,654C0677,90,-230,0
-72531,Spectral Samurai Daimyo,72534,Enchanted Mnemosyne Portal 2,654C0677,160,-230,0
-72532,Spectral Samurai Daimyo,72535,Enchanted Mnemosyne Portal 3,654C065D,20,-230,0
+4201,Drunken Madman,4203,Walled Portals,2264000D,36.3,96.9,120,0,0,
+4201,Drunken Madman,23772,Ulgrim's Island Portal,73080018,71.1,179,12,0,0,
+4202,Grilhud the Hermit,4148,Northwest Direlands,147C0014,54,77.8,150,0,0,
+5763,Tazal al-Ashfai,5667,Mage Academy Portal,01390396,40,-60,6,150,0,
+5874,Mairisa bint Fuda,5875,Gateway,86CE0014,69,89.43,251.71,20,0,
+7348,Lesser Acolyte,7343,Soul-Fearing Vestry Dungeon (Area 2),02EF0244,160,-150,-6,0,0,
+7349,Lesser Acolyte,7344,Soul-Fearing Vestry Dungeon (Area 3),02EF0254,180,-110,-6,0,0,
+7350,High Acolyte,7347,Soul-Fearing Vestry Dungeon (Area 4),02EF028E,30,-70,0,0,0,
+7372,Relic Watchman,7417,Aerfalle Keep Portal,01F50229,50,-180,0,0,0,
+7402,Garaena the Emissary,7413,Aerlinthe Island Portal,BAE8001D,84,105,26,40,0,
+7403,Faladha the Emissary,7413,Aerlinthe Island Portal,BAE8001D,84,105,26,40,0,
+10737,Director's Majordomo,10732,Director's Chambers Portal,02940101,0,-70,0,32,0,
+10956,Virindi Observer,10983,Habitat Tower Portal,029302B4,80,-59.6,0.1,30,0,
+12262,Ecorto the Lost Director,12292,Seat of the New Singularity,039E02FA,122.4,-897.3,1.5,55,0,
+21383,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18,0,0,
+21386,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18,0,0,
+21388,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18,0,0,
+21390,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18,0,0,
+22001,Coral Golem Viceroy,21403,Citadel Valley,BCC7000C,35,85,95,0,0,
+22002,Diamond Golem Suzerain,21406,Citadel Valley,BBC80012,60,35,120,0,0,
+22003,Glacial Golem Margrave,21405,Citadel Valley,BBC60026,105,130,90,0,0,
+22004,Magma Golem Exarch,21404,Citadel Valley,BAC7001A,76.66,43.87,160,0,0,
+22598,Mowen Udaun,22705,Antechamber,5E430109,120,-33.23,0,0,0,
+24856,Harbinger,24861,Surface,B96F0025,118.81,116.08,10.01,0,0,
+24857,Harbinger,24863,Surface,B96F0025,118.81,116.08,10.01,0,0,
+27427,Shadow Nightmare Leader,27560,Consumed Wraith's Tower,1F2A0035,151.1,102.9,200,0,0,
+27428,Shadow Phantom Leader,27559,Second Tower,1F290008,7.5,175.1,148,0,0,
+30834,Shadow Lugian Portal,30844,Purple Portal Template,1A8E010A,-332.11,-14.92,88.4,80,0,
+31876,Bur Lizk,70099,Water Island Access,1E090007,1.94,157.72,48.01,0,0,
+33231,Harbinger,71240,Surface,B96F0025,118.81,116.08,10.01,0,0,
+33536,Dark Crystal Spire,70110,Dark Isle,C8E9000B,38.07,60.31,0.34,150,0,
+33913,White Totem Gateway,87623,White Totem Temple,009A02CE,40,-500,0,0,0,
+33914,Black Totem Gateway,87617,Black Totem Temple,009901E1,110,-200,0,0,0,
+35177,Crystal Array,87405,Ritual Chambers,00E401DE,30,-100,0,0,0,
+36178,Harbinger,87777,Surface,B96F0025,118.81,116.08,10.01,0,0,
+36926,Shade of Dule,87039,Shade of Dule Portal,00A701CF,10,-50,48.01,130,0,
+42618,Merkitz ibn'Akadh,70714,Direlands Gear Knight Resistance Camp,21700031,145.51,14.37,178.01,150,0,
+43262,Apostate Nexus Guardian,87499,Gateway,F93B0413,179.05,91.2,-45.99,0,0,
+46928,Obsidian Golem Noble,21406,Citadel Valley,BBC80012,60,35,120,0,0,
+46930,Gaerlan,72890,Gaerlan's Inner Sanctum,58540106,10,-20,18,0,0,
+51700,Apparition of Spite,72098,Gateway,58780158,300.92,-328.69,-59.99,180,0,
+51701,Apparition of Bloodlust,72095,Gateway,5878029F,130,-350,-17.9,180,0,
+51702,Apparition of Envy,72097,Gateway,5878014A,170,-240,-59.9,180,0,
+51703,Apparition of Apathy,72096,Gateway,58780206,290,-20,-35.9,180,0,
+71239,Harbinger,71240,Surface,B96F0025,118.81,116.08,10.01,0,0,
+72530,Spectral Samurai Daimyo,72533,Enchanted Mnemosyne Portal 1,654C0677,90,-230,0,200,0,
+72531,Spectral Samurai Daimyo,72534,Enchanted Mnemosyne Portal 2,654C0677,160,-230,0,200,0,
+72532,Spectral Samurai Daimyo,72535,Enchanted Mnemosyne Portal 3,654C065D,20,-230,0,200,0,

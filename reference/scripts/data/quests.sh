@@ -1,6 +1,8 @@
 #!/bin/sh
-# Regenerate crates/ac-world/data/quests.csv, quest_givers.csv and
-# quest_sources.csv: every quest a placed NPC holds, XP or not (each path
+# Regenerate crates/ac-world/data/quests.csv, quest_givers.csv,
+# quest_sources.csv, summoned_portals.csv and npc_ways.csv (the portals and
+# teleports an NPC opens for an item handed or a use): every quest a placed
+# NPC holds, XP or not (each path
 # that does anything for the character), what each asks and does, what
 # the client cannot check, where its givers stand, and where what it asks
 # comes from.
@@ -66,7 +68,8 @@ q action 'select a.emote_Id, a.order, a.type, coalesce(a.message, ""), coalesce(
   coalesce(a.max, ""), coalesce(a.amount, ""), coalesce(a.amount_64, ""),
   coalesce(a.percent, ""), coalesce(a.min_64, ""), coalesce(a.max_64, ""),
   coalesce(a.stat, ""), coalesce(a.weenie_Class_Id, ""), coalesce(a.stack_Size, ""),
-  coalesce(a.spell_Id, "")
+  coalesce(a.spell_Id, ""), coalesce(hex(a.obj_Cell_Id), ""), coalesce(round(a.origin_X, 2), ""),
+  coalesce(round(a.origin_Y, 2), ""), coalesce(round(a.origin_Z, 2), ""), coalesce(a.delay, 0)
 from weenie_properties_emote_action a
 where a.emote_Id in (select id from weenie_properties_emote
   where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select
@@ -86,9 +89,13 @@ left join event e on e.name = s.value where s.type = 34 and s.value <> "";'
 q summonspell 'select id, link from spell where name like "Summon % Portal%" and link in (1, 2);'
 
 q linkportal 'select d.object_Id, d.type, d.value, hex(p.obj_Cell_Id), round(p.origin_X, 2),
-  round(p.origin_Y, 2), round(p.origin_Z, 2)
+  round(p.origin_Y, 2), round(p.origin_Z, 2), coalesce(lo.value, 0), coalesce(hi.value, 0),
+  coalesce(q.value, "")
 from weenie_properties_d_i_d d
 join weenie_properties_position p on p.object_Id = d.value and p.position_Type = 2
+left join weenie_properties_int lo on lo.object_Id = d.value and lo.type = 86
+left join weenie_properties_int hi on hi.object_Id = d.value and hi.type = 87
+left join weenie_properties_string q on q.object_Id = d.value and q.type = 37
 where d.type in (31, 48);'
 
 # Spells that hurt whoever they land on: a vital lowered (boost), a bolt (base_Intensity) or a

@@ -1,0 +1,75 @@
+# Ways a placed NPC opens for whoever hands it an item or uses it: a portal it summons in front
+# of it (Faladha the Emissary's to Aerlinthe, for a 10,000 note) or a teleport (EmoteType 99).
+# npc_wcid,npc,cell,x,y,z,item,needs,min_level,max_level,portal_wcid,to_cell,to_x,to_y,to_z,secs
+# item: what is handed, 0 for a use. needs: flags held first, ;-separated. Level band 0: open.
+# portal_wcid 0: a teleport. x/y/z local to the cell's landblock. secs: the NPC's emote delays
+# before the portal is summoned or the teleport made.
+# Regenerate with reference/scripts/data/quests.sh.
+10737,Director's Majordomo,0298010F,200,-440,-17.97,10731,,32,0,10732,02940101,0,-70,0,1
+12262,Ecorto the Lost Director,7F900000,101.8,110.1,143.06,12271,,55,0,12292,039E02FA,122.4,-897.3,1.5,6
+22500,Oolutanga; the Tusker King,5F4401A2,233.46,-93.5,0.02,0,spokenbobo;tuskerhelm,0,0,0,F682002B,138.57,56.92,58.01,1
+33913,White Totem Gateway,42EC001F,84,156,4,33884,,0,0,87623,009A02CE,40,-500,0,0
+33914,Black Totem Gateway,090B0002,12,36,16,33885,,0,0,87617,009901E1,110,-200,0,0
+33915,Abyssal Totem Gateway,C7EB0005,12,108,0,0,abyssaltotemgatewayflag,0,0,0,009801BC,10,-540,0,0
+33915,Abyssal Totem Gateway,C7EB0005,12,108,0,33886,,0,0,0,009801BC,10,-540,0,0
+34593,Portal to Bur,A5D30026,107.5,132,405.94,0,burflagged(permanent),0,0,0,009C0247,160,-70,-18,0
+35177,Crystal Array,00E5018D,89.95,-204.9,-78,0,,0,0,87405,00E401DE,30,-100,0,0
+35478,Kresovus' Lockbox,A21E001C,76.01,84,610,0,aerbaxsprodigallugian_repeat;aerbaxsprodigallugian_start,0,0,0,009F010B,100,-38.01,-53.99,0
+35478,Kresovus' Lockbox,A21E001C,76.01,84,610,0,totheartenergycagedown,0,0,0,009F010B,100,-38.01,-53.99,0
+36007,Statue of Bael'Zharon; the Hopeslayer,65480140,90,-136.41,-77.94,35994,,0,0,0,00E6040B,130,-100,0,0
+36012,Statue of Bael'Zharon; the Hopeslayer,09050003,12.04,69.85,88.06,0,prodigalshadowflag,0,0,0,00E60422,190,-50,0,0
+36780,Quiddity Seed,5E450229,42.29,-170.74,-6,0,,130,0,0,01EE02BA,15.82,-166.95,-41.99,0
+36925,Ithaenc Quiddity Seed,F4180009,34,6,181.9,0,quiddityseedquestflag,0,0,0,00A702AA,277.06,-60.48,72,0
+36926,Shade of Dule,00A70249,180,-60,54.01,36924,,130,0,87039,00A701CF,10,-50,48.01,0
+37094,Southern Resonating Crystal,B93D0035,156,108,54.06,0,southernresonatingcrystalflag,0,0,0,00EC0120,110,-210,0,0
+37094,Southern Resonating Crystal,B93D0035,156,108,54.06,37091,,0,0,0,00EC0120,110,-210,0,0
+37095,Northern Resonating Crystal,A8BF000F,36,156,86.06,0,northernresonatingcrystalflag,0,0,0,00EC0147,270,-180,0,0
+37095,Northern Resonating Crystal,A8BF000F,36,156,86.06,37090,,0,0,0,00EC0147,270,-180,0,0
+37169,Master's Sentinel,96DC001F,93.53,163.31,302.6,0,mastersealturnedin,0,0,0,00D80228,10.07,-239.62,0,1
+37169,Master's Sentinel,96DC001F,93.53,163.31,302.6,37168,,0,0,0,00D80228,10.07,-239.62,0,1
+40810,Apostate Nexus Gateway,0110028A,40,-140,12.06,0,apostatenexusflag,0,0,0,7F0202A6,70,-510,18,0
+4201,Drunken Madman,CB3D0000,136.57,26.74,176.01,23126,,0,0,23772,73080018,71.1,179,12,8.5
+4201,Drunken Madman,CB3D0000,136.57,26.74,176.01,2468,,0,0,4203,2264000D,36.3,96.9,120,5
+4202,Grilhud the Hermit,A98E0100,105.94,51.24,19.66,4206,,0,0,4148,147C0014,54,77.8,150,5
+42618,Merkitz ibn'Akadh,934B000B,24.91,49.36,14.12,20630,,150,0,70714,21700031,145.51,14.37,178.01,0
+43788,Dark Cavern,73ED0101,154.96,47.11,70.74,0,deewainbossroomflag,180,0,0,7E030865,409.32,-62.07,6.01,0
+43986,Menhir,8B64000A,31.53,35.87,10.44,0,ritualtimestarted_0411,0,0,0,5652038A,69.92,-158.95,0,0
+44308,Ancient Portal,88650032,155.8,33.23,-0.06,0,sandminione_canenter_0511,180,0,0,57540261,80,-130,0,0
+44309,Ancient Portal,8865003D,172.94,101.88,19.65,0,sandminitwo_canenter_0511,180,0,0,57540302,130,-30,0,0
+44310,Ancient Portal,8865003F,176.58,154.9,-0.06,0,sandminithree_canenter_0511,180,0,0,57540313,130,-80,0,0
+44311,Ancient Portal,88650035,158.75,105.26,-0.06,0,sandminifour_canenter_0511,180,0,0,57540322,130,-130,0,0
+44434,Summoning Cave,F75A0101,50.58,182.03,14.74,0,summoningcavedule,0,0,0,57610218,60,-106.46,0.01,0
+44434,Summoning Cave,F75A0101,50.58,182.03,14.74,0,summoningcaverhan,0,0,0,575E0218,60,-106.46,0,0
+44650,Shadow Vortex,F65C0033,146.63,62.64,19.94,0,shadowvortexdule,0,0,0,57620149,29.84,-109.31,0.01,0
+45124,Entry to the Oubliette,8C03015F,110,-110,-6.21,0,,0,0,0,5764031E,0,-30,24,0
+45126,Deeper into the Oubliette,576402E0,0,-30,17.79,0,,0,0,0,576402A2,0,-30,12.01,0
+45128,Deeper into the Oubliette,57640287,30,0,5.79,0,,0,0,0,57640249,30,0,0.01,0
+45130,Deeper into the Oubliette,576401A2,30,-30,-18.21,0,,0,0,0,57640163,30,-30,-24,0
+45131,Exit from the Oubliette,5764031E,2.5,-32.5,23.79,0,,0,0,0,8C030137,100,-110,-5.99,0
+45132,Up to the Previous Level,5764030F,32,-32,17.79,0,,0,0,0,5764031E,0,-30,24,0
+45133,Up to the Previous Level,576402A2,2,-32,11.79,0,,0,0,0,5764030F,30,-30,18,0
+45134,Up to the Previous Level,57640280,22,-22,5.79,0,,0,0,0,576402A2,0,-30,12.01,0
+45135,Up to the Previous Level,57640249,28,2,-0.21,0,,0,0,0,57640280,20,-20,6.01,0
+45136,Up to the Previous Level,576401E0,2,2,-6.21,0,,0,0,0,57640249,30,0,0.01,0
+45137,Up to the Previous Level,57640163,32,-32,-24.21,0,,0,0,0,576401E0,0,0,-5.99,0
+48857,Mysterious Hatch,4CE30104,29.91,28.85,60,0,defeathoshinokeistarted_0113,180,0,0,654C0666,30,-330,0.01,0
+48858,Mysterious Hatch,4CE10124,131.99,138.1,53.5,0,defeathoshinokeistarted_0113,200,0,0,654C06A7,150,-330,0.01,0
+48859,Mysterious Hatch,4AE1010C,102.47,39.24,60,0,defeathoshinokeistarted_0113,200,0,0,654C0681,90,-330,0.01,0
+48875,Mysterious Hatch,4BE20014,63.54,85.88,172.09,0,hoshinomnemosynesdone,200,0,0,654D0593,150,-170,0.01,0
+52253,Altar,58660124,120,-100,0,0,,0,0,0,58660112,24.92,-125.39,0.05,0
+5763,Tazal al-Ashfai,83870000,148.63,3.55,154.01,5655,,150,0,5667,01390396,40,-60,6,8
+5874,Mairisa bint Fuda,49B60000,27.8,181.27,238.9,5883,,20,0,5875,86CE0014,69,89.43,251.71,7
+7402,Garaena the Emissary,2D110000,82.69,171.34,56.01,2626,,40,0,7413,BAE8001D,84,105,26,7
+7402,Garaena the Emissary,2D110000,82.69,171.34,56.01,2627,,40,0,7413,BAE8001D,84,105,26,9
+7403,Faladha the Emissary,376A0000,145.79,45.49,34.01,2625,,40,0,7413,BAE8001D,84,105,26,7
+7403,Faladha the Emissary,376A0000,145.79,45.49,34.01,2626,,40,0,7413,BAE8001D,84,105,26,7
+7403,Faladha the Emissary,376A0000,145.79,45.49,34.01,2627,,40,0,7413,BAE8001D,84,105,26,7
+88210,Sanctum Guardian Spirit,8A630438,-104,209,-25.59,0,sanctumguardiankilltask_completed,0,0,0,8A63024E,-103.5,208.05,-61.59,0
+88215,Sanctum Guardian Spirit,3150041C,81.77,97.01,-41.29,0,secondsisterstarted_1112,0,0,0,31500338,152,117,-53.6,1
+88364,Door,57680266,257.85,-40,6.05,0,sclavuspresentportaldoor,0,0,0,5768020E,189.7,-190.01,6.11,0
+88431,Aerlinthe Altar,2BF50115,30,-43,0.05,88425,,0,0,0,B6E80100,108,108,2.95,2
+88432,A'mun Altar,2BF50137,240,-43.02,0.05,88426,,0,0,0,8E4F0100,86.34,134.85,16.95,2
+88433,Esper Altar,2BF5011A,30,-203,0.05,88427,,0,0,0,95CC0100,183.14,177.96,172.95,2
+88434,Halaetan Altar,2BF5013C,240,-203,0.05,88428,,0,0,0,2BF4000E,31.96,128.34,69.01,2
+88435,Linvak Altar,2BF50110,20,-373,0.05,88429,,0,0,0,C92E0024,104,87.88,213.23,2
+88436,Obsidian Altar,2BF50141,240,-373,0.05,88430,,0,0,0,312A002C,128.69,87.49,68.95,2

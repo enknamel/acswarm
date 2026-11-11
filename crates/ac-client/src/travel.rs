@@ -21,6 +21,7 @@ use overland::{Corridor, EXIT_REACH};
 
 mod flown;
 mod mouth;
+mod npc_step;
 mod overland;
 mod reaching;
 mod turned_away;
@@ -144,6 +145,8 @@ pub struct Travel {
     /// Gems that did not take us anywhere *on this journey*: left out of
     /// the next plan, like `refused_recalls`.
     refused_gems: Vec<u32>,
+    /// NPCs whose way did not open *on this journey*, by weenie class, like `refused_gems`.
+    refused_npcs: Vec<u32>,
     /// Walks the region planner found no way for *on this journey*, like `refused_recalls`.
     refused_walks: Vec<NoWalk>,
     /// This journey has been carried into another region (a portal, recall or gem): a walk with
@@ -326,6 +329,7 @@ impl Client {
             self.travel.refused.clear();
             self.travel.refused_recalls.clear();
             self.travel.refused_gems.clear();
+            self.travel.refused_npcs.clear();
             self.travel.refused_walks.clear();
             self.travel.hopped = false;
             self.travel.fly_to = self.travel.fly_to.filter(|f| f.distance(xy) <= 1.0);
@@ -359,7 +363,7 @@ impl Client {
                             }
                             // A gem needs nothing of the character but
                             // carrying it, so it can never be refused.
-                            Step::Walk(_) | Step::Recall { .. } | Step::Gem { .. } => None,
+                            _ => None,
                         })
                         .next();
                     match asks {
@@ -469,6 +473,10 @@ impl Client {
                 tracing::info!("travel: step {n} ({name:?}, {does})");
                 self.travel.state.portal_from = Some(block);
             }
+            Step::Npc { name, .. } => {
+                tracing::info!("travel: step {n} (to {name:?}, who opens the way on)");
+                self.travel.state.portal_from = Some(block);
+            }
             Step::Portal { name, mouth, .. } => {
                 tracing::info!(
                     "travel: step {n} (portal {name:?} at {:?} in {:#010x})",
@@ -496,7 +504,7 @@ impl Client {
         self.traveling()
             && matches!(
                 self.travel_step(),
-                Some(Step::Portal { .. } | Step::Gem { .. })
+                Some(Step::Portal { .. } | Step::Gem { .. } | Step::Npc { .. })
             )
     }
 
@@ -744,6 +752,7 @@ impl Client {
         self.travel.refused.clear();
         self.travel.refused_recalls.clear();
         self.travel.refused_gems.clear();
+        self.travel.refused_npcs.clear();
         self.travel.refused_walks.clear();
         self.travel.hopped = false;
         self.travel.goal = None;
@@ -759,7 +768,7 @@ impl Client {
     pub(crate) fn travel_portal(&self) -> Option<(String, Vec2)> {
         match self.travel_step()? {
             Step::Portal { name, mouth, .. } => Some((name.clone(), mouth.at.truncate())),
-            Step::Walk(_) | Step::Recall { .. } | Step::Gem { .. } => None,
+            Step::Walk(_) | Step::Recall { .. } | Step::Gem { .. } | Step::Npc { .. } => None,
         }
     }
 
@@ -767,7 +776,7 @@ impl Client {
     pub(crate) fn travel_recall_spell(&self) -> Option<u32> {
         match self.travel_step()? {
             Step::Recall { spell, .. } => Some(*spell),
-            Step::Walk(_) | Step::Portal { .. } | Step::Gem { .. } => None,
+            Step::Walk(_) | Step::Portal { .. } | Step::Gem { .. } | Step::Npc { .. } => None,
         }
     }
 
@@ -985,6 +994,7 @@ impl Client {
         let refused = std::mem::take(&mut self.travel.refused);
         let refused_recalls = std::mem::take(&mut self.travel.refused_recalls);
         let refused_gems = std::mem::take(&mut self.travel.refused_gems);
+        let refused_npcs = std::mem::take(&mut self.travel.refused_npcs);
         let refused_walks = std::mem::take(&mut self.travel.refused_walks);
         let (goal, owner, hopped) = (self.travel.goal, self.travel.owner, self.travel.hopped);
         let (fly_to, about) = (self.travel.fly_to, self.travel.about_the_ground);
@@ -994,6 +1004,7 @@ impl Client {
         self.travel.refused = refused;
         self.travel.refused_recalls = refused_recalls;
         self.travel.refused_gems = refused_gems;
+        self.travel.refused_npcs = refused_npcs;
         self.travel.refused_walks = refused_walks;
         self.travel.hopped = hopped;
         self.travel.goal = goal;
@@ -1089,7 +1100,9 @@ impl Client {
             return false;
         }
         let gem = matches!(self.travel_step(), Some(Step::Gem { .. }));
-        let portal = self.travel_portal().is_some();
+        // An NPC step ends carried off, as a portal's does, not on reaching the NPC.
+        let npc = matches!(self.travel_step(), Some(Step::Npc { .. }));
+        let portal = self.travel_portal().is_some() || npc;
         let stretch = self.travel.state.stretch;
         match (did, stretch) {
             (Did::Done | Did::Blocked(_), _) if gem => self.travel.state.faced = true,
@@ -1249,6 +1262,8 @@ impl Client {
                 // Finding room for the portal, using the gem, and seeing
                 // that it works. A step to open ground is the only walk.
                 return self.travel_gem_wait(guid, &name, summons, now);
+            } else if let Some(npc @ Step::Npc { .. }) = &step {
+                return self.travel_npc_wait(npc, now);
             }
         }
         if self.replan_if_carried_off(me) {

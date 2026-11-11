@@ -35,8 +35,12 @@ impl Client {
             .map(|s| self.describe_for_sale(s, mine.contains(&s.guid)))
             .collect();
         let mut notes: BTreeMap<u32, u32> = BTreeMap::new();
+        // A note a pursuit wants as a way (handed to an NPC: `portals::npc_ways`) is no money.
+        let ways = self.wanted_gems();
         for o in self.world.inventory() {
-            if o.item_type & ac_world::item_type::PROMISSORY_NOTE != 0 {
+            if o.item_type & ac_world::item_type::PROMISSORY_NOTE != 0
+                && !ways.contains(&o.weenie_class_id)
+            {
                 *notes.entry(o.value / o.stack_size.max(1)).or_insert(0) += o.stack_size.max(1);
             }
         }

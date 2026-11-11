@@ -2092,3 +2092,74 @@ fn a_journey_to_a_spot_out_at_sea_is_refused_before_setting_off() {
     let me = c.my_position().expect("on its feet").truncate();
     assert!(!c.is_at_sea(me));
 }
+
+/// Faladha the Emissary two paces off in Holtburg's field, a 10,000 note carried: her NPC step.
+fn by_faladha() -> (Client, Step) {
+    let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    const NOTE: u32 = 0x8000_0741;
+    crate::testkit::thing_in_the_pack(&mut c, NOTE, "Trade Note (10,000)", 1);
+    c.world.objects.get_mut(&NOTE).unwrap().weenie_class_id = 2625;
+    let at = c.my_position().unwrap() + Vec3::new(2.0, 0.0, 0.0);
+    let mut faladha = crate::testkit::creature(0x5000_0741, "Faladha the Emissary");
+    faladha.weenie_class_id = 7403;
+    faladha.position = crate::testkit::placed(0xA9B4_0019, at);
+    c.world.objects.insert(faladha.guid, faladha);
+    let mouth = c.place_at(at);
+    let exit = Place {
+        at: ac_world::landblock_origin(0xBAE8_001D) + Vec3::new(84.0, 105.0, 26.0),
+        cell: 0xBAE8_001D,
+    };
+    let step = Step::Npc {
+        npc: 7403,
+        name: "Faladha the Emissary".into(),
+        item: Some(2625),
+        portal: Some(7413),
+        secs: 7.0,
+        mouth,
+        exit,
+    };
+    (c, step)
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_emissary_handed_the_note_has_the_portal_she_summons_used() {
+    // Faladha's emotes run 7 s before her portal to Aerlinthe stands: not given up on meanwhile.
+    let (mut c, step) = by_faladha();
+    let t0 = Instant::now();
+    let _ = c.travel_npc_wait(&step, t0);
+    assert_eq!(c.travel.state.gem_uses, 1, "the note was not handed over");
+    c.world.objects.remove(&0x8000_0741);
+    c.autoplay.cast_answered();
+    let _ = c.travel_npc_wait(&step, t0 + Duration::from_secs(10));
+    assert!(!c.is_npc_way_refused(7403), "given up while her emotes ran");
+    assert_eq!(c.travel.state.gem_uses, 1, "the note asked for again");
+    let me = c.my_position().unwrap();
+    c.world.objects.insert(
+        0x80E2_0741,
+        ac_world::WorldObject {
+            guid: 0x80E2_0741,
+            name: "Aerlinthe Island Portal".into(),
+            item_type: ac_world::item_type::PORTAL,
+            position: crate::testkit::placed(0xA9B4_0019, me + Vec3::new(3.0, 2.0, 0.0)),
+            ..Default::default()
+        },
+    );
+    let _ = c.travel_npc_wait(&step, t0 + Duration::from_secs(11));
+    assert_eq!(c.travel.state.summoned_uses, 1, "her portal was not used");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_emissary_who_opens_nothing_is_left_out_of_the_next_plan() {
+    let (mut c, step) = by_faladha();
+    let t0 = Instant::now();
+    let _ = c.travel_npc_wait(&step, t0);
+    c.world.objects.remove(&0x8000_0741);
+    c.autoplay.cast_answered();
+    // Her 7 s and a gem's 8 s of waiting past them, with no portal.
+    let _ = c.travel_npc_wait(&step, t0 + Duration::from_secs(16));
+    assert!(c.is_npc_way_refused(7403));
+    assert!(c.travel.replan_due);
+}

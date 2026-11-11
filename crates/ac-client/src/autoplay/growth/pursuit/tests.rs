@@ -2379,6 +2379,52 @@ fn the_sanatorium_chest_past_the_island_portal_has_virindiisland_had_first() {
     );
 }
 
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_sacrificial_dagger_on_aerlinthe_is_reached_by_a_note_handed_to_an_emissary() {
+    // No fixed portal reaches Aerlinthe from the mainland: the dagger was dropped as a source,
+    // "no way". An emissary handed a trade note summons the portal to the island.
+    let mut c = mage_pursuing("give:40913", "aerfalle-by-note");
+    c.world.stats.level = 66;
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    assert!(
+        matches!(&c.pursuit[0].step, PursuitStep::PickUp { name, .. } if name == "Sacrificial Dagger"),
+        "{:?}",
+        c.pursuit[0].step
+    );
+    let cfg = c.autoplay.config.growth.clone();
+    c.grow_hunt(now, &cfg);
+    let wanted: Vec<(u32, String)> = c
+        .autoplay
+        .growth
+        .pursuit_gems
+        .iter()
+        .map(|g| (g.wcid, g.name.clone()))
+        .collect();
+    let [(note, name)] = &wanted[..] else {
+        panic!("{wanted:?}: {}", c.autoplay.status);
+    };
+    assert!(name.starts_with("Trade Note"), "{name}");
+    // Carried, the journey to the dagger goes by the emissary who takes it.
+    in_the_pack(&mut c, 0x8000_0731, *note, name, 1);
+    let dagger = ac_world::Place {
+        at: ac_world::landblock_origin(0x02EE_025B) + glam::Vec3::new(147.65, -77.56, -41.93),
+        cell: 0x02EE_025B,
+    };
+    let trip = c.plan_trip(dagger, false).expect("a journey to the dagger");
+    let by = trip.steps.iter().find_map(|s| match s {
+        ac_world::trip::Step::Npc { name, item, .. } => Some((name.clone(), *item)),
+        _ => None,
+    });
+    let (emissary, item) = by.unwrap_or_else(|| panic!("{:?}", trip.steps));
+    assert!(emissary.ends_with("the Emissary"), "{emissary}");
+    assert_eq!(item, Some(*note));
+    // The note is the way, not money the town run cashes.
+    let cfg = crate::autoplay::growth::config::Growth::default();
+    assert!(c.vendor_snapshot(&cfg).notes.is_empty());
+}
+
 /// `mage_pursuing`'s mage with autoplay on, town runs and grounds on, no buy list of its own, and
 /// `coin` pyreals carried.
 fn mage_playing(quest: &str, profile: &str, coin: u32) -> Client {

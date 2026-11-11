@@ -233,8 +233,9 @@ pub fn out_of(block: u32) -> impl Iterator<Item = &'static Portal> {
     })
 }
 
-/// A portal a creature's death opens: its death casts a summon of its linked portal, 3 m in front
-/// of it, for the spell's lifetime (`data/summoned_portals.csv`; WorldObject_Magic.cs:1185-1266).
+/// A portal a creature's death, or an NPC handed an item or used, opens: a summon of its linked
+/// portal, 3 m in front of it, for the spell's lifetime (`data/summoned_portals.csv`;
+/// WorldObject_Magic.cs:1185-1266).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Summoned {
     /// The creature whose death opens it.
@@ -245,6 +246,10 @@ pub struct Summoned {
     pub name: String,
     pub to_cell: u32,
     pub to: Vec3,
+    /// The portal's own level band (0: open) and flag ("" for none).
+    pub min_level: u32,
+    pub max_level: u32,
+    pub quest: String,
 }
 
 impl Summoned {
@@ -256,9 +261,9 @@ impl Summoned {
             from: mouth,
             to_cell: self.to_cell,
             to: self.to,
-            min_level: 0,
-            max_level: 0,
-            quest: String::new(),
+            min_level: self.min_level,
+            max_level: self.max_level,
+            quest: self.quest.clone(),
             usable: 0,
             bitmask: UNRESTRICTED,
         }
@@ -282,9 +287,108 @@ pub fn summoned() -> &'static [Summoned] {
                 name: crate::data_name(f.get(3)?),
                 to_cell,
                 to: crate::landblock_origin(to_cell) + Vec3::new(num(5)?, num(6)?, num(7)?),
+                min_level: f.get(8).and_then(|v| v.parse().ok()).unwrap_or(0),
+                max_level: f.get(9).and_then(|v| v.parse().ok()).unwrap_or(0),
+                quest: f.get(10).map_or_else(String::new, |q| q.to_string()),
             })
         };
         let lines = SUMMONED
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty());
+        lines.filter_map(row).collect()
+    })
+}
+
+/// A way a placed NPC opens for whoever hands it an item or uses it: a portal it summons in front
+/// of it (Faladha the Emissary's to Aerlinthe, for a 10,000 note), or a teleport
+/// (`data/npc_ways.csv`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NpcWay {
+    pub npc: u32,
+    pub name: String,
+    /// Where it stands: walked to, then handed the item or used.
+    pub cell: u32,
+    pub at: Vec3,
+    /// What is handed; `None` for a use.
+    pub item: Option<u32>,
+    /// Flags held first, lower case.
+    pub needs: Vec<String>,
+    /// Level band, 0 for open.
+    pub min_level: u32,
+    pub max_level: u32,
+    /// The portal it summons; `None` for a teleport.
+    pub portal: Option<u32>,
+    pub to_cell: u32,
+    pub to: Vec3,
+    /// Seconds of the NPC's emote delays before the portal is summoned or the teleport made.
+    pub secs: f32,
+}
+
+impl NpcWay {
+    /// Whether a character of `level` holding `quests_done` may take it, the item had.
+    pub fn usable_by(&self, level: u32, quests_done: &[String]) -> bool {
+        let held = |f: &String| quests_done.iter().any(|q| q.eq_ignore_ascii_case(f));
+        level >= self.min_level
+            && (self.max_level == 0 || level <= self.max_level)
+            && self.needs.iter().all(held)
+    }
+
+    /// The way as a portal from its NPC's spot: what the trip planner searches.
+    pub fn as_portal(&self) -> Portal {
+        Portal {
+            name: self.name.clone(),
+            from_cell: self.cell,
+            from: self.at,
+            to_cell: self.to_cell,
+            to: self.to,
+            min_level: self.min_level,
+            max_level: self.max_level,
+            quest: String::new(),
+            usable: 0,
+            bitmask: UNRESTRICTED,
+        }
+    }
+}
+
+const NPC_WAYS: &str = include_str!("../data/npc_ways.csv");
+
+/// Every way a placed NPC opens, parsed on first use.
+pub fn npc_ways() -> &'static [NpcWay] {
+    static PARSED: OnceLock<Vec<NpcWay>> = OnceLock::new();
+    PARSED.get_or_init(|| {
+        let row = |line: &str| {
+            let f: Vec<&str> = line.split(',').collect();
+            let num = |i: usize| f.get(i)?.parse::<f32>().ok();
+            let int = |i: usize| f.get(i)?.parse::<u32>().ok();
+            let cell = u32::from_str_radix(f.get(2)?, 16).ok()?;
+            let local = Vec3::new(num(3)?, num(4)?, num(5)?);
+            // An outdoor placement may name its landblock alone: its cell is where it stands.
+            let cell = match cell & 0xFFFF {
+                0 => crate::outdoor_cell(cell, local),
+                _ => cell,
+            };
+            let to_cell = u32::from_str_radix(f.get(11)?, 16).ok()?;
+            Some(NpcWay {
+                npc: int(0)?,
+                name: crate::data_name(f.get(1)?),
+                cell,
+                at: crate::landblock_origin(cell) + local,
+                item: int(6).filter(|w| *w != 0),
+                needs: f
+                    .get(7)?
+                    .split(';')
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+                min_level: int(8)?,
+                max_level: int(9)?,
+                portal: int(10).filter(|w| *w != 0),
+                to_cell,
+                to: crate::landblock_origin(to_cell) + Vec3::new(num(12)?, num(13)?, num(14)?),
+                secs: num(15).unwrap_or(0.0),
+            })
+        };
+        let lines = NPC_WAYS
             .lines()
             .filter(|l| !l.starts_with('#') && !l.is_empty());
         lines.filter_map(row).collect()

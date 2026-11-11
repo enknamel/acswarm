@@ -48,6 +48,9 @@ fn main() {
                     ac_world::trip::Step::Recall { name, exit, .. } => {
                         println!("  cast {name:?} -> {:?}", map(exit))
                     }
+                    ac_world::trip::Step::Npc {
+                        name, mouth, exit, ..
+                    } => println!("  to {name:?} at {:?} -> {:?}", map(mouth), map(exit)),
                 }
             }
         }

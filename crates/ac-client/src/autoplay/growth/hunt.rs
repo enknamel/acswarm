@@ -700,8 +700,9 @@ impl Client {
         let far = ac_world::trip::Prefs::far();
         let from = ac_world::Place { at: me, cell };
         let goal = self.planning_place(goal);
+        let ways = self.standing_ways();
         let plan = |p| {
-            ac_world::trip::plan_with_recalls_and_gems(
+            ac_world::trip::plan_with_ways(
                 from,
                 goal,
                 level,
@@ -711,6 +712,7 @@ impl Client {
                 &recalls,
                 &gems,
                 p,
+                &ways,
             )
         };
         plan(prefs).or_else(|| {
