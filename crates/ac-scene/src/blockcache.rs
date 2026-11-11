@@ -23,6 +23,8 @@ pub struct BlockCollision {
     pub world: CollisionWorld,
     /// A dungeon block: no terrain to walk on.
     pub dungeon: bool,
+    /// Its rooms never see outside: a dungeon from inside them (`LandblockScene::sealed`).
+    pub sealed: bool,
     /// The middle of every opening between this block's interior cells,
     /// at the threshold, in world space. The navigation graph stands a
     /// node in each: see `nav::Ground::doorways`.
@@ -58,6 +60,7 @@ impl BlockCache {
             block,
             world,
             dungeon: scene.is_dungeon,
+            sealed: scene.sealed,
             doorways: scene
                 .cells
                 .iter()

@@ -33,6 +33,8 @@ const OWN_TRIES: usize = 4;
 struct Region {
     blocks: Vec<u32>,
     dungeon: bool,
+    /// `Area::sealed`: blocks a walk from inside whose rooms only a dungeon area holds.
+    sealed: Vec<u32>,
     capsule: Capsule,
     area: RwLock<Area>,
 }
@@ -40,8 +42,11 @@ struct Region {
 impl Region {
     /// It holds a walk from `from` to `goal` for a body of `capsule`.
     fn is_holding(&self, from: Place, goal: Place, capsule: &Capsule) -> bool {
+        let block = from.cell & 0xFFFF_0000;
+        let inside_sealed = self.sealed.contains(&block) && from.cell & 0xFFFF >= 0x100;
         self.capsule.same(capsule)
-            && self.blocks.contains(&(from.cell & 0xFFFF_0000))
+            && self.blocks.contains(&block)
+            && (!self.sealed.contains(&block) || inside_sealed == self.dungeon)
             && routing::is_held(&self.blocks, self.dungeon, from, goal)
     }
 }
@@ -62,12 +67,16 @@ fn region_for(from: Place, goal: Place, capsule: &Capsule) -> Option<Arc<Region>
 
 /// An area assembled for a walk would hold it: not when the dungeon `from` is in is already
 /// assembled without the goal, nor when the goal lies past the blocks a walk from `from` covers.
+/// Two rooms of one block always: a dungeon's are held by cell, however far apart they lie.
 fn can_assemble(from: Place, goal: Place, capsule: &Capsule) -> bool {
+    let is_room = |p: Place| p.cell & 0xFFFF >= 0x100;
+    let same_rooms = is_room(from) && is_room(goal) && from.cell >> 16 == goal.cell >> 16;
     let regions = REGIONS.lock().unwrap_or_else(|e| e.into_inner());
     !regions
         .iter()
         .any(|r| r.dungeon && r.is_holding(from, from, capsule))
-        && routing::is_held(&navarea::blocks_for(from.at, goal.at), false, from, goal)
+        && (same_rooms
+            || routing::is_held(&navarea::blocks_for(from.at, goal.at), false, from, goal))
 }
 
 /// What became of a job handed on (see `Pathfinder::dispatch`).
@@ -755,7 +764,7 @@ fn assemble(assets: &Assets, walk: &Walk) -> Option<Arc<Region>> {
     let started = Instant::now();
     let here = walk.from.cell & 0xFFFF_0000;
     let want = navarea::blocks_for(walk.from.at, walk.goal.at);
-    let area = match Area::build(assets, &want, &walk.capsule, here) {
+    let area = match Area::build(assets, &want, &walk.capsule, walk.from.cell) {
         Ok(a) => a,
         Err(e) => {
             tracing::debug!("pathfinder: cannot assemble around {here:#010x}: {e}");
@@ -771,6 +780,7 @@ fn assemble(assets: &Assets, walk: &Walk) -> Option<Arc<Region>> {
     let region = Arc::new(Region {
         blocks: area.blocks.clone(),
         dungeon: area.dungeon,
+        sealed: area.sealed.clone(),
         capsule: area.capsule(),
         area: RwLock::new(area),
     });

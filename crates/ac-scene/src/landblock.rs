@@ -26,10 +26,21 @@ pub struct LandblockScene {
     /// A dungeon block: all terrain heights are zero and it only has
     /// interior cells. Its terrain is a placeholder and should not be drawn.
     pub is_dungeon: bool,
+    /// Cells, and none seen from outside (`SEEN_OUTSIDE`): from inside one the block is a dungeon
+    /// whatever its terrain, as the server never meets terrain there (`PhysicsObj.cs:256-259`).
+    pub sealed: bool,
     /// Interior cells (buildings' insides, dungeons).
     pub cells: Vec<crate::interior::CellScene>,
     /// Per-cell interior lighting (torches and lamps plus a low ambient).
     pub lights: LightSampler,
+}
+
+impl LandblockScene {
+    /// Whether a body in `cell` of this block is in a dungeon: a flat dungeon block anywhere, or
+    /// inside a [`sealed`](Self::sealed) block's rooms (0x010A: a dungeon under a hill).
+    pub fn is_dungeon_from(&self, cell: u32) -> bool {
+        self.is_dungeon || (self.sealed && cell & 0xFFFF >= 0x100)
+    }
 }
 
 /// The assembled landblock, from [`Assets::landblock`]'s cache when it
@@ -106,7 +117,8 @@ pub(crate) fn build(assets: &Assets, block_id: u32) -> Result<LandblockScene> {
         _ => Vec::new(),
     };
     let is_dungeon = !cells.is_empty() && lb.height.iter().all(|&h| h == 0);
-    let ambient = if is_dungeon {
+    let sealed = !cells.is_empty() && cells.iter().all(|c| !c.seen_outside);
+    let ambient = if is_dungeon || sealed {
         lighting::DUNGEON_AMBIENT
     } else {
         lighting::BUILDING_AMBIENT
@@ -121,6 +133,7 @@ pub(crate) fn build(assets: &Assets, block_id: u32) -> Result<LandblockScene> {
         scenery_count,
         cells,
         is_dungeon,
+        sealed,
         lights,
     })
 }

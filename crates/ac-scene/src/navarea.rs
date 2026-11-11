@@ -69,19 +69,24 @@ pub struct Area {
     pub nav: NavGraph,
     /// A dungeon area: no terrain under it, fine lattice.
     pub dungeon: bool,
+    /// The blocks read whose verdict is the cell's ([`LandblockScene::sealed`], not flat): a walk
+    /// from inside their rooms belongs on a dungeon area, any other on the surface's.
+    ///
+    /// [`LandblockScene::sealed`]: crate::landblock::LandblockScene::sealed
+    pub sealed: Vec<u32>,
     /// Which of the region's terrain types are water, by index: a block water at every vertex
     /// is the invisible wall in the sea ([`is_water_block`]). Empty when the region is unread.
     water_types: Vec<bool>,
 }
 
 impl Area {
-    /// Assemble `blocks`. A dungeon is assembled alone whatever else was
-    /// asked for: the blocks around it on the lattice are unrelated
-    /// pieces of the surface, and there is no terrain under it to walk.
-    pub fn build(assets: &Assets, blocks: &[u32], cap: &Capsule, centre: u32) -> Result<Area> {
-        let centre = centre & 0xFFFF_0000;
+    /// Assemble `blocks` for a walk from cell `from`. A dungeon is assembled alone whatever else
+    /// was asked for: the blocks around it on the lattice are unrelated pieces of the surface,
+    /// and there is no terrain under it to walk (`LandblockScene::is_dungeon_from`).
+    pub fn build(assets: &Assets, blocks: &[u32], cap: &Capsule, from: u32) -> Result<Area> {
+        let centre = from & 0xFFFF_0000;
         let centre_scene = crate::landblock::load(assets, centre)?;
-        let dungeon = centre_scene.is_dungeon;
+        let dungeon = centre_scene.is_dungeon_from(from);
         let wanted: Vec<u32> = if dungeon {
             vec![centre]
         } else {
@@ -94,6 +99,7 @@ impl Area {
         let mut indoors = false;
         let mut doorways: Vec<Vec3> = Vec::new();
         let mut collision = CollisionWorld::default();
+        let mut sealed = Vec::new();
         for &id in &wanted {
             let scene = if id == centre {
                 centre_scene.clone()
@@ -109,6 +115,9 @@ impl Area {
             // at the same coordinates as the ground above it.
             if scene.is_dungeon && id != centre {
                 continue;
+            }
+            if scene.sealed && !scene.is_dungeon {
+                sealed.push(id);
             }
             if let Ok(w) = CollisionWorld::from_scene(assets, &scene) {
                 collision.absorb(&w);
@@ -152,6 +161,7 @@ impl Area {
             doorways,
             nav,
             dungeon,
+            sealed,
             water_types,
         })
     }

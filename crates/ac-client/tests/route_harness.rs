@@ -455,3 +455,39 @@ fn a_walk_inside_a_building_is_planned_on_the_region_not_the_block() {
     }
     println!("WALK {:?}", run_on(&mut c, &t));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_dungeon_under_a_hill_is_walked_without_the_hill() {
+    // 0x010A's rooms never see outside, under the next block's hillside: from the arrival room to
+    // Virindi Castaway, a plan and a walk with no terrain in the shafts or across the rooms.
+    let (start, start_cell) = at(0x010A_0223, Vec3::new(-2.8, -72.8, 0.0));
+    let (goal, goal_cell) = at(0x010A_0108, Vec3::new(247.57, -11.18, -119.97));
+    let t = Trial {
+        name: "010A Virindi Castaway from the arrival room".into(),
+        start,
+        start_cell,
+        goal,
+        goal_cell,
+        stop: 1.5,
+        limit: 300.0,
+    };
+    let mut c = standing_at(LEVEL, &t);
+    let pl = c.player.as_ref().expect("a body");
+    let me = Place {
+        at: pl.world_position(),
+        cell: pl.cell,
+    };
+    let cap = pl.capsule();
+    let to = Place {
+        at: goal,
+        cell: goal_cell,
+    };
+    let planned = c.pathfinder.plan(me, to, t.stop, cap);
+    assert!(matches!(planned, Planned::Route(_)), "{planned:?}");
+    let (first, _) = plan_first(&mut c, &t);
+    assert!(first.is_ok(), "{first:?}");
+    let o = run_on(&mut c, &t);
+    println!("WALK {o:?}");
+    assert!(matches!(o, Outcome::Arrived { .. }), "{o:?}");
+}

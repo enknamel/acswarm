@@ -49,7 +49,7 @@ struct Cli {
     /// places, and otherwise opens a folder picker (default: $AC_DATA_DIR).
     #[arg(long, env = "AC_DATA_DIR")]
     data_dir: Option<PathBuf>,
-    /// Landblock to show, hex (e.g. A9B4 for Holtburg)
+    /// Landblock to show, hex (e.g. A9B4 for Holtburg), or a cell to see it from (010A0223)
     #[arg(long)]
     landblock: Option<String>,
     /// Extra rings of landblocks around the center
@@ -496,6 +496,8 @@ struct App {
     sky_at: Option<f32>,
     /// Block id -> is a dungeon (learnt when the block is built).
     dungeon: std::collections::HashMap<u32, bool>,
+    /// Blocks whose `dungeon` is the character's cell's (`Built::by_cell`): rebuilt on a change.
+    by_cell: std::collections::HashSet<u32>,
     /// Caches shared by every session: decoded meshes, GPU meshes, palettes,
     /// motion tables, block particle emitters, and the sound device.
     mesh_cache: std::collections::HashMap<u32, ac_scene::model::Mesh>,
@@ -1568,7 +1570,18 @@ impl App {
         };
         // Stream landblocks around the character: the block we stand in
         // first, then its neighbours (outdoors only), one per frame.
-        if let Some(center) = net.client.player.as_ref().map(|p| p.landblock()) {
+        if let Some((center, cell)) = net.client.player.as_ref().map(|p| (p.landblock(), p.cell)) {
+            // Into or out of the rooms of a block whose verdict is the cell's: build it again.
+            let inside = cell & 0xFFFF >= 0x100;
+            if self.by_cell.contains(&center)
+                && self.loaded_blocks.contains(&center)
+                && self.dungeon.get(&center) != Some(&inside)
+            {
+                gpu.remove_block(center);
+                self.fx.unload_block(center);
+                self.loaded_blocks.remove(&center);
+                self.dungeon.insert(center, inside);
+            }
             let mut wanted = vec![center];
             if self.dungeon.get(&center) == Some(&false) {
                 let cx = ac_scene::lbid::block_x(center);
@@ -1588,9 +1601,12 @@ impl App {
                     net.client.is_always_daylight(),
                     net.client.day_time().map(|d| d.fraction).unwrap_or(MIDDAY),
                 );
-                match scene::build_landblock(&net.client.assets, id, &mut self.mesh_cache) {
+                match scene::build_landblock(&net.client.assets, id, cell, &mut self.mesh_cache) {
                     Ok(built) => {
                         self.dungeon.insert(id, built.is_dungeon);
+                        if built.by_cell {
+                            self.by_cell.insert(id);
+                        }
                         let assets = &net.client.assets;
                         let palettes = &self.palettes;
                         gpu.add_block(id, built.batches, |k| {
@@ -1801,11 +1817,14 @@ impl App {
                 center: Vec3::ZERO,
                 radius: 1.0,
                 is_dungeon: false,
+                by_cell: false,
             }
         } else {
             let lb = self.cli.landblock.as_deref().unwrap_or("A9B4");
-            let id = u32::from_str_radix(lb.trim_start_matches("0x"), 16)? << 16;
-            scene::build_landblocks(&assets, id, self.cli.radius)?
+            let lb = lb.trim_start_matches("0x");
+            let id = u32::from_str_radix(lb, 16)?;
+            let viewer = if lb.len() > 4 { id } else { id << 16 };
+            scene::build_landblocks(&assets, viewer, self.cli.radius)?
         };
         let tris: usize = built.batches.values().map(|b| b.indices.len() / 3).sum();
         tracing::info!(
@@ -2379,6 +2398,7 @@ fn main() -> Result<()> {
             loaded_blocks: Default::default(),
             sky_at: None,
             dungeon: Default::default(),
+            by_cell: Default::default(),
             mesh_cache: Default::default(),
             gpu_meshes: Default::default(),
             palettes: Default::default(),
@@ -3004,6 +3024,7 @@ fn main() -> Result<()> {
         loaded_blocks: Default::default(),
         sky_at: None,
         dungeon: Default::default(),
+        by_cell: Default::default(),
         mesh_cache: Default::default(),
         gpu_meshes: Default::default(),
         palettes: Default::default(),

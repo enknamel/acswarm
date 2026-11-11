@@ -354,3 +354,21 @@ fn hea_arantah_s_town_is_walked_to_across_the_shallows() {
     let path = area.with_ground(|ground, nav| route(ground, nav, pa, pb, 2.0));
     assert!(path.is_some(), "no way across the shallows");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_block_whose_rooms_never_see_outside_is_a_dungeon_only_from_inside() {
+    // 0x010A: a hill over sealed rooms (no cell SEEN_OUTSIDE), which lie under 0x0109's hillside.
+    let assets = Assets::open(ac_dat::test_data_dir()).unwrap();
+    let scene = ac_scene::landblock::load(&assets, 0x010A_0000).unwrap();
+    assert!(scene.sealed && !scene.is_dungeon);
+    let cap = Capsule::default();
+    let blocks = [0x0109_0000, 0x010A_0000, 0x0209_0000];
+    let inside = Area::build(&assets, &blocks, &cap, 0x010A_0223).unwrap();
+    assert!(inside.dungeon);
+    assert_eq!(inside.blocks, vec![0x010A_0000]);
+    assert!(inside.terrain_at(200.0, 1850.0).is_none());
+    let outside = Area::build(&assets, &blocks, &cap, 0x010A_0001).unwrap();
+    assert!(!outside.dungeon);
+    assert!(outside.sealed.contains(&0x010A_0000));
+}

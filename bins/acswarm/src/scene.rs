@@ -16,6 +16,8 @@ pub struct Built {
     pub radius: f32,
     /// The centre block is a dungeon (only meaningful for single blocks).
     pub is_dungeon: bool,
+    /// Whether it is depends on the viewer's cell (`LandblockScene::is_dungeon_from`).
+    pub by_cell: bool,
 }
 
 /// Append a mesh transformed into world space to its material batches,
@@ -249,11 +251,12 @@ fn terrain_blend(surface: &texmerge::CellSurface, cell_uv: [f32; 2]) -> TerrainB
     }
 }
 
-/// Build one landblock's static geometry (terrain, buildings, scenery,
-/// interiors) into per-material batches in world space.
+/// Build one landblock's static geometry (terrain, buildings, scenery, interiors) into
+/// per-material batches in world space, as seen from cell `viewer` (no terrain from a dungeon).
 pub fn build_landblock(
     assets: &Assets,
     id: u32,
+    viewer: u32,
     mesh_cache: &mut HashMap<u32, model::Mesh>,
 ) -> Result<Built> {
     let mut batches: HashMap<MaterialKey, Batch> = HashMap::new();
@@ -262,6 +265,11 @@ pub fn build_landblock(
     let t0 = std::time::Instant::now();
     let scene = landblock::load(assets, id)?;
     let t_load = t0.elapsed();
+    let dungeon = if viewer & 0xFFFF_0000 == id & 0xFFFF_0000 {
+        scene.is_dungeon_from(viewer)
+    } else {
+        scene.is_dungeon
+    };
     let origin = ac_scene::lbid::world_origin(id);
     // Terrain: each cell's six vertices carry the cell's texture recipe
     // (base texture, overlays and roads with their alpha maps); the whole
@@ -270,7 +278,7 @@ pub fn build_landblock(
     // merged cell textures.
     let region = assets.region()?;
     let tables = texmerge::Tables::from_region(&region);
-    let terrain_cells = if scene.is_dungeon { 0 } else { usize::MAX };
+    let terrain_cells = if dungeon { 0 } else { usize::MAX };
     for (cell, tri) in scene
         .terrain
         .indices
@@ -323,7 +331,7 @@ pub fn build_landblock(
                 .push(&verts, &[0, 1, 2, 3, 4, 5]),
         }
     }
-    if !scene.is_dungeon {
+    if !dungeon {
         let region = assets.region()?;
         crate::water::push_water(&mut batches, &region, &scene.terrain, origin);
     }
@@ -360,7 +368,7 @@ pub fn build_landblock(
         ambient: ac_scene::lighting::DUNGEON_AMBIENT,
         lights: Vec::new(),
     };
-    let outdoor_lit = scene.is_dungeon.then_some(&underground);
+    let outdoor_lit = dungeon.then_some(&underground);
     for part in &scene.parts {
         if let std::collections::hash_map::Entry::Vacant(e) = mesh_cache.entry(part.gfxobj_id) {
             let g = match assets.gfxobj(part.gfxobj_id) {
@@ -394,11 +402,14 @@ pub fn build_landblock(
         batches,
         center,
         radius: (max - min).length() * 0.5,
-        is_dungeon: scene.is_dungeon,
+        is_dungeon: dungeon,
+        by_cell: scene.sealed && !scene.is_dungeon,
     })
 }
 
-pub fn build_landblocks(assets: &Assets, center_id: u32, radius: u32) -> Result<Built> {
+/// The blocks `radius` rings round `viewer`'s (a cell, or its block), as seen from that cell.
+pub fn build_landblocks(assets: &Assets, viewer: u32, radius: u32) -> Result<Built> {
+    let center_id = viewer & 0xFFFF_0000;
     let cx = ac_scene::lbid::block_x(center_id);
     let cy = ac_scene::lbid::block_y(center_id);
     let mut batches: HashMap<MaterialKey, Batch> = HashMap::new();
@@ -408,13 +419,13 @@ pub fn build_landblocks(assets: &Assets, center_id: u32, radius: u32) -> Result<
     // A dungeon block is its own world: its neighbours in id space are
     // unrelated blocks that would overlap it, so never load around one.
     let radius = match landblock::load(assets, center_id) {
-        Ok(s) if s.is_dungeon => 0,
+        Ok(s) if s.is_dungeon_from(viewer) => 0,
         _ => radius,
     };
     for bx in cx.saturating_sub(radius)..=(cx + radius).min(255) {
         for by in cy.saturating_sub(radius)..=(cy + radius).min(255) {
             let id = ac_scene::lbid::from_xy(bx, by);
-            let built = match build_landblock(assets, id, &mut mesh_cache) {
+            let built = match build_landblock(assets, id, viewer, &mut mesh_cache) {
                 Ok(b) => b,
                 Err(e) => {
                     tracing::warn!("landblock {id:#010x}: {e}");
@@ -436,6 +447,7 @@ pub fn build_landblocks(assets: &Assets, center_id: u32, radius: u32) -> Result<
         center,
         radius: (max - min).length() * 0.5,
         is_dungeon: false,
+        by_cell: false,
     })
 }
 
@@ -464,6 +476,7 @@ pub fn build_model_with(assets: &Assets, model_id: u32, app: &model::Appearance)
         center,
         radius: ((max - min).length() * 0.5).max(1.0),
         is_dungeon: false,
+        by_cell: false,
     })
 }
 

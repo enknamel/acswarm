@@ -75,6 +75,8 @@ struct Block {
     collision: Option<Rc<BlockCollision>>,
     /// A dungeon block: no terrain to walk on.
     dungeon: bool,
+    /// Its rooms never see outside: a dungeon from inside them (`BlockCollision::sealed`).
+    sealed: bool,
 }
 
 /// Blocked steps in a row that count as wedged: about half a second at twenty a second, so a
@@ -878,6 +880,7 @@ impl Player {
                     lb,
                     collision: None,
                     dungeon: false,
+                    sealed: false,
                 },
             );
         }
@@ -904,9 +907,17 @@ impl Player {
     /// Whether the block we stand in is a dungeon: there is no terrain
     /// under it to fall onto, and no cell-0 floor can take us outside.
     pub fn in_dungeon(&mut self, assets: &Assets) -> bool {
-        let blk = self.landblock();
+        self.is_dungeon_at(assets, self.cell)
+    }
+
+    /// Whether a body in `cell` is in a dungeon: a flat dungeon block, or a room of a block whose
+    /// rooms never see outside (`LandblockScene::is_dungeon_from`).
+    fn is_dungeon_at(&mut self, assets: &Assets, cell: u32) -> bool {
+        let blk = cell & 0xFFFF_0000;
         self.collision(assets, blk);
-        self.blocks.get(&blk).map(|b| b.dungeon).unwrap_or(false)
+        self.blocks
+            .get(&blk)
+            .is_some_and(|b| b.dungeon || (b.sealed && cell & 0xFFFF >= 0x100))
     }
 
     /// The height of the ground under a world `(x, y)`: the interior
@@ -916,7 +927,7 @@ impl Player {
         // A dungeon's rooms run past its landblock's square (the Copper Legion Keep's door at
         // y -8): within one, its own block holds the floor, as `solid_blocks` takes it.
         let own = self.landblock();
-        let block = if self.collision(assets, own).is_some_and(|c| c.dungeon) {
+        let block = if self.is_dungeon_at(assets, self.cell) {
             own
         } else {
             block_of(Vec3::new(x, y, 0.0))
@@ -983,6 +994,7 @@ impl Player {
         if b.collision.is_none() {
             let c = assets.block_collision(block_id).ok()?;
             b.dungeon = c.dungeon;
+            b.sealed = c.sealed;
             b.collision = Some(c);
         }
         b.collision.clone()
@@ -995,19 +1007,18 @@ impl Player {
     pub fn sees(&mut self, assets: &Assets, from: Vec3, to: Vec3) -> bool {
         let eyes = from + Vec3::new(0.0, 0.0, 1.4);
         let chest = to + Vec3::new(0.0, 0.0, 1.0);
-        let blocks = self.solid_blocks(assets, self.landblock(), &[from, to]);
+        let blocks = self.solid_blocks(assets, self.cell, &[from, to]);
         !blocks.iter().any(|&blk| {
             self.collision(assets, blk)
                 .is_some_and(|c| c.world.segment_hit(eyes, chest).is_some())
         })
     }
 
-    /// The blocks whose geometry stands between `points` for a body in `own`'s block: that block
+    /// The blocks whose geometry stands between `points` for a body in cell `own`: its block
     /// and those under the points, or in a dungeon only its own (its cells overlap other dungeons).
     fn solid_blocks(&mut self, assets: &Assets, own: u32, points: &[Vec3]) -> Vec<u32> {
-        let own = own & 0xFFFF_0000;
-        let mut blocks = vec![own];
-        if self.collision(assets, own).is_some_and(|c| c.dungeon) {
+        let mut blocks = vec![own & 0xFFFF_0000];
+        if self.is_dungeon_at(assets, own) {
             return blocks;
         }
         for b in points.iter().map(|p| block_of(*p)) {
@@ -1037,7 +1048,7 @@ impl Player {
         assets: &Assets,
         path: &[Vec3],
     ) -> Vec<Rc<BlockCollision>> {
-        self.solid_blocks(assets, self.landblock(), path)
+        self.solid_blocks(assets, self.cell, path)
             .iter()
             .filter_map(|&b| self.collision(assets, b))
             .collect()
@@ -1047,9 +1058,11 @@ impl Player {
     /// landblock already loaded; `None` in a dungeon, which has none,
     /// or off the blocks this character has seen.
     pub(crate) fn terrain_height(&self, x: f32, y: f32) -> Option<f32> {
+        let sealed_in =
+            self.is_indoors() && self.blocks.get(&self.landblock()).is_some_and(|b| b.sealed);
         let block = block_of(Vec3::new(x, y, 0.0));
         let b = self.blocks.get(&block)?;
-        if b.dungeon {
+        if b.dungeon || sealed_in {
             return None;
         }
         let origin = ac_world::landblock_origin(block);
@@ -1078,16 +1091,15 @@ impl Player {
         }) == Some(true)
     }
 
-    /// Ask `f` about landblock `block`'s ground as the walking code sees
-    /// it -- its collision, and outside a dungeon its terrain and sea --
-    /// for this character's capsule; `None` when the block has no
-    /// collision.
+    /// Ask `f` about the ground of `block` (a cell, or its block) as the walking code sees it --
+    /// its collision, and outside a dungeon its terrain and sea; `None` with no collision.
     pub(crate) fn on_ground<R>(
         &mut self,
         assets: &Assets,
         block: u32,
         f: impl FnOnce(&Ground<'_>, &Capsule) -> R,
     ) -> Option<R> {
+        let dungeon = self.is_dungeon_at(assets, block);
         let block = block & 0xFFFF_0000;
         self.collision(assets, block)?;
         let cap = self.capsule;
@@ -1105,8 +1117,8 @@ impl Player {
         let sea = |_: f32, _: f32| sunk;
         let ground = Ground {
             collision,
-            terrain: (!b.dungeon).then_some(&terrain),
-            sea: (!b.dungeon).then_some(&sea),
+            terrain: (!dungeon).then_some(&terrain),
+            sea: (!dungeon).then_some(&sea),
             doorways: b
                 .collision
                 .as_ref()
@@ -1119,7 +1131,7 @@ impl Player {
     /// Fraction along `from`..`to` where static geometry first blocks the
     /// segment, if it does.
     pub fn first_wall(&mut self, assets: &Assets, from: Vec3, to: Vec3) -> Option<f32> {
-        let blocks = self.solid_blocks(assets, self.landblock(), &[from, to]);
+        let blocks = self.solid_blocks(assets, self.cell, &[from, to]);
         let mut best: Option<f32> = None;
         for blk in blocks {
             if let Some(c) = self.collision(assets, blk) {
@@ -1787,10 +1799,7 @@ mod tests {
         assert!(p.sees(&assets, from, to));
         let path = [from + Vec3::Z * 1.4, to + Vec3::Z];
         assert!(p.flies_clear(&assets, &path));
-        assert_eq!(
-            p.solid_blocks(&assets, p.landblock(), &path),
-            vec![0x0101_0000]
-        );
+        assert_eq!(p.solid_blocks(&assets, p.cell, &path), vec![0x0101_0000]);
     }
 
     #[test]
