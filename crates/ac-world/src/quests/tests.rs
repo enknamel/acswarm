@@ -401,6 +401,11 @@ fn a_portal_source_and_a_watched_kill_with_its_deaths_column_parse() {
         (Yield::Portal, Want::Flag("accessboss3".into()))
     );
     assert_eq!(s.places.len(), 1);
+    let revealed = portal.replace(",portal,", ",revealed,");
+    assert_eq!(
+        parse_source(&revealed).map(|s| s.kind),
+        Some(Yield::Revealed)
+    );
     let heard = "event:stonefistsbossstart,kill,199,Magma Golem,100,1,B6:2,,,1,4:0,,,8";
     let s = parse_source(heard).expect("a watched kill with its deaths");
     assert_eq!(

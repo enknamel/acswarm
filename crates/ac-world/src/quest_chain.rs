@@ -21,7 +21,7 @@ pub enum FlagBy {
     Quest(&'static Row),
     /// A creature whose death stamps it on its killer (a `flag:` source).
     Kill(&'static Source),
-    /// A portal stamping it on whoever goes through (a `flag:` portal source).
+    /// A portal stamping it on whoever goes through (a `flag:` portal or revealed source).
     Portal(&'static Source),
 }
 
@@ -222,6 +222,7 @@ pub fn flag_givers(flag: &str) -> Vec<FlagBy> {
         .chain(crate::quests::stamped_by(flag).map(FlagBy::Quest))
         .chain(of(crate::quests::Yield::Kill).map(FlagBy::Kill))
         .chain(of(crate::quests::Yield::Portal).map(FlagBy::Portal))
+        .chain(of(crate::quests::Yield::Revealed).map(FlagBy::Portal))
         .collect()
 }
 

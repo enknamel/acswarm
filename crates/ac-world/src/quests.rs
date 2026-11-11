@@ -252,8 +252,11 @@ pub enum Yield {
     /// An event started by handing one of its `keys` to this NPC.
     Give,
     /// A portal stamping the flag on whoever goes through it (its Portal emote set: Portal.cs:287),
-    /// placed, or where the generator making it stands.
+    /// in the world from the landblock's load (placed, or a generator's that fills then).
     Portal,
+    /// As [`Yield::Portal`], made only once something reveals it (a Colosseum room's waves passed:
+    /// `crate::arenas`); where its generator puts it.
+    Revealed,
 }
 
 impl Yield {
@@ -599,6 +602,7 @@ fn parse_source(line: &str) -> Option<Source> {
         "combine" => Yield::Combine,
         "give" => Yield::Give,
         "portal" => Yield::Portal,
+        "revealed" => Yield::Revealed,
         _ => return None,
     };
     let landblocks = pairs(f[6], 16)?;

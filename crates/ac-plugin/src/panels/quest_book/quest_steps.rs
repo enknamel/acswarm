@@ -195,7 +195,7 @@ fn fetch_verb(kind: Yield) -> &'static str {
         Yield::Combine => "Use on ",
         Yield::Vendor => "Buy it from ",
         Yield::Give => "Hand it to ",
-        Yield::Portal => "Go through ",
+        Yield::Portal | Yield::Revealed => "Go through ",
         Yield::Drop | Yield::Kill | Yield::Npc => "Get it from ",
     }
 }
