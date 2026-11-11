@@ -231,7 +231,10 @@ impl Client {
             .unwrap_or_else(|| "none of the attack spells is known".into());
         self.autoplay
             .say(Doing::Fighting, format!("cannot cast at {name} ({why})"));
-        true
+        // Nothing went out: no fight is held, so the town run that restocks is not held off by
+        // one, and no target is given up as taking no damage.
+        self.let_go(Release::Cast);
+        false
     }
 
     /// The attack spells on offer, in the order they are tried and with

@@ -124,3 +124,28 @@ fn casts_wait_while_the_server_has_us_in_the_air() {
     c.hear_airborne(crate::autoplay::cast::IN_THE_AIR, now);
     assert!(!c.autoplay.cast_in_flight(later(1)));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_with_nothing_castable_holds_no_fight() {
+    // Out of components it claimed the fight's tick holding its target, doing nothing: the town
+    // run that restocks them waited on that fight in hand, and the target was given up after 20 s.
+    let mut c =
+        crate::testkit::standing_in_the_field(20, 0xA9B4_0019, glam::Vec3::new(84.0, 84.0, 94.0));
+    crate::testkit::as_a_war_mage(&mut c);
+    let it = crate::testkit::standing_by(&mut c, 0x8000_0103, "Drudge Skulker", 5.0).guid;
+    let cfg = c.autoplay.config.fight.clone();
+    let now = Instant::now();
+    assert!(
+        !c.autoplay_fight_with_spells(now, &cfg),
+        "{}",
+        c.autoplay.status
+    );
+    assert!(
+        c.autoplay.status.starts_with("cannot cast at"),
+        "{}",
+        c.autoplay.status
+    );
+    assert_eq!(c.autoplay.casting_at(), None, "held {it:#x}");
+    assert!(!c.fight_in_hand());
+}
