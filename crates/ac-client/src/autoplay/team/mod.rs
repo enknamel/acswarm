@@ -69,12 +69,19 @@ impl Client {
                     .spell_by_name("Heal Other")
                     .filter(|s| matches!(self.can_cast_well(*s), crate::magic::CastCheck::Ok));
                 if let Some(spell) = spell {
+                    // Paced as every autoplay cast: one sent over another is turned away busy.
+                    if self.autoplay.cast_in_flight(now) {
+                        self.autoplay
+                            .say(Doing::Healing, format!("healing {}", hurt.name));
+                        return true;
+                    }
                     self.select(Some(hurt.guid));
-                    self.cast(spell);
-                    self.autoplay.last_heal = Some(now);
-                    self.autoplay
-                        .say(Doing::Healing, format!("healing {}", hurt.name));
-                    return true;
+                    if self.cast_paced(spell, now) {
+                        self.autoplay.last_heal = Some(now);
+                        self.autoplay
+                            .say(Doing::Healing, format!("healing {}", hurt.name));
+                        return true;
+                    }
                 }
             }
         }
@@ -85,6 +92,7 @@ impl Client {
                 .autoplay
                 .last_debuff
                 .is_some_and(|t| now.duration_since(t) < BUFF_EVERY)
+                || self.autoplay.cast_in_flight(now)
             {
                 return false;
             }
@@ -115,22 +123,30 @@ impl Client {
                         self.autoplay.note(said, now);
                         return false;
                     }
+                    // The next of the list not on it by the fight's own record (`is_debuff_on`).
                     for spell_name in &team.debuffs {
                         let Some(spell) = self.spell_by_name(spell_name) else {
                             continue;
                         };
-                        if !matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok) {
+                        if self.is_debuff_on(guid, spell)
+                            || !matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok)
+                        {
                             continue;
                         }
                         self.select(Some(guid));
-                        self.cast(spell);
+                        if !self.cast_paced(spell, now) {
+                            continue;
+                        }
+                        self.note_debuff_sent(guid, spell);
                         self.autoplay.last_debuff = Some(now);
-                        let spell_name = spell_name.clone();
                         self.autoplay
                             .say(Doing::Debuffing, format!("casting {spell_name} on {name}"));
-                        // One family per target: the rest of the team can
-                        // stop waiting for us.
-                        if team.debuffs.last() == Some(&spell_name) {
+                        // The whole list on: the rest of the team can stop waiting for us.
+                        let all_on = team.debuffs.iter().all(|n| {
+                            self.spell_by_name(n)
+                                .is_none_or(|s| self.is_debuff_on(guid, s))
+                        });
+                        if all_on {
                             self.autoplay.debuffed.push(guid);
                         }
                         return true;

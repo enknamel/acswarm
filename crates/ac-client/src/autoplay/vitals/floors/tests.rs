@@ -160,10 +160,15 @@ fn a_healer_heals_a_fellow_under_its_own_mana_slider() {
     let mut aldric = testkit::mate(0x5000_0002, "Aldric");
     aldric.health = 0.3;
     c.autoplay.team.mates.push(aldric);
+    // In sight, as a mate healed is: a cast at one the world lacks is not sent.
+    let seen = testkit::creature(0x5000_0002, "Aldric");
+    c.world.objects.insert(seen.guid, seen);
     assert!(c.autoplay_team(now), "no heal: {}", c.autoplay.status);
     assert!(
         c.autoplay.status.contains("healing Aldric"),
         "{}",
         c.autoplay.status
     );
+    // Paced as every autoplay cast: in the air, it holds the busy slot for the other rows.
+    assert!(c.autoplay.cast_in_flight(now), "Heal Other sent unpaced");
 }

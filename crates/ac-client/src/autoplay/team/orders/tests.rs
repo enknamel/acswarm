@@ -389,6 +389,39 @@ fn a_debuffer_leaves_what_its_rules_bar_marked_so_nobody_waits_on_it() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_debuffer_goes_down_its_list_by_the_fights_record_of_what_is_on() {
+    // ["Imperil", "Magic Yield"]: every pass began at the head of the list, so Imperil went on
+    // the same creature till it died and the rest of the list never went out.
+    let now = Instant::now();
+    let spells = ["Imperil Other I", "Fire Vulnerability Other II"];
+    let (mut c, ids) = crate::testkit::a_caster_knowing(now, &spells);
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.team.enabled = true;
+    let me = c.my_position().expect("on its feet");
+    let mut leader = crate::testkit::mate(LEADER, "Verity");
+    leader.leader = true;
+    leader.world = me + glam::vec3(3.0, 0.0, 0.0);
+    c.autoplay.team = view_of(vec![leader]);
+    let it = crate::testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 6.0).guid;
+    debuffing(&mut c, it);
+    c.autoplay.config.team.debuffs = spells.iter().map(|s| s.to_string()).collect();
+    assert!(c.autoplay_team(now), "{}", c.autoplay.status);
+    assert!(c.is_debuff_on(it, ids[0]), "{}", c.autoplay.status);
+    assert!(!c.autoplay_team(now), "cast over the one in the air");
+    let later = now + Duration::from_secs(2);
+    c.autoplay.cast_sent = None;
+    assert!(c.autoplay_team(later), "{}", c.autoplay.status);
+    assert!(
+        c.autoplay.status.starts_with("casting Fire Vulnerability"),
+        "{}",
+        c.autoplay.status
+    );
+    assert!(c.is_debuff_on(it, ids[1]));
+    assert!(c.autoplay.debuffed.contains(&it), "the list done");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_debuffer_casts_at_the_boards_target_but_not_at_one_it_avoids() {
     let now = Instant::now();
     let caster = |target_name: &str| {

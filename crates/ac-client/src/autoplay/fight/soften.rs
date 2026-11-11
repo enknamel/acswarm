@@ -252,6 +252,72 @@ impl Client {
     }
 }
 
+/// What a debuff does, as the fight records it on a creature.
+enum Debuff {
+    /// A Magic Yield, taking this much magic defence off.
+    Yield(f32),
+    /// A vulnerability to this element, by this multiplier.
+    Vuln(Element, f32),
+    /// Anything else: an imperil.
+    Other,
+}
+
+/// What `spell` does, as a debuff.
+fn debuff_kind(spell: u32) -> Debuff {
+    let lowers_defence = ac_world::buffs::effect(spell)
+        .filter(|e| e.skill() == Some(MAGIC_DEFENSE) && e.value < 0.0);
+    if let Some(e) = lowers_defence {
+        return Debuff::Yield(-e.value);
+    }
+    let vuln = ac_world::elements::spell_role(spell)
+        .filter(|(role, _)| *role == ac_world::elements::Role::Vulnerability)
+        .zip(ac_world::elements::vuln_mod(spell));
+    match vuln {
+        Some(((_, element), m)) => Debuff::Vuln(element, m),
+        None => Debuff::Other,
+    }
+}
+
+impl Client {
+    /// Whether the debuff `spell` is on `guid` by the fight's own record (`yielded`, `vulned`):
+    /// what the team's debuffer and the fight's softening both read.
+    pub(crate) fn is_debuff_on(&self, guid: u32, spell: u32) -> bool {
+        let st = &self.autoplay;
+        match debuff_kind(spell) {
+            Debuff::Yield(_) => st.yielded_by(guid) > 0.0,
+            Debuff::Vuln(element, _) => st
+                .vulned
+                .iter()
+                .any(|(g, on)| *g == guid && on.is_some_and(|(e, _)| e == element)),
+            Debuff::Other => st.imperiled.contains(&guid),
+        }
+    }
+
+    /// Record the debuff `spell` just sent at `guid` where the fight reads it; a resist or a
+    /// fizzle takes it off again (`rearm_debuff`).
+    pub(crate) fn note_debuff_sent(&mut self, guid: u32, spell: u32) {
+        let st = &mut self.autoplay;
+        match debuff_kind(spell) {
+            Debuff::Yield(by) => {
+                st.yield_sent = Some(guid);
+                st.mark_yielded(guid, by + st.yielded_by(guid));
+            }
+            Debuff::Vuln(element, m) => {
+                st.debuff_sent = Some(guid);
+                st.mark_vulned(guid, Some((element, m)));
+            }
+            Debuff::Other => {
+                st.debuff_sent = Some(guid);
+                if st.imperiled.len() > 64 {
+                    st.imperiled.drain(..32);
+                }
+                st.imperiled.push(guid);
+            }
+        }
+        *st.kill_kept.borrow_mut() = None;
+    }
+}
+
 impl Autoplay {
     /// How much magic defence the Magic Yield cast on `guid` took off, 0 for none.
     pub(crate) fn yielded_by(&self, guid: u32) -> f32 {

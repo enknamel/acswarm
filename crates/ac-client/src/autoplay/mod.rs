@@ -218,6 +218,8 @@ pub struct Autoplay {
     yielded: Vec<(u32, f32)>,
     /// The Magic Yield last sent and still unanswered, by target; re-armed as `debuff_sent` is.
     yield_sent: Option<u32>,
+    /// Targets a team debuff of neither kind above went on (an imperil), by guid.
+    imperiled: Vec<u32>,
     /// The fight's fastest kill of its target and when it was worked out (`Client::best_kill`).
     kill_kept:
         std::cell::RefCell<Option<(u32, Instant, Option<crate::autoplay::fight::kill::Kill>)>>,

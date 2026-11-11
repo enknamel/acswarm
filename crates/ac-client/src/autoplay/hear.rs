@@ -169,6 +169,7 @@ impl Client {
         }
         if let Some(g) = self.autoplay.debuff_sent.take() {
             self.autoplay.vulned.retain(|(t, _)| *t != g);
+            self.autoplay.imperiled.retain(|t| *t != g);
             tracing::info!("the debuff on {g:#010x} {why}; casting it again");
         }
     }
