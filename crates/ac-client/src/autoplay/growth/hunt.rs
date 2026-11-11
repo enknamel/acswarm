@@ -332,6 +332,13 @@ impl Client {
             return false;
         }
         let area = self.hunting_area().cloned();
+        // The ground stood on by the arrival's own test: its walk ends within the 2D
+        // GROUND_REACH, which may lie over a landblock's edge.
+        let hunting = (self.autoplay.growth.hunting_at)
+            .and_then(|h| ac_world::hunting::at(h).map(|g| (h, g.place())));
+        let here = hunting
+            .and_then(|g| self.ground_stood_on(&[g], here))
+            .unwrap_or(here);
         let tactic = ac_world::hunting::tactic_for(cfg.tactic, ac_world::hunting::at(here));
         use ac_world::hunting::Tactic;
         // Patrol and Camp keep walking the ground; only Sweep gives up on it.
@@ -436,7 +443,7 @@ impl Client {
         let st = &mut self.autoplay.growth;
         st.skip.expire(now, SKIP_GROUND_FOR);
         let mut skip: Vec<u32> = st.skip.iter().map(|(g, _)| *g).collect();
-        skip.push(here);
+        skip.push(cell >> 16);
         if let Some(h) = st.hunting_at {
             skip.push(h);
         }

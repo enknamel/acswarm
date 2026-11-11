@@ -85,48 +85,51 @@ impl Client {
     /// Whether the character hunts the pursued ground it stands on: not on a town run, nor on
     /// its way anywhere but round that ground's own spawn spots.
     fn is_at_pursued_ground(&self) -> bool {
-        let Some(here) = self.player.as_ref().map(|p| p.cell >> 16) else {
+        let Some(here) = self.pursued_ground_stood_on() else {
             return false;
         };
         let st = &self.autoplay.growth;
         let own_walk = st.bound_landblock() == Some(here);
-        self.is_pursued_hunt()
-            && self.pursued_place(here).is_some()
-            && st.run.is_none()
-            && (own_walk || !self.on_its_way())
+        self.is_pursued_hunt() && st.run.is_none() && (own_walk || !self.on_its_way())
     }
 
-    /// Whether the landblock stood in is a cleared pursued ground being hunted: everything on it
+    /// The pursued ground stood on ([`Self::ground_stood_on`]), over a landblock's edge too.
+    fn pursued_ground_stood_on(&self) -> Option<u32> {
+        let here = self.player.as_ref()?.cell >> 16;
+        self.ground_stood_on(&self.autoplay.growth.pursuit_grounds, here)
+    }
+
+    /// Whether the ground stood on is a cleared pursued ground being hunted: everything on it
     /// is fought, so the generators holding a slot make way for the creature sought.
     pub(crate) fn is_clearing_ground(&self) -> bool {
-        let here = self.player.as_ref().map(|p| p.cell >> 16);
+        let here = self.pursued_ground_stood_on();
         here.is_some() && self.autoplay.growth.clearing == here && self.is_at_pursued_ground()
     }
 
-    /// The hunt's `grounds` sweep: a sought creature in sight chased, the grounds left lately kept
-    /// marked while in or beside them, and `grounds` cut to those not left lately (all of them
-    /// when every one was), a rotating hunt's to the nearest [`HUNT_GROUNDS`]. `Some` is
-    /// `grow_pursuit`'s answer while chasing.
+    /// The hunt's `grounds` sweep, `stood` the one stood on: a sought creature in sight chased,
+    /// the grounds left lately kept marked while in or beside them, and `grounds` cut to those not
+    /// left lately (all of them when every one was), a rotating hunt's to the nearest
+    /// [`HUNT_GROUNDS`]. `Some` is `grow_pursuit`'s answer while chasing.
     pub(super) fn sweep(
         &mut self,
         title: &str,
         creature: &str,
         grounds: &mut Vec<(u32, Place)>,
+        stood: Option<u32>,
         now: Instant,
     ) -> Option<Option<bool>> {
         let cell = self.player.as_ref()?.cell;
         let here = cell >> 16;
         // Met anywhere, on a ground or between two: the fight rule only sees its own radius.
-        let on_ground = grounds.iter().any(|(lb, _)| *lb == here);
-        if self.is_rotating_hunt() || on_ground {
+        if self.is_rotating_hunt() || stood.is_some() {
             let sought = self.autoplay.growth.pursuit_sought.clone();
             if let Some(answer) = self.chase_in_sight(title, creature, &sought, now) {
-                if on_ground {
+                if let Some(on) = stood {
                     // It comes here after all: no miss of this ground stands.
                     let st = &mut self.autoplay.growth;
-                    st.found_empty.forget(&here);
-                    st.missed_stay.forget(&here);
-                    st.missed_back.forget(&here);
+                    st.found_empty.forget(&on);
+                    st.missed_stay.forget(&on);
+                    st.missed_back.forget(&on);
                     st.staying = None;
                 }
                 return Some(answer);

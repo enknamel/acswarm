@@ -3593,6 +3593,22 @@ fn an_aun_ralirea_ground_reached_over_its_landblock_s_edge_is_swept_not_walked_t
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_pursued_ground_cleared_over_its_landblock_s_edge_is_cleared_there() {
+    // Stood in 0x1AB6 within the reach of the 0x19B6 ground: the arrival found it, but clearing
+    // read the landblock stood in, and what held its generators' slots was walked past.
+    let now = std::time::Instant::now();
+    let mut c = mage_pursuing("championkillquest1", "aun-ralirea");
+    c.world.stats.level = 120;
+    c.autoplay.growth.proven_tier = 8;
+    c.refresh_quests(now);
+    crate::testkit::stand(&mut c, 0x1AB6_0004, glam::Vec3::new(4.6, 87.8, 76.0));
+    again(&mut c, now);
+    c.autoplay.growth.clearing = Some(0x19B6);
+    assert!(c.is_clearing_ground());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_wait_at_a_ground_of_several_spawn_rooms_is_stood_not_walked_round() {
     // The Silver Tusker's four rooms in the Tusker Pits, 7-18 m apart: the 90 s wait forgot the
     // rooms gone round and the next tick walked them again, a round every 1.7 s for good.

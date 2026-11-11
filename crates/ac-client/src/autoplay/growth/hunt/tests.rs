@@ -1135,3 +1135,18 @@ fn outdoors_the_pursued_creatures_spawn_spots_are_gone_round() {
         "not the nearest spot: {goal:?}"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ground_stood_on_over_its_landblock_s_edge_is_waited_at_not_left() {
+    // The Gotrok Obeloths' ground (A911) has its spot 9 m from the landblock east of it: arrived
+    // at from there, the quiet wait read the landblock stood in and chose another ground at once.
+    let mut c = standing_at(0xAA11_0002, glam::Vec3::new(5.0, 30.0, 60.0));
+    c.world.stats.level = 30;
+    c.autoplay.growth.hunting_at = Some(0xA911);
+    let cfg = Growth::default();
+    let now = Instant::now();
+    c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(1));
+    assert!(!c.grow_hunt(now, &cfg), "{}", c.autoplay.status);
+    assert!(!c.traveling(), "left: {}", c.autoplay.status);
+}

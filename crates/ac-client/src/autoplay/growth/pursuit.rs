@@ -1232,13 +1232,15 @@ impl Client {
             PursuitStep::Hunt { creature, .. } => {
                 let here = self.player.as_ref()?.cell >> 16;
                 let mut grounds = self.autoplay.growth.pursuit_grounds.clone();
-                if let Some(answer) = self.sweep(&line.title, creature, &mut grounds, now) {
+                // Worked out once: the sweep, the camp and the holds read one ground stood on.
+                let stood = self.ground_stood_on(&grounds, here);
+                if let Some(answer) = self.sweep(&line.title, creature, &mut grounds, stood, now) {
                     return answer;
                 }
                 if let Some(answer) = self.wait_out_unload(&line.title) {
                     return answer;
                 }
-                let stood = self.ground_stood_on(&grounds, here);
+                let stood = stood.filter(|lb| grounds.iter().any(|g| g.0 == *lb));
                 let camped = stood.is_some();
                 let here = stood.unwrap_or(here);
                 // Cleared where camping beats leaving and others hold its slots: they make way.
@@ -1420,7 +1422,7 @@ impl Client {
 
     /// The landblock of the ground of `grounds` stood on: `here`'s, or outdoors one whose place
     /// is within the [`GROUND_REACH`] its walk ends at, which may lie over a landblock's edge.
-    fn ground_stood_on(&self, grounds: &[(u32, Place)], here: u32) -> Option<u32> {
+    pub(crate) fn ground_stood_on(&self, grounds: &[(u32, Place)], here: u32) -> Option<u32> {
         if grounds.iter().any(|(lb, _)| *lb == here) {
             return Some(here);
         }
