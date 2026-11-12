@@ -21,8 +21,10 @@
 # PropertyBool 8: Player_Inventory.cs:3439), corpse create lists (Contain,
 # or Treasure without Wield: Creature_Death.cs:688-693), names, levels,
 # item types and values, and spawn entries per creature and landblock
-# with hunting.sh's filters (attackable, with a level; a landblock with a
-# surface counts its outdoor spawns only), the encounter table's for a
+# with hunting.sh's filters (attackable, with a level but for a placed one:
+# the Aetherium stockpiles have none; a landblock with a surface counts a
+# creature's outdoor spawns only, its dungeon's when it has none outdoors:
+# the stockpiles' excavation under 0x8852), the encounter table's for a
 # creature nothing placed spawns; and for each wanted item the
 # generators making it on the ground and the chests holding it, with the
 # keys a locked one needs, and the placed objects a recipe makes it on from
@@ -173,22 +175,16 @@ q spawns 'with recursive spawn(inst, wcid, depth) as (
     -- RegenLocationType.cs:12-16) puts nothing in the world, as the guardians a chest holds
     and (g.where_Create & 56) = 0
 ),
-surface as (
-  select distinct obj_Cell_Id >> 16 lb from landblock_instance
-  where (obj_Cell_Id & 65535) < 256
-),
 mon as (
   select distinct s.inst, s.wcid, li.obj_Cell_Id >> 16 lb,
     if((li.obj_Cell_Id & 65535) < 256, "o", "d") kind
   from spawn s
   join landblock_instance li on li.guid = s.inst
   join weenie c on c.class_Id = s.wcid and c.type = 10
-  join weenie_properties_int lv on lv.object_Id = c.class_Id and lv.type = 25
   left join weenie_properties_bool b on b.object_Id = c.class_Id and b.type = 19
   where coalesce(b.value, 1) = 1
 )
-select m.wcid, hex(m.lb), count(*) from mon m
-where m.kind = "o" or m.lb not in (select lb from surface)
+select m.wcid, hex(m.lb), if(sum(m.kind = "o") > 0, sum(m.kind = "o"), count(*)) from mon m
 group by m.wcid, m.lb;'
 
 # And the outdoor generators a landblock puts out from the encounter table, each at a cell corner
@@ -249,6 +245,10 @@ join weenie w on w.class_Id = s.object_Id and w.type = 22 where s.type = 13;'
 
 q stuck 'select object_Id from weenie_properties_bool where type = 1 and value = 1;'
 
+# Creatures that leave no corpse (NoCorpse, PropertyBool 29): their drops lie on the ground where
+# they died (Creature_Death.cs:431-443), a generator among them making its items there.
+q nocorpse 'select object_Id from weenie_properties_bool where type = 29 and value = 1;'
+
 # What a carried item used on a placed object makes (RecipeManager.UseObjectOnTarget,
 # Managers/RecipeManager.cs:43-130): the made item, the item used and the object.
 q recipes 'select r.success_W_C_I_D, c.source_W_C_I_D, c.target_W_C_I_D
@@ -300,7 +300,7 @@ q encroots 'select hex(landblock), weenie_Class_Id, count(*) from encounter
 group by landblock, weenie_Class_Id;'
 
 for t in placed emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
-  gens chestlist locks keys stuck recipes combines encounters roots profiles genprops crit inst links \
+  gens chestlist locks keys stuck nocorpse recipes combines encounters roots profiles genprops crit inst links \
   encroots genevent summonspell linkportal deathsignals portalstamps spellpos reldest hearing; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done

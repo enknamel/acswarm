@@ -166,6 +166,15 @@ class Data:
             last[g] = p if p >= 0 else was
             self.made_by[int(wcid)].append((g, min(chance, 1.0), int(where),
                                             (int(cell, 16), x, y, z)))
+        # A creature with no corpse drops a generator on the ground where it died
+        # (Creature_Death.cs:431-443): what that makes there is the creature's drop too (the
+        # Dull Aetherium Ore Stockpile's nine fragments).
+        nocorpse = {int(o) for (o,) in rows(dump, "nocorpse")}
+        for item, makers in list(self.made_by.items()):
+            for gen, chance, where, _ in makers:
+                if not where & (8 | 16 | 32 | 64):
+                    self.drops[item].extend((c, p * chance) for c, p in self.drops.get(gen, ())
+                                            if c in nocorpse)
         # Generators put in the world themselves: placed, or a landblock's encounter.
         self.roots = {int(w) for (w,) in rows(dump, "roots")}
         self.chest_list = defaultdict(set)
@@ -680,15 +689,17 @@ class Spawning:
 
     def rates(self, wcid, lb):
         """(load, per hour, others an hour) of creature `wcid` on landblock `lb`: a surface
-        landblock's outdoor roots only, as the spawns query counts. Others are what clearing its
-        slots kills, counted from the roots it comes from only so (a share of a region roll)."""
+        landblock's outdoor roots only, its dungeon's when none outdoors put it out, as the spawns
+        query counts. Others are what clearing its slots kills, counted from the roots it comes
+        from only so (a share of a region roll)."""
         load = rate = others = 0.0
-        for w, links, outdoors, n in self.roots.get(lb, ()):
-            if lb in self.surface and not outdoors:
-                continue
-            if not (w == wcid or wcid in links or wcid in self.reaches(w)
-                    or any(wcid in self.reaches(c) for c in links)):
-                continue
+        def puts_out(w, links):
+            return (w == wcid or wcid in links or wcid in self.reaches(w)
+                    or any(wcid in self.reaches(c) for c in links))
+        roots = [r for r in self.roots.get(lb, ()) if puts_out(r[0], r[1])]
+        if lb in self.surface and any(r[2] for r in roots):
+            roots = [r for r in roots if r[2]]
+        for w, links, _, n in roots:
             ld, rt = self.root_figures(w, links)
             load += n * ld.get(wcid, 0.0)
             rate += n * rt.get(wcid, 0.0)

@@ -6,7 +6,8 @@
 # which spawns creatures from its list (weenie_properties_generator), and
 # a generator can spawn other generators, so the list is walked to a
 # depth of four (as reference/scripts/data/hunting.sh does). A creature
-# counts when it is attackable and has a level.
+# counts when it is attackable; one with no level (the Aetherium ore
+# stockpiles) as level 0.
 #
 # One row per cell and creature (weenie class): outdoors the cell is the
 # outdoor cell the generators stand in, indoors the dungeon room. x/y/z are
@@ -37,11 +38,11 @@ SQL='set session max_execution_time=20000; with recursive spawn(inst, wcid, dept
 ),
 mon as (
   select distinct s.inst, s.wcid, li.obj_Cell_Id cell,
-    li.origin_X x, li.origin_Y y, li.origin_Z z, nm.value nm, lv.value lv
+    li.origin_X x, li.origin_Y y, li.origin_Z z, nm.value nm, coalesce(lv.value, 0) lv
   from spawn s
   join landblock_instance li on li.guid = s.inst
   join weenie c on c.class_Id = s.wcid and c.type = 10
-  join weenie_properties_int lv on lv.object_Id = c.class_Id and lv.type = 25
+  left join weenie_properties_int lv on lv.object_Id = c.class_Id and lv.type = 25
   join weenie_properties_string nm on nm.object_Id = c.class_Id and nm.type = 1
   left join weenie_properties_bool b on b.object_Id = c.class_Id and b.type = 19
   where coalesce(b.value, 1) = 1
