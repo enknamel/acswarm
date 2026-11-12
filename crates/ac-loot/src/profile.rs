@@ -801,13 +801,13 @@ impl Profile {
     pub fn fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        // A salvage rule's bands decide how it salvages, not what it takes: edited, they re-judge
-        // nothing, and an empty one is skipped, so every older fingerprint stands. A give rule's
-        // receiver is the same: where it goes, not what is taken.
+        // Salvage bands, a give rule's receiver and the editor's group decide nothing about what is
+        // taken: blanked here, and skipped empty when written, so every older fingerprint stands.
         let rules: Vec<Rule> = self
             .rules
             .iter()
             .map(|r| Rule {
+                group: String::new(),
                 combine: String::new(),
                 give_to: None,
                 ..r.clone()
@@ -2089,6 +2089,47 @@ mod tests {
         // A blank name, as an editor leaves after un-picking "this counter", means none was named.
         p.sell_to = SellTo::Named("   ".into());
         assert_eq!(p.sell_to_named(), None);
+    }
+
+    #[test]
+    fn a_profile_saved_before_groups_loads_saves_and_reloads_with_the_same_rules() {
+        let text = r#"{"name":"Old","note":"","rules":[
+            {"name":"dear","on":true,"action":"keep","all":[],"keep_up_to":null},
+            {"name":"junk","on":false,"action":"sell","all":[],"keep_up_to":3}]}"#;
+        let old: Profile = serde_json::from_str(text).expect("an old profile loads");
+        assert!(old.rules.iter().all(|r| r.group.is_empty()));
+        let saved = serde_json::to_string(&old).unwrap();
+        assert!(!saved.contains("group"), "no group is written: {saved}");
+        let back: Profile = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back.rules, old.rules);
+        assert_eq!(back.fingerprint(), old.fingerprint());
+    }
+
+    #[test]
+    fn a_group_files_a_rule_without_changing_what_the_profile_decides() {
+        let p = Profile::starter();
+        let mut grouped = p.clone();
+        for (i, r) in grouped.rules.iter_mut().enumerate() {
+            r.group = format!("group {}", i % 3);
+        }
+        assert_eq!(grouped.fingerprint(), p.fingerprint());
+        let back: Profile =
+            serde_json::from_str(&serde_json::to_string(&grouped).unwrap()).unwrap();
+        assert_eq!(back, grouped, "a group reads back");
+        let me = me(50, &[(skill::HEALING, 100, sac::TRAINED)]);
+        for (name, kind, value) in [
+            ("Pyreal", item_type::MONEY, 1_000),
+            ("Copper Pea", item_type::MISC, 40),
+            ("Prismatic Taper", item_type::SPELL_COMPONENTS, 5),
+            ("Rusty Nail", item_type::MISC, 1),
+        ] {
+            let it = item(name, kind, value);
+            assert_eq!(
+                grouped.judge_test(&it, &me, "Aldric", 0),
+                p.judge_test(&it, &me, "Aldric", 0),
+                "{name}"
+            );
+        }
     }
 
     #[test]

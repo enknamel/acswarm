@@ -33,7 +33,7 @@ const LONG_FILES: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/ac-plugin/src/panels/loot_profiles.rs",
-        1_800,
+        1_700,
         "the profile editor, one widget per rule field, over an ordered list that is the policy",
     ),
     (

@@ -28,10 +28,11 @@
 //! another that reads it again, so a profile from a friend is dropped
 //! in and reloaded.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 mod receiver;
+mod rule_groups;
 
 use super::{caption, title, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
@@ -209,18 +210,6 @@ pub(crate) fn unused_name(names: &[String], want: &str) -> String {
         .map(|i| format!("{want} {i}"))
         .find(|n| !taken(n))
         .unwrap_or_else(|| want.to_string())
-}
-
-/// Move entry `i` of a list one step up or down. True when it moved.
-pub(crate) fn move_entry<T>(list: &mut [T], i: usize, up: bool) -> bool {
-    let Some(j) = (if up { i.checked_sub(1) } else { Some(i + 1) }) else {
-        return false;
-    };
-    if i >= list.len() || j >= list.len() {
-        return false;
-    }
-    list.swap(i, j);
-    true
 }
 
 /// Every word `ItemStats::kind` can hold, for the kind dropdown: the
@@ -428,6 +417,16 @@ pub(crate) struct Editor {
     searches: BTreeMap<String, String>,
     /// Names being typed into the always / never lists.
     drafts: super::autoplay::Drafts,
+    /// The rule list's search line: only the rules it finds are shown.
+    rule_search: String,
+    /// Group headings folded shut, by group name ("" for the ungrouped).
+    shut: BTreeSet<String>,
+    /// The group being renamed, and the name being typed for it.
+    group_rename: Option<(String, String)>,
+    /// A new group's name, typed under the open rule to file it there.
+    move_to: String,
+    /// A new group's name, typed under the list to start it with a rule.
+    new_group: String,
 }
 
 impl Editor {
@@ -1252,109 +1251,6 @@ fn shopping(ui: &mut egui::Ui, p: &mut Profile) {
     });
 }
 
-fn rules(ui: &mut egui::Ui, p: &mut Profile, editor: &mut Editor) {
-    let mut drop = None;
-    let mut moved = None;
-    let mut copy = None;
-    let n = p.rules.len();
-    for i in 0..n {
-        let open = editor.open_rule == Some(i);
-        ui.horizontal(|ui| {
-            // Straight to the library, so a rule switched off here is
-            // off everywhere before the next corpse.
-            ui.checkbox(&mut p.rules[i].on, "")
-                .on_hover_text("Off without being deleted");
-            let name = if p.rules[i].name.trim().is_empty() {
-                format!("rule {}", i + 1)
-            } else {
-                p.rules[i].name.clone()
-            };
-            if ui
-                .selectable_label(open, name)
-                .on_hover_text("Open its conditions")
-                .clicked()
-            {
-                editor.open_rule = if open { None } else { Some(i) };
-            }
-            action_box(
-                ui,
-                &format!("loot_profiles.rule{i}.act"),
-                &mut p.rules[i].action,
-            );
-            if p.rules[i].needs_id() {
-                id_marker(ui);
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add(egui::Button::new("x").small())
-                    .on_hover_text("Delete this rule")
-                    .clicked()
-                {
-                    drop = Some(i);
-                }
-                if ui
-                    .add(egui::Button::new("+").small())
-                    .on_hover_text("A copy of this rule, under it")
-                    .clicked()
-                {
-                    copy = Some(i);
-                }
-                if ui
-                    .add_enabled(i + 1 < n, egui::Button::new("v").small())
-                    .on_hover_text("Read this rule later")
-                    .clicked()
-                {
-                    moved = Some((i, false));
-                }
-                if ui
-                    .add_enabled(i > 0, egui::Button::new("^").small())
-                    .on_hover_text("Read this rule earlier")
-                    .clicked()
-                {
-                    moved = Some((i, true));
-                }
-            });
-        });
-        let told = p.rules[i].tell();
-        ui.add(egui::Label::new(egui::RichText::new(told).small().color(DIM)).wrap());
-        if open {
-            egui::Frame::new()
-                .inner_margin(4)
-                .fill(egui::Color32::from_black_alpha(60))
-                .show(ui, |ui| {
-                    rule_editor(
-                        ui,
-                        &format!("loot_profiles.rule{i}"),
-                        &mut p.rules[i],
-                        editor,
-                    );
-                });
-        }
-        ui.add_space(2.0);
-    }
-    if let Some(i) = drop {
-        p.rules.remove(i);
-        editor.open_rule = None;
-    }
-    if let Some(i) = copy {
-        let mut made = p.rules[i].clone();
-        // Names are how a tag remembers its rule (`Ledger::why`): never two alike.
-        let names: Vec<String> = p.rules.iter().map(|r| r.name.clone()).collect();
-        made.name = unused_name(&names, &format!("{} copy", made.name));
-        p.rules.insert(i + 1, made);
-        editor.open_rule = Some(i + 1);
-    }
-    if let Some((i, up)) = moved {
-        if move_entry(&mut p.rules, i, up) {
-            // The editor follows the rule it had open rather than the
-            // place it used to sit in.
-            if editor.open_rule == Some(i) {
-                editor.open_rule = Some(if up { i - 1 } else { i + 1 });
-            }
-        }
-    }
-}
-
 /// The panel. Returns what was asked for; every edit to the profile
 /// open comes back as a `put`, so nothing waits on an Apply button.
 pub(crate) fn draw(egui: &egui::Context, v: &ProfilesView, editor: &mut Editor) -> Actions {
@@ -1436,32 +1332,7 @@ pub(crate) fn draw(egui: &egui::Context, v: &ProfilesView, editor: &mut Editor) 
                         .desired_width(440.0),
                 );
                 ui.add_space(4.0);
-                caption(
-                    ui,
-                    "rules, in order: the first that claims an item decides it",
-                );
-                egui::ScrollArea::vertical()
-                    .id_salt("loot_profiles.rules")
-                    .max_height(240.0)
-                    .show(ui, |ui| {
-                        ui.set_min_width(440.0);
-                        if p.rules.is_empty() {
-                            caption(ui, "(no rules: nothing is taken)");
-                        }
-                        rules(ui, p, editor);
-                    });
-                if ui
-                    .add(egui::Button::new("Add a rule").small())
-                    .on_hover_text("A new rule at the end, read last")
-                    .clicked()
-                {
-                    let names: Vec<String> = p.rules.iter().map(|r| r.name.clone()).collect();
-                    p.rules.push(Rule {
-                        name: unused_name(&names, &format!("rule {}", p.rules.len() + 1)),
-                        ..Default::default()
-                    });
-                    editor.open_rule = Some(p.rules.len() - 1);
-                }
+                rule_groups::list(ui, p, editor);
                 ui.separator();
                 shopping(ui, p);
                 ui.separator();
@@ -1567,12 +1438,14 @@ impl LootProfiles {
             rules: vec![
                 Rule {
                     name: "anything dear".into(),
+                    group: "Rares".into(),
                     action: LootAction::Keep,
                     all: vec![Ask::Item(Term::Num(NumKey::Value, Op::Ge, 5_000.0))],
                     ..Default::default()
                 },
                 Rule {
                     name: "rings with two epics".into(),
+                    group: "Rares".into(),
                     action: LootAction::Keep,
                     all: vec![
                         Ask::Item(Term::Slot(ac_client::items::slot::FINGER)),
@@ -1596,6 +1469,7 @@ impl LootProfiles {
                 },
                 Rule {
                     name: "poor armour for salvage".into(),
+                    group: "Salvage".into(),
                     action: LootAction::Salvage,
                     all: vec![
                         Ask::Item(Term::Kind("armor".into())),
@@ -1805,18 +1679,6 @@ mod tests {
     }
 
     #[test]
-    fn rules_move_one_step_and_stop_at_the_ends() {
-        let mut list = vec![1, 2, 3];
-        assert!(!move_entry(&mut list, 0, true));
-        assert!(!move_entry(&mut list, 2, false));
-        assert!(!move_entry(&mut list, 9, true));
-        assert!(move_entry(&mut list, 0, false));
-        assert_eq!(list, vec![2, 1, 3]);
-        assert!(move_entry(&mut list, 2, true));
-        assert_eq!(list, vec![2, 3, 1]);
-    }
-
-    #[test]
     fn changing_what_a_condition_asks_gives_it_the_right_fields() {
         // Every sort of question round-trips: the blank one it makes is
         // read back as the same sort, so the dropdown cannot land on a
@@ -1937,5 +1799,10 @@ mod tests {
         editor.open_rule = Some(2);
         assert_eq!(frame(&ctx, &view, &mut editor), Actions::default());
         assert_eq!(editor.open_rule, Some(2));
+        // And with a group folded and a search line typed, which only change what is shown.
+        editor.shut.insert("Rares".into());
+        assert_eq!(frame(&ctx, &view, &mut editor), Actions::default());
+        editor.rule_search = "RING".into();
+        assert_eq!(frame(&ctx, &view, &mut editor), Actions::default());
     }
 }
