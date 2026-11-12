@@ -1277,7 +1277,13 @@ impl Client {
         } else {
             waited >= give_up
         };
-        if !due {
+        // Cast within the server's 3.5 s of a portal, it is turned away as teleported too recently
+        // and tried again only at the give-up clock: held till then instead.
+        let portal_wait = ac_world::recalls::spell::is_portal_checked(spell)
+            && self
+                .teleported_at
+                .is_some_and(|t| now.saturating_duration_since(t) < PORTAL_COOLDOWN);
+        if !due || portal_wait {
             return;
         }
         if casts >= RECALL_TRIES {

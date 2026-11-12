@@ -59,6 +59,16 @@ pub mod spell {
         spell == FREE_LIFESTONE || spell == FREE_MARKETPLACE
     }
 
+    /// Whether the recall goes by a portal and so asks the portal's own use rules, 3.5 s since
+    /// the last portal among them (WorldObject_Magic.cs:1158, Portal.cs:120): Portal Recall and
+    /// the ties' recalls, not the lifestone's.
+    pub fn is_portal_checked(spell: u32) -> bool {
+        matches!(
+            spell,
+            PORTAL_RECALL | PRIMARY_PORTAL_RECALL | SECONDARY_PORTAL_RECALL
+        )
+    }
+
     pub const LIFESTONE_RECALL: u32 = 1635;
     pub const LIFESTONE_SENDING: u32 = 1636;
     pub const LIFESTONE_TIE: u32 = 2644;

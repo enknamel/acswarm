@@ -2357,3 +2357,37 @@ fn a_portal_that_ignores_collisions_is_used_at_its_mouth_not_jumped_into() {
     assert!(c2.wait_at_mouth(now));
     assert!(!used(&c2), "a portal walked into was used");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn portal_recall_waits_out_the_servers_portal_cooldown_before_it_is_cast() {
+    // Cast 0.84 s after the Tusker Barracks portal, Portal Recall was turned away as teleported
+    // too recently (Portal.cs:120, asked of the recall's portal) and cast again only at 15 s.
+    let t0 = Instant::now();
+    let (mut c, known) = crate::testkit::a_caster_knowing(t0, &["Portal Recall"]);
+    assert_eq!(known[0], ac_world::recalls::spell::PORTAL_RECALL);
+    let cell = 0x8A6C_002B;
+    let exit = Place {
+        at: ac_world::landblock_origin(cell) + Vec3::new(124.3, 56.0, 11.0),
+        cell,
+    };
+    let trip = Trip {
+        steps: vec![
+            Step::Recall {
+                spell: known[0],
+                name: "Portal Recall".into(),
+                exit,
+            },
+            Step::Walk(exit),
+        ],
+        seconds: 60.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
+    c.teleported_at = Some(t0);
+    let at = |s: f32| t0 + Duration::from_secs_f32(s);
+    c.step_goal(at(0.0));
+    c.step_goal(at(1.0));
+    assert_eq!(c.travel.state.recall_casts, 0, "cast inside the cooldown");
+    c.step_goal(at(4.2));
+    assert_eq!(c.travel.state.recall_casts, 1, "not cast once it was over");
+}
