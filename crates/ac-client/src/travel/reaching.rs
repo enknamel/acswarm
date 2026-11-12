@@ -138,7 +138,8 @@ impl Client {
     }
 
     /// Whether indoor `cell` is a dungeon's room, not a building's: in a dungeon's landblock, or
-    /// one the outdoors cannot see (Ketnan's, under Tusker Island). Without the grid, as dungeon.
+    /// one not walked into from its landblock's ground (Ketnan's, under Tusker Island; not the
+    /// Gear Knights' excavation). Without the grid, as dungeon.
     pub(crate) fn is_dungeon_cell(&mut self, cell: u32) -> bool {
         if cell & 0xFFFF < 0x100 {
             return false;
@@ -149,7 +150,7 @@ impl Client {
         let dungeon = self
             .travel_terrain()
             .is_none_or(|(grid, _)| grid.is_dungeon_block(cell))
-            || ac_scene::interior::seen_outside(&self.assets, cell) == Some(false);
+            || ac_scene::interior::can_walk_in(&self.assets, cell) == Some(false);
         self.travel.dungeon_cells.insert(cell, dungeon);
         dungeon
     }

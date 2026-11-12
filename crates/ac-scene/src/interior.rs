@@ -115,6 +115,43 @@ pub fn seen_outside(assets: &Assets, cell_id: u32) -> Option<bool> {
     Some(cell.flags & env_cell_flags::SEEN_OUTSIDE != 0)
 }
 
+/// A landblock's side (metres): 8 cells of 24.
+const LANDBLOCK_METRES: f32 = 192.0;
+
+/// Whether indoor cell `cell_id` is walked into from its landblock's ground: it lies under that
+/// ground, and it or a room its portals lead to is seen from outdoors or opens onto the land
+/// (`other_cell_id` 0xFFFF). The Gear Knights' excavation under 0x8852 opens at 0x0115; Ketnan's
+/// rooms (0xF784039F, at 376, 528) lie off the landblock, past any walk's region. `None`: no cell.
+pub fn can_walk_in(assets: &Assets, cell_id: u32) -> Option<bool> {
+    let block = cell_id & 0xFFFF_0000;
+    let parse = |id: u32| {
+        let bytes = assets.cell.read(id).ok()?;
+        EnvCell::parse(id, &bytes).ok()
+    };
+    let first = parse(cell_id)?;
+    let at = first.position.origin;
+    let ground = 0.0..LANDBLOCK_METRES;
+    if !ground.contains(&at.x) || !ground.contains(&at.y) {
+        return Some(false);
+    }
+    let mut seen = std::collections::HashSet::from([(cell_id & 0xFFFF) as u16]);
+    let mut todo = vec![first];
+    while let Some(cell) = todo.pop() {
+        if cell.flags & env_cell_flags::SEEN_OUTSIDE != 0 {
+            return Some(true);
+        }
+        for p in &cell.portals {
+            if p.other_cell_id == 0xFFFF {
+                return Some(true);
+            }
+            if seen.insert(p.other_cell_id) {
+                todo.extend(parse(block | u32::from(p.other_cell_id)));
+            }
+        }
+    }
+    Some(false)
+}
+
 /// The cells visible from indoor cell `cell_id` (low 16 bits, as the data lists them) and whether it is
 /// seen from outdoors: what ACE shows a player standing in it (ObjectMaint.cs:365-388). `None`: no such cell.
 pub fn cell_view(assets: &Assets, cell_id: u32) -> Option<(Vec<u16>, bool)> {
