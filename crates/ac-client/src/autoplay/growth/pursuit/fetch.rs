@@ -113,6 +113,12 @@ impl Ask<'_> {
                 Want::Event(_) => 0,
                 _ => continue,
             };
+            let carried = |k: &u32| (self.asking.carried)(*k) > 0;
+            // A give whose item is carried is the way: another's item is not had first (the
+            // Ghost of Dylaeral takes either Sacrificial Dagger; the one held is given).
+            let gives_held = self.chains.sources(want).iter().any(|s| {
+                s.kind == Yield::Give && !(self.dropped)(s) && s.keys.iter().any(|k| carried(&k.0))
+            });
             for s in self.chains.sources(want) {
                 if s.kind.is_hunted() || (self.dropped)(s) {
                     continue;
@@ -120,7 +126,6 @@ impl Ask<'_> {
                 // An NPC only an event puts out is gone to once the event is on; a give's item
                 // is had first, as the event may not last.
                 let off = s.event.as_deref().filter(|e| !(self.event_on)(e));
-                let carried = |k: &u32| (self.asking.carried)(*k) > 0;
                 let has_item = s.kind != Yield::Give || s.keys.iter().any(|k| carried(&k.0));
                 if let Some(e) = off.filter(|_| has_item) {
                     if !events.contains(&e) {
@@ -156,6 +161,7 @@ impl Ask<'_> {
                             at,
                             item,
                         },
+                        None if gives_held => continue,
                         None => {
                             for (k, name) in &s.keys {
                                 if !locked.iter().any(|l| l.0 == *k) {

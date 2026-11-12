@@ -4343,3 +4343,27 @@ fn the_bar_carried_to_the_repair_golem_is_worked_by_the_pursuit_not_passed_to_th
         "{gems:?}"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_dagger_held_is_the_ghosts_and_its_pickup_stamp_holds_nothing_back() {
+    // Blargerton held the Aerlinthe dagger (28065), the Bellows and the Bar, galaeraldagger 17 h
+    // off: the board asked for the other Sacrificial Dagger (7447) the Ghost also takes, waited
+    // on its stamp, and the quest showed as waiting from zero.
+    let mut c = mage_pursuing("give:40913", "aerfalle");
+    let now = std::time::Instant::now();
+    for (guid, wcid, name) in [
+        (0x8000_0701, 28065, "Sacrificial Dagger"),
+        (0x8000_0702, 7411, "Pyreal Forge Bellows"),
+        (0x8000_0703, 7412, "Sluice Gate Bar"),
+    ] {
+        in_the_pack(&mut c, guid, wcid, name, 1);
+    }
+    let unix = crate::holdings::unix_now();
+    c.quest_log.note_wait("galaeraldagger", unix + 60_000);
+    let step = again(&mut c, now);
+    assert!(
+        matches!(&step, PursuitStep::GiveTo { source, item: 7412, .. } if source.wcid == 7404),
+        "{step:?}"
+    );
+}

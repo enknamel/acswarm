@@ -622,9 +622,11 @@ impl Ask<'_> {
         depth: usize,
     ) -> (PursuitStep, Option<Hunting>) {
         // An item whose pickup stamp waits is not gone for: the server turns the pickup down (the
-        // Ancient Key hunted with novquest1 2.6 h off). With every one so, the quest waits.
+        // Ancient Key hunted with novquest1 2.6 h off). With every one so, the quest waits. One
+        // carried is had: its stamp bars only another (the Sacrificial Dagger held for the Ghost).
+        let carried = |i: &u32| self.facts.carried.get(i).is_some_and(|n| *n > 0);
         let waits = |w: &Want| match w {
-            Want::Item(i) => self.facts.log.pickup_wait(*i, self.facts.now),
+            Want::Item(i) if !carried(i) => self.facts.log.pickup_wait(*i, self.facts.now),
             _ => None,
         };
         let open: Vec<Want> = wants
