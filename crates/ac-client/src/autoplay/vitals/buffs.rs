@@ -117,13 +117,6 @@ impl Client {
         self.longest_left(|e| e.category as u32 == category && e.power >= power)
     }
 
-    /// Whether a stronger enchantment of `category` than `power` is still up: a cast of the weaker
-    /// is then "surpassed" and spends its components for nothing.
-    fn is_surpassed(&self, category: u32, power: u32) -> bool {
-        self.longest_left(|e| e.category as u32 == category && e.power > power)
-            .is_some_and(|left| left > 0.0)
-    }
-
     /// The longest any enchantment passing `keep` has left. A quest or
     /// item enchantment with no end has a duration below zero and is
     /// worth infinity here: treating it as run out had a character
@@ -358,12 +351,9 @@ impl Client {
                 .is_some_and(|f| f.is_bringing())
     }
 
-    /// The urgent window `base`, widened so that the buffs coming due together all go back up
-    /// before the first of them lapses; not in a fight, where each one pulled in is a heal's mana.
+    /// The window `base`, widened so that the buffs coming due together all go back up before the
+    /// first of them lapses, in a fight too: a buff never runs out.
     fn queue_window(&self, base: f32, wants: &[crate::buffs::Want], now: Instant) -> f32 {
-        if self.in_a_fight() {
-            return base;
-        }
         let lefts: Vec<f32> = self
             .buff_times(wants, now)
             .into_iter()
@@ -471,10 +461,10 @@ impl Client {
         // to cast holds no swing back. Worked out once, for the pick and
         // for saying why none is due.
         let wants = self.auto_buffs();
-        let mut within = self.buff_within_now(urgent);
-        if urgent {
-            within = self.queue_window(within, &wants, now);
-        }
+        // Widened for a cluster coming due together, the top-up too: put back a cast or two a lull
+        // ahead of it, not all at once at its end.
+        let within = self.buff_within_now(urgent);
+        let within = self.queue_window(within, &wants, now);
         let mut due = self.due_buff_among(&wants, within, now);
         let mut topping_up = !urgent;
         // Between fights the urgent pass tops up as well, one at a time, journey or not: the
@@ -486,7 +476,8 @@ impl Client {
             return false;
         }
         if due.is_none() && urgent && !fighting && !yielding {
-            due = self.due_buff_among(&wants, cfg.top_up_within, now);
+            let top_up = self.queue_window(cfg.top_up_within, &wants, now);
+            due = self.due_buff_among(&wants, top_up, now);
             topping_up = true;
         }
         let Some((spell, target, category, name, lasts)) = due else {
@@ -728,8 +719,9 @@ impl Client {
         })
     }
 
-    /// Every buff wanted, `(seconds left, spell, target, category)`, one surpassed left out. One
-    /// not up is 0 s left; until the server's clock is known nothing can be told apart, so none.
+    /// Every buff wanted, `(seconds left, spell, target, category)`, a stronger one's time counting:
+    /// cast as it nears its end, the weaker goes on the next layer and holds on after it
+    /// (`EnchantmentManager.cs:154-175`). One not up is 0 s left; with no server clock, none.
     fn buff_times(
         &self,
         wants: &[crate::buffs::Want],
@@ -746,9 +738,6 @@ impl Client {
             None => {}
         };
         for want in wants {
-            if want.target == Target::Me && self.is_surpassed(want.category, want.power) {
-                continue;
-            }
             let left = match want.target {
                 Target::Me => self.category_left(want.category, want.power),
                 Target::Item(g) => self.item_buff_left(g, want.category, want.power, now),
@@ -759,13 +748,10 @@ impl Client {
             let Some(spell) = self.spell_by_name(name) else {
                 continue;
             };
-            let (category, power) = table
+            let category = table
                 .as_ref()
                 .and_then(|t| t.get(spell))
-                .map_or((0, 0), |s| (s.category, s.power));
-            if self.is_surpassed(category, power) {
-                continue;
-            }
+                .map_or(0, |s| s.category);
             offer(self.buff_left(spell), spell, Target::Me, category);
         }
         out

@@ -224,24 +224,35 @@ fn a_fighter_with_no_buff_due_is_not_held_back_between_swings() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_buff_weaker_than_one_still_up_is_not_cast() {
-    // Blargerton topped up Aura of Spirit Drinker Self IV under a Buffbot's Other VII with four
-    // minutes left: "surpassed", and two tapers gone each time.
+fn a_buff_weaker_than_one_up_is_layered_under_it_as_it_nears_its_end() {
+    // A Buffbot's buffs all ran out within minutes, and Blargerton's own went up only after each
+    // had lapsed (Coordination, Fealty, Summoning Mastery Self VI). Cast under the stronger one, a
+    // weaker goes on the next layer and holds on after it (EnchantmentManager.cs:154-175).
     let now = Instant::now();
     let (mut c, spell) = crate::testkit::a_caster_with_a_buff_due(now);
     let sp = c.assets.spell_table().unwrap().get(spell).unwrap().clone();
-    let up = |power: u32| ac_world::stats::Enchantment {
+    let up = |power: u32, duration: f64| ac_world::stats::Enchantment {
         spell_id: 1,
         category: sp.category as u16,
         power,
         start_time: 0.0,
-        duration: 100.0,
+        duration,
         received: Some(1000.0),
         ..Default::default()
     };
-    c.world.stats.enchantments = vec![up(sp.power + 100)];
-    assert_eq!(c.due_buff(300.0, now), None, "cast under a stronger one");
-    c.world.stats.enchantments = vec![up(sp.power)];
+    c.world.stats.enchantments = vec![up(sp.power + 100, 3600.0)];
+    assert_eq!(
+        c.due_buff(300.0, now),
+        None,
+        "cast under a stronger one far from its end"
+    );
+    c.world.stats.enchantments = vec![up(sp.power + 100, 100.0)];
+    assert_eq!(
+        c.due_buff(300.0, now).map(|d| d.0),
+        Some(spell),
+        "not layered under a stronger one nearing its end"
+    );
+    c.world.stats.enchantments = vec![up(sp.power, 100.0)];
     assert_eq!(
         c.due_buff(300.0, now).map(|d| d.0),
         Some(spell),
@@ -468,9 +479,9 @@ fn a_fight_at_low_mana_puts_no_bane_back_and_leaves_the_heal_its_mana() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn in_a_fight_the_urgent_window_pulls_no_more_banes_in() {
-    // The queue widening pulled banes with time still on them into a fight, each cast mana the
-    // heal then lacked.
+fn in_a_fight_the_urgent_window_pulls_the_queue_in_too() {
+    // A buff never runs out, in a fight neither: those coming due together start in time. The
+    // heal's mana is kept by the slider hold (a_fight_at_low_mana_puts_no_bane_back...).
     let now = Instant::now();
     let (mut c, me) = a_caster_with_banes_lapsed(now, &FOUR_BANES);
     c.autoplay.config.buffs.never_below = 5.0;
@@ -491,7 +502,7 @@ fn in_a_fight_the_urgent_window_pulls_no_more_banes_in() {
     );
     c.autoplay.last_hit_us = Some(Instant::now());
     assert!(
-        !c.has_urgent_buff_due(now),
-        "a bane with time on it pulled into the fight"
+        c.has_urgent_buff_due(now),
+        "in a fight the queue is left to lapse"
     );
 }
