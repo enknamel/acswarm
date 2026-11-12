@@ -595,8 +595,16 @@ impl Pathfinder {
             return None;
         }
         let planned = a.answer?;
+        // What was asked, as `plan` logs it: the walk trial replays it offline.
         if let Planned::NoWay(why) = &planned {
-            tracing::debug!("pathfinder: no way: {why:?}");
+            tracing::info!(
+                "pathfinder: no way ({why:?}) from {:?} in {:#010x} to within {within} of {:?} in \
+                 {:#010x}",
+                a.from.at,
+                a.from.cell,
+                a.goal.at,
+                a.goal.cell
+            );
         }
         Some((a.from, planned))
     }
