@@ -4504,3 +4504,26 @@ fn a_chest_only_a_camp_made_portal_reaches_is_gone_to_through_it_once_seen() {
     assert!(c.autoplay.growth.pursuit_portals.is_empty());
     assert!(matches!(step, PursuitStep::OpenChest { .. }), "{step:?}");
 }
+
+#[test]
+fn a_sought_creature_deleted_in_reach_has_its_drop_looked_for() {
+    // The Dull Aetherium Ore Stockpile (70701) went with no killer notice (a pet's blow, or its
+    // death emote's): its Dull Aetherium Ore Fragment (70378) lay on the floor, never picked up.
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 72);
+    crate::testkit::stand(&mut c, 0xA9B4_0019, glam::Vec3::new(84.0, 84.0, 94.0));
+    let pile =
+        crate::testkit::standing_by(&mut c, 0x8000_0002, "Dull Aetherium Ore Stockpile", 4.0);
+    c.world.objects.get_mut(&pile.guid).unwrap().weenie_class_id = 70701;
+    let at = c.world.objects[&pile.guid].world_pos().unwrap();
+    let mut delete = ac_net::messages::opcode::OBJECT_DELETE
+        .to_le_bytes()
+        .to_vec();
+    delete.extend_from_slice(&pile.guid.to_le_bytes());
+    delete.extend_from_slice(&[0, 0]);
+    c.forget_the_departed(&delete);
+    assert_eq!(c.autoplay.growth.sought_kill, None, "nothing sought");
+    c.autoplay.growth.pursuit_sought = vec![70701];
+    c.forget_the_departed(&delete);
+    let (spot, _) = c.autoplay.growth.sought_kill.expect("its kill noted");
+    assert!(spot.distance(at) < 0.01);
+}

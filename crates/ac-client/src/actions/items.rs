@@ -115,6 +115,7 @@ impl Client {
         else {
             return;
         };
+        self.note_sought_gone(guid, std::time::Instant::now());
         self.forget_creature_appraisal(guid);
     }
 

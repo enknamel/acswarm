@@ -1120,6 +1120,20 @@ impl Client {
         self.note_flag_kill(at);
     }
 
+    /// A pursued hunt's creature in fight reach deleted by the server: destroyed, so its drop is
+    /// looked for where it stood. A pet's kill brings no killer notice (`Creature_Death.cs:73-76`).
+    pub(crate) fn note_sought_gone(&mut self, guid: u32, now: Instant) {
+        let (Some(o), Some(me)) = (self.world.objects.get(&guid), self.my_position()) else {
+            return;
+        };
+        let reach = self.autoplay.config.fight.radius;
+        let at = o.world_pos().filter(|at| at.distance(me) <= reach);
+        if let (Some(at), true) = (at, self.is_sought(o.weenie_class_id)) {
+            let st = &mut self.autoplay.growth;
+            st.sought_kill = st.sought_kill.or(Some((at, now)));
+        }
+    }
+
     /// The body of the pursued hunt's creature killed, once it lies there (`sought_kill`): opened
     /// under blows too (a_sought_kill_s_body_is_opened_under_blows).
     pub(crate) fn sought_body(&self) -> Option<u32> {
