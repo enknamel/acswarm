@@ -724,13 +724,16 @@ impl Client {
                 &ways,
             )
         };
-        plan(prefs).or_else(|| {
-            plan(ac_world::trip::Prefs {
-                walk_reach: far.walk_reach,
-                portal_reach: far.portal_reach,
-                ..prefs
-            })
-        })
+        let far = ac_world::trip::Prefs {
+            walk_reach: far.walk_reach,
+            portal_reach: far.portal_reach,
+            ..prefs
+        };
+        // No way on foot: a body that may fly flies it (`travel::flown`), over any cliff.
+        let flies = self.movement_rules.limits().noclip;
+        plan(prefs)
+            .or_else(|| plan(far))
+            .or_else(|| flies.then(|| plan(far.flown())).flatten())
     }
 }
 

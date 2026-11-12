@@ -286,8 +286,14 @@ impl Client {
                 self.take_journey(owner);
                 return Did::Acting;
             }
-            let within = goal.within();
-            let did = self.set_off(owner, Goal::At { place, within }, now);
+            let far = Goal::At {
+                place,
+                within: goal.within(),
+            };
+            let mut did = self.set_off(owner, far, now);
+            if matches!(did, Did::Blocked(_)) {
+                did = self.fly_journey(owner, far, now);
+            }
             if let Did::Blocked(why) = &did {
                 tracing::info!(
                     "travel: no way for {} to {:?} from here: {}",

@@ -24,12 +24,13 @@ pub fn building_cells_known() -> bool {
     BUILDING_CELLS.get().is_some()
 }
 
-/// Which landmass a world xy is on, `None` at sea: told once a process by whoever has the terrain.
-type LandmassOf = Box<dyn Fn(Vec2) -> Option<u32> + Send + Sync>;
+/// Which landmass a world xy is on, (the sea's label, the ground's: a cliff parts it too), `None`
+/// at sea: told once a process by whoever has the terrain.
+type LandmassOf = Box<dyn Fn(Vec2) -> Option<(u32, u32)> + Send + Sync>;
 static LANDMASS: OnceLock<LandmassOf> = OnceLock::new();
 
 /// Tell the planner the landmasses: a walk between two never stands (Ithaenc's island).
-pub fn set_landmasses(of: impl Fn(Vec2) -> Option<u32> + Send + Sync + 'static) {
+pub fn set_landmasses(of: impl Fn(Vec2) -> Option<(u32, u32)> + Send + Sync + 'static) {
     let _ = LANDMASS.set(Box::new(of));
 }
 
@@ -38,13 +39,26 @@ pub fn landmasses_known() -> bool {
     LANDMASS.get().is_some()
 }
 
-/// Whether the sea parts `a` and `b`, as far as the landmasses are known.
-fn sea_between(a: Place, b: Place) -> bool {
+/// Whether the sea parts `a` and `b`, or a cliff does for a walk on foot past the region round
+/// its start, as far as the landmasses are known. Within that region the client's walk climbs a
+/// building's stairs; past it the terrain's route does not (Corcima Castle's wards).
+fn is_parted(a: Place, b: Place, flies: bool) -> bool {
     let Some(of) = LANDMASS.get() else {
         return false;
     };
-    matches!((of(a.at.truncate()), of(b.at.truncate())), (Some(x), Some(y)) if x != y)
+    let block = |p: Place| (p.at.truncate() / 192.0).floor();
+    let far = (block(a) - block(b)).abs().max_element() > REGION_BLOCKS;
+    let label = |p: Place| {
+        of(p.at.truncate()).map(|(sea, ground)| match flies || !far {
+            true => sea,
+            false => ground,
+        })
+    };
+    matches!((label(a), label(b)), (Some(x), Some(y)) if x != y)
 }
+
+/// Landblocks the client's walk region reaches round the block it starts in (`ac_scene::navarea`).
+const REGION_BLOCKS: f32 = 1.0;
 
 /// Indoors and not in a building: a dungeon, or the hub, walked only within its own landblock.
 fn shut_in(p: Place) -> bool {
@@ -249,14 +263,15 @@ fn walk_seconds(a: Place, b: Place) -> f32 {
 /// The same, told whether `a` is inside a dungeon. From one, nothing is
 /// walkable but the rest of the dungeon: the way out is a portal or a
 /// recall, never a stroll.
-fn can_walk_from(a: Place, b: Place, reach: f32, in_dungeon: bool) -> bool {
+/// A body that `flies` is parted from ground only by the sea.
+fn can_walk_from(a: Place, b: Place, reach: f32, in_dungeon: bool, flies: bool) -> bool {
     if in_dungeon {
         return b.is_indoors() && a.cell & 0xFFFF_0000 == b.cell & 0xFFFF_0000;
     }
-    can_walk_plain(a, b, reach)
+    can_walk_plain(a, b, reach, flies)
 }
 
-fn can_walk_plain(a: Place, b: Place, reach: f32) -> bool {
+fn can_walk_plain(a: Place, b: Place, reach: f32, flies: bool) -> bool {
     // A place known by its position alone (`Place::on_map`) is outdoors in the block its
     // position lies in: from inside a shop in that block, the walk out of the door is a walk.
     let same_block = a.cell & 0xFFFF_0000 == b.cell & 0xFFFF_0000;
@@ -266,7 +281,7 @@ fn can_walk_plain(a: Place, b: Place, reach: f32) -> bool {
         // Inside, only within the same landblock (the hub, a dungeon).
         return same_block;
     }
-    a.at.truncate().distance(b.at.truncate()) <= reach && !sea_between(a, b)
+    a.at.truncate().distance(b.at.truncate()) <= reach && !is_parted(a, b, flies)
 }
 
 #[derive(PartialEq)]
@@ -328,6 +343,8 @@ pub struct Prefs {
     /// A portal asking a flag not held is taken at this many seconds more; `None` leaves it out.
     /// A figure past any journey's finds the way that needs the fewest flags.
     pub flag_seconds: Option<f32>,
+    /// The journey is flown: its walks cross a cliff, only the sea parts land.
+    pub flies: bool,
 }
 
 impl Default for Prefs {
@@ -348,6 +365,7 @@ impl Prefs {
             in_dungeon: false,
             who: portals::Traveller::default(),
             flag_seconds: None,
+            flies: false,
         }
     }
 
@@ -361,6 +379,14 @@ impl Prefs {
     pub fn in_dungeon(self, yes: bool) -> Self {
         Prefs {
             in_dungeon: yes,
+            ..self
+        }
+    }
+
+    /// The same journey flown: its walks cross any cliff (`Prefs::flies`).
+    pub fn flown(self) -> Self {
+        Prefs {
+            flies: true,
             ..self
         }
     }
@@ -526,7 +552,8 @@ pub fn plan_with_ways(
 ) -> Option<Trip> {
     let recalls: &[Recall] = if prefs.use_recalls { recalls } else { &[] };
     let can_walk = |a: Place, b: Place, stuck: bool| {
-        can_walk_from(a, b, prefs.walk_reach, stuck) && !no_walks.iter().any(|n| n.is_walk(a, b))
+        can_walk_from(a, b, prefs.walk_reach, stuck, prefs.flies)
+            && !no_walks.iter().any(|n| n.is_walk(a, b))
     };
     // Straight there, when that is a believable walk and there is no
     // spell that might be quicker.
@@ -766,11 +793,11 @@ mod tests {
         };
         let surface = Place::on_map(Vec2::new(32_560.0, 34_660.0));
         assert!(
-            can_walk_plain(deep, surface, 1000.0),
+            can_walk_plain(deep, surface, 1000.0, false),
             "a building's door is still a walk"
         );
         assert!(
-            !can_walk_from(deep, surface, 1000.0, true),
+            !can_walk_from(deep, surface, 1000.0, true, false),
             "walked out of a dungeon"
         );
         // The rest of the dungeon is still walkable.
@@ -778,7 +805,7 @@ mod tests {
             at: Vec3::new(32_510.0, 34_610.0, 0.0),
             cell: 0xA9B4_0135,
         };
-        assert!(can_walk_from(deep, room, 1000.0, true));
+        assert!(can_walk_from(deep, room, 1000.0, true, false));
     }
 
     #[test]
@@ -791,10 +818,10 @@ mod tests {
             cell: 0xA9B4_016A,
         };
         let outside = Place::on_map(xy + Vec2::new(20.0, 10.0));
-        assert!(can_walk_plain(inside, outside, 1000.0));
+        assert!(can_walk_plain(inside, outside, 1000.0, false));
         // The next block over is not walked to from indoors.
         let next = Place::on_map(xy + Vec2::new(192.0, 0.0));
-        assert!(!can_walk_plain(inside, next, 1000.0));
+        assert!(!can_walk_plain(inside, next, 1000.0, false));
     }
     use crate::towns;
 

@@ -1,8 +1,8 @@
-//! A journey flown as the last resort, when the body may fly: one that hops (a portal, recall or
-//! gem) with no way left on foot, flown to its next hop over what the walk graph cannot cross
-//! (Ithaenc's ruins), then walked, and any later step with no way on foot flown too (the Coral
-//! Tunnels' 3.3 m ledge); and one within the dungeon stood in, clipped through whatever wall or
-//! shaft the graph has no way past (the Catacombs of Ithaenc's key room).
+//! A journey flown as the last resort, when the body may fly and no way is left on foot: planned
+//! with only the sea parting land (`Prefs::flies`), flown to its next hop over what the walk graph
+//! cannot cross (Ithaenc's ruins, a cliff), then walked, and any later step with no way on foot
+//! flown too (the Coral Tunnels' 3.3 m ledge); within the dungeon stood in, clipped through
+//! whatever wall or shaft the graph has no way past (the Catacombs of Ithaenc's key room).
 
 use std::time::Instant;
 
@@ -12,7 +12,7 @@ use crate::did::Did;
 use crate::{Client, Goal, Owner};
 
 impl Client {
-    /// [`set_off`](Self::set_off), and with no way on foot to a place in the dungeon stood in,
+    /// [`set_off`](Self::set_off), and with no way on foot to a [flight goal](Self::is_flight_goal),
     /// flown there; refused, kept refused for `owner` and answered so till the body moves.
     pub(super) fn set_off_or_fly(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
         let ends = self.my_position().zip(goal.place().map(|p| p.at));
@@ -20,7 +20,7 @@ impl Client {
             return Did::blocked(why);
         }
         let mut did = self.set_off(owner, goal, now);
-        if matches!(did, Did::Blocked(_)) && self.is_in_this_dungeon(goal) {
+        if matches!(did, Did::Blocked(_)) && self.is_flight_goal(goal) {
             did = self.fly_journey(owner, goal, now);
         }
         if let (Did::Blocked(why), Some((me, there))) = (&did, ends) {
@@ -37,6 +37,14 @@ impl Client {
             .filter(|p| p.is_indoors())
             .map(|p| p.cell >> 16);
         there == Some(here) && self.underground()
+    }
+
+    /// Whether a journey to `goal` with no way on foot is flown: to a place in the dungeon stood in,
+    /// or past the region round the body, which only the terrain's route reaches (Corcima's ward);
+    /// on the surface within it, no way stands (a creature out at sea).
+    pub(crate) fn is_flight_goal(&mut self, goal: Goal) -> bool {
+        let far = goal.place().is_some_and(|p| !self.is_in_region(p));
+        far || self.is_in_this_dungeon(goal)
     }
 
     /// Whether the step under way is a portal whose mouth stands in the dungeon the body stands in.
@@ -96,7 +104,7 @@ impl Client {
     /// The journey to `goal` set off flown, `owner`'s refusals forgotten; blocked when
     /// the body may not fly, it is flown already, or the trip planner still has no way. A flight
     /// to the same goal before a hop is no bar: the ruins flown, the catacombs are flown afresh.
-    pub(super) fn fly_journey(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
+    pub(crate) fn fly_journey(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
         let Some(to) = goal.place().map(|p| p.at.truncate()) else {
             return Did::blocked("no place to fly to");
         };

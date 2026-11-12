@@ -551,9 +551,14 @@ impl Client {
         self.travel.prefs = prefs;
     }
 
-    /// The saved prefs, for the character as it stands now: PK status and vitae.
+    /// The saved prefs, for the character as it stands now: PK status and vitae, and whether the
+    /// journey is flown, its walks over any cliff (`flown::fly_journey`).
     pub fn travel_prefs(&self) -> Prefs {
-        self.travel.prefs.for_traveller(self.traveller())
+        let flies = self.movement_rules.limits().noclip && self.travel.fly_to.is_some();
+        Prefs {
+            flies,
+            ..self.travel.prefs.for_traveller(self.traveller())
+        }
     }
 
     pub fn traveling(&self) -> bool {
@@ -1029,7 +1034,7 @@ impl Client {
         self.cancel_travel_keeping_refusals();
         let mut did = self.set_off(owner, goal, now);
         // Flown as a first plan is (`set_off_or_fly`): refused here, the flight would never be tried.
-        if matches!(did, Did::Blocked(_)) && (hopping || self.is_in_this_dungeon(goal)) {
+        if matches!(did, Did::Blocked(_)) && (hopping || self.is_flight_goal(goal)) {
             did = self.fly_journey(owner, goal, now);
         }
         if let (Did::Blocked(why), Some(me), Some(p)) = (&did, self.my_position(), goal.place()) {
