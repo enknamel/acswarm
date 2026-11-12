@@ -4367,3 +4367,72 @@ fn the_dagger_held_is_the_ghosts_and_its_pickup_stamp_holds_nothing_back() {
         "{step:?}"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_stockpile_with_no_corpse_is_hunted_and_its_fragment_taken_off_the_floor() {
+    // Sir Oakley's Dull Aetherium Ore Fragment: the Stockpile in 0x8852's excavation leaves no
+    // corpse, its generator scatters nine on the floor (Creature_Death.cs:431-443). The data had
+    // no source, so he hunted XP instead; then a kill left them lying.
+    let now = std::time::Instant::now();
+    let mut c = mage_pursuing("aetheriumraidslowcompleted", "chained-quests");
+    c.quest_log.note_taken("aetheriumraidslowstarted");
+    let step = again(&mut c, now);
+    let PursuitStep::Hunt {
+        landblock,
+        creature,
+        ..
+    } = &step
+    else {
+        panic!("not hunted: {step:?}");
+    };
+    assert_eq!(
+        (*landblock, creature.as_str()),
+        (0x8852, "Dull Aetherium Ore Stockpile")
+    );
+    assert_eq!(c.autoplay.growth.pursuit_items, vec![70378]);
+    assert!(c.is_sought(70701));
+    let (_, at) = c.autoplay.growth.pursuit_grounds[0];
+    assert!(
+        at.cell >> 16 == 0x8852 && at.is_indoors(),
+        "sought on the surface: {at:?}"
+    );
+    // From Holtburg, a journey there sets off: the excavation is walked into from 36.1S 7.2E.
+    assert_eq!(c.grow_pursuit(now), Some(true), "{}", c.autoplay.status);
+    assert!(c.traveling(), "{}", c.autoplay.status);
+    // Arrived: stood in the room, the journey over.
+    c.cancel_travel();
+    c.stop_going(None, "arrived");
+    crate::testkit::stand(&mut c, at.cell, at.at - ac_world::landblock_origin(at.cell));
+    let me = c.my_position().unwrap();
+    let mut pile = crate::testkit::creature(0x5000_0901, "Dull Aetherium Ore Stockpile");
+    pile.weenie_class_id = 70701;
+    pile.position = crate::testkit::placed(at.cell, me);
+    c.world.objects.insert(pile.guid, pile);
+    c.note_sought_kill(me, now);
+    c.world.objects.remove(&0x5000_0901);
+    assert!(c.autoplay.growth.sought_kill.is_some());
+    // One fragment two metres off where it fell, and no body.
+    let mut bit = crate::testkit::creature(0x5000_0902, "Dull Aetherium Ore Fragment");
+    bit.weenie_class_id = 70378;
+    bit.item_type = 0;
+    bit.position = crate::testkit::placed(at.cell, me + glam::Vec3::new(2.0, 0.0, 0.0));
+    c.world.objects.insert(bit.guid, bit);
+    let cfg = crate::autoplay::growth::config::Growth::default();
+    let later = now + std::time::Duration::from_secs(1);
+    assert!(c.grow_hunt(later, &cfg), "{}", c.autoplay.status);
+    assert!(
+        c.loot_queue.contains(&0x5000_0902),
+        "not taken: {}",
+        c.autoplay.status
+    );
+    // Its pickup limit held: no fragment came, and it is left lying, the body waited out.
+    let gone = later + std::time::Duration::from_secs(6);
+    c.grow_hunt(gone, &cfg);
+    assert!(c.autoplay.growth.floor_left.contains(&0x5000_0902));
+    assert!(
+        c.autoplay.growth.sought_kill.is_none(),
+        "{}",
+        c.autoplay.status
+    );
+}

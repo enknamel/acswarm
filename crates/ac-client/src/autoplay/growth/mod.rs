@@ -241,6 +241,8 @@ pub struct State {
     /// Every creature the working hunt's item drops from that this character can kill: class,
     /// chance a kill and seconds a kill.
     pub(crate) pursuit_droppers: Vec<(u32, f32, f32)>,
+    /// The working pursued hunt's items, by weenie class: taken off the floor where its creature fell.
+    pub(crate) pursuit_items: Vec<u32>,
     /// Seconds to the item by the plan set off on, journey and ground; none once there.
     pub(crate) plan_secs: Option<f32>,
     /// Droppers met on the road a fight with saves time: fought like the sought ones.
@@ -284,6 +286,10 @@ pub struct State {
     pub(crate) clearing: Option<u32>,
     /// Where and when a pursued hunt's creature fell: its body is stood by till emptied.
     pub(crate) sought_kill: Option<(glam::Vec3, Instant)>,
+    /// A sought kill's drop taken off the floor: guid, class, how many were carried, when sent.
+    pub(crate) floor_take: Option<(u32, u32, u32, Instant)>,
+    /// Floor drops whose take went unanswered (a pickup limit), by guid: left lying.
+    pub(crate) floor_left: Vec<u32>,
     /// The sought creature a journey was set off to (`Client::chase_in_sight`), by guid.
     pub(crate) chased: Option<u32>,
 }

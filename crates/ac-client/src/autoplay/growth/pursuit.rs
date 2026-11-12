@@ -358,6 +358,8 @@ pub(crate) struct Pursued {
     /// Every creature the hunt's item drops from that this character can kill, wherever: class,
     /// chance a kill and seconds a kill (`pace::road_droppers` picks those worth a road fight).
     pub(crate) droppers: Vec<(u32, f32, f32)>,
+    /// The hunt's items, by weenie class.
+    pub(crate) items: Vec<u32>,
 }
 
 /// What each line's step is worked out from, besides the board.
@@ -482,6 +484,7 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
             out.paces = h.paces;
             out.sought = h.sought;
             out.droppers = h.droppers;
+            out.items = h.items;
         }
         out.lines.push(line);
     }
@@ -512,6 +515,7 @@ pub(crate) struct Hunting {
     paces: Vec<pace::Ground>,
     sought: Vec<u32>,
     droppers: Vec<(u32, f32, f32)>,
+    items: Vec<u32>,
 }
 
 impl Ask<'_> {
@@ -837,6 +841,13 @@ impl Ask<'_> {
                 paces: paced.iter().map(|p| p.2.clone()).collect(),
                 sought,
                 droppers,
+                items: wants
+                    .iter()
+                    .filter_map(|w| match w {
+                        Want::Item(i) => Some(*i),
+                        _ => None,
+                    })
+                    .collect(),
             };
             return (step, Some(hunting));
         }
@@ -898,6 +909,7 @@ impl Client {
             st.pursuit_flags.clear();
             st.pursuit_sought.clear();
             st.pursuit_droppers.clear();
+            st.pursuit_items.clear();
             st.pursuit_road.clear();
             st.plan_secs = None;
             self.keep_quest_section(&ChainData);
@@ -994,6 +1006,7 @@ impl Client {
         st.pursuit_paces = pursued.paces;
         st.pursuit_sought = pursued.sought;
         st.pursuit_droppers = pursued.droppers;
+        st.pursuit_items = pursued.items;
         self.keep_road_droppers();
         self.keep_quest_section(&ChainData);
     }
@@ -1123,6 +1136,9 @@ impl Client {
     pub(super) fn stand_by_sought_body(&mut self, now: Instant) -> Option<bool> {
         use crate::autoplay::loot::choose::{CORPSE_APPEARS, CORPSE_LIFE, LOOT_NEAR};
         let (at, fell) = self.autoplay.growth.sought_kill?;
+        if let Some(claimed) = self.take_sought_drop(at, now) {
+            return Some(claimed);
+        }
         let since = now.saturating_duration_since(fell);
         let body = self.sought_body();
         let me = self.my_position()?;

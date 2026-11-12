@@ -22,6 +22,8 @@ const FETCH_REACH: f32 = crate::visit::REACH;
 const FOUND_NEAR: f32 = 20.0;
 /// An act's answer is waited for this long before it counts as refused (guess).
 pub(super) const ANSWER_WAIT: Duration = Duration::from_secs(5);
+/// Floor drops a take of went unanswered, kept to leave lying (the Stockpile's scatter is nine).
+const FLOOR_LEFT: usize = 16;
 /// A take, key or item use the server never carried out (movement cancelled its walk:
 /// `Player_Use.cs:157-163`, `Player_Inventory.cs:1014-1018`) is sent this many times.
 pub(super) const UNLOCK_TRIES: u32 = 3;
@@ -627,6 +629,81 @@ impl Client {
             Act::Open if has_item => Heard::Done,
             Act::Open => Heard::Refused("held nothing wanted".to_string()),
         }
+    }
+
+    /// The working hunt's item lying where its creature `fell`: a creature with no corpse leaves
+    /// its drop, or a generator scattering it, on the floor (`Creature_Death.cs:431-443`).
+    pub(in crate::autoplay::growth) fn take_sought_drop(
+        &mut self,
+        fell: glam::Vec3,
+        now: Instant,
+    ) -> Option<bool> {
+        use crate::autoplay::loot::owed::KILL_SPOT;
+        if let Some((guid, wcid, had, sent)) = self.autoplay.growth.floor_take {
+            let taken = self.carried_count(wcid) > had;
+            let st = &mut self.autoplay.growth;
+            if taken {
+                st.floor_take = None;
+                self.quest_board_at = None;
+            } else if now.saturating_duration_since(sent) < ANSWER_WAIT {
+                return Some(true);
+            } else {
+                // Its pickup limit held (`Player_Inventory.cs:1249-1262`): the next is tried.
+                st.floor_take = None;
+                st.floor_left.push(guid);
+                let over = st.floor_left.len().saturating_sub(FLOOR_LEFT);
+                st.floor_left.drain(..over);
+            }
+        }
+        let me = self.my_position()?;
+        let st = &self.autoplay.growth;
+        let lying = self.world.objects.values().filter(|o| {
+            st.pursuit_items.contains(&o.weenie_class_id)
+                && !st.floor_left.contains(&o.guid)
+                && o.container.is_none()
+                && o.wielder.is_none()
+        });
+        let (guid, wcid, goal, name) = lying
+            .filter_map(|o| {
+                let at = o.world_pos()?;
+                let cell = o.position?.cell;
+                (at.truncate().distance(fell.truncate()) <= KILL_SPOT).then(|| {
+                    (
+                        o.guid,
+                        o.weenie_class_id,
+                        Place { at, cell },
+                        o.name.clone(),
+                    )
+                })
+            })
+            .min_by(|a, b| a.2.at.distance(me).total_cmp(&b.2.at.distance(me)))?;
+        if self.room_anywhere() == 0 {
+            return None;
+        }
+        self.autoplay.growth.drop_ground_walk();
+        if me.distance(goal.at) > FETCH_REACH {
+            if !self.grow_travel(goal, FETCH_STOP) {
+                return None;
+            }
+            let why = format!("to {name} where the quest creature fell");
+            self.autoplay.say(Doing::Traveling, why);
+            return Some(true);
+        }
+        // The server walks the character to it, and movement of ours cancels that walk.
+        if self.traveling() || self.is_walking() {
+            self.interrupt_travel("at the quest creature's drop");
+            self.stop_going(None, "at the quest creature's drop");
+            return Some(true);
+        }
+        if self.hands_busy(now) {
+            return Some(true);
+        }
+        let had = self.carried_count(wcid);
+        self.take(guid);
+        self.autoplay.growth.floor_take = Some((guid, wcid, had, now));
+        let why = format!("picking up {name} where the quest creature fell");
+        self.autoplay.say(Doing::Looting, why);
+        Some(true)
     }
 
     /// The nearest object of weenie class `wcid` lying in the world within [`FOUND_NEAR`] of
