@@ -70,13 +70,13 @@ pub fn in_berth(mouth: Vec3, p: Vec3, berth: f32) -> bool {
 
 pub struct Ground<'a> {
     pub collision: &'a CollisionWorld,
-    pub terrain: Option<&'a dyn Fn(f32, f32) -> Option<f32>>,
+    pub terrain: Option<&'a (dyn Fn(f32, f32) -> Option<f32> + Sync)>,
     /// Where the terrain is open sea. A character cannot walk into it:
     /// the server refuses the move and the character stops dead against
     /// nothing, which is what an invisible wall in the ocean is. Only
     /// the terrain is ruled out, not the static geometry over it, so
     /// piers and bridges over water are still walked.
-    pub sea: Option<&'a dyn Fn(f32, f32) -> bool>,
+    pub sea: Option<&'a (dyn Fn(f32, f32) -> bool + Sync)>,
     /// The middle of every opening between cells: doorways, arches, the
     /// gaps between rooms (see `interior::CellScene::doorways`).
     ///
@@ -699,6 +699,47 @@ fn root_of(roots: &[u32], node: u32) -> u32 {
 /// Columns per chunk side: chunks are built on demand, so a path only
 /// pays for the part of the block it crosses (24 m squares indoors).
 const CHUNK: i32 = 16;
+/// Threads a chunk's columns and hops are built on: the M3 Pro's six performance cores, half
+/// its twelve, leaving the frame and the other sessions theirs.
+const BUILD_THREADS: usize = 6;
+/// Pieces per thread `map_in_parallel` cuts its items into, so a thread done early takes more.
+const PIECES_PER_THREAD: usize = 4;
+
+/// `f` over `items` on up to [`BUILD_THREADS`] threads, the answers in `items`' order: a column's
+/// nodes and a pair's hop are each the ground's alone, so the graph is the one built on one.
+fn map_in_parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let threads = (cores / 2).clamp(1, BUILD_THREADS).min(items.len());
+    if threads < 2 {
+        return items.iter().map(f).collect();
+    }
+    let size = items.len().div_ceil(threads * PIECES_PER_THREAD);
+    let pieces: Vec<&[T]> = items.chunks(size).collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut done: Vec<(usize, Vec<R>)> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(piece) = pieces.get(k) else {
+                            return mine;
+                        };
+                        mine.push((k, piece.iter().map(&f).collect::<Vec<R>>()));
+                    }
+                })
+            })
+            .collect();
+        // A panic in `f` is the build's own: carried on to the caller as it would be on one thread.
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+            .collect()
+    });
+    done.sort_by_key(|d| d.0);
+    done.into_iter().flat_map(|d| d.1).collect()
+}
 
 pub struct NavGraph {
     pub spacing: f32,
@@ -1129,33 +1170,42 @@ impl Draft<'_> {
         let (cx, cy) = self.chunk;
         let cap = nav.capsule;
         let mut fresh: Vec<u32> = Vec::new();
-        for gx in (cx * CHUNK..(cx + 1) * CHUNK).filter(|x| (nav.gx.0..=nav.gx.1).contains(x)) {
-            for gy in (cy * CHUNK..(cy + 1) * CHUNK).filter(|y| (nav.gy.0..=nav.gy.1).contains(y)) {
-                let x = gx as f32 * nav.spacing;
-                let y = gy as f32 * nav.spacing;
-                let mut levels = ground.collision.floors_at_xy(x, y);
-                if let Some(t) = ground.terrain_under(x, y) {
-                    levels.push((t, 0));
-                }
-                levels.sort_by(|a, b| b.0.total_cmp(&a.0));
-                let mut placed: Vec<f32> = Vec::new();
-                for (z, _) in levels {
-                    if placed.iter().any(|&pz| (pz - z).abs() < LEVEL_MERGE) {
-                        continue;
-                    }
-                    let Some(node) = nav.place(ground, Vec3::new(x, y, z), (gx, gy), &cap) else {
-                        continue;
-                    };
-                    if placed
-                        .iter()
-                        .any(|&pz| (pz - node.pos.z).abs() < LEVEL_MERGE)
-                    {
-                        continue;
-                    }
-                    placed.push(node.pos.z);
-                    fresh.push(self.push_node(node));
-                }
+        let xs = (cx * CHUNK..(cx + 1) * CHUNK).filter(|x| (nav.gx.0..=nav.gx.1).contains(x));
+        let columns: Vec<(i32, i32)> = xs
+            .flat_map(|gx| {
+                let ys =
+                    (cy * CHUNK..(cy + 1) * CHUNK).filter(|y| (nav.gy.0..=nav.gy.1).contains(y));
+                ys.map(move |gy| (gx, gy))
+            })
+            .collect();
+        let placed = map_in_parallel(&columns, |&(gx, gy)| {
+            let x = gx as f32 * nav.spacing;
+            let y = gy as f32 * nav.spacing;
+            let mut levels = ground.collision.floors_at_xy(x, y);
+            if let Some(t) = ground.terrain_under(x, y) {
+                levels.push((t, 0));
             }
+            levels.sort_by(|a, b| b.0.total_cmp(&a.0));
+            let mut nodes: Vec<NavNode> = Vec::new();
+            for (z, _) in levels {
+                if nodes.iter().any(|n| (n.pos.z - z).abs() < LEVEL_MERGE) {
+                    continue;
+                }
+                let Some(node) = nav.place(ground, Vec3::new(x, y, z), (gx, gy), &cap) else {
+                    continue;
+                };
+                if nodes
+                    .iter()
+                    .any(|n| (n.pos.z - node.pos.z).abs() < LEVEL_MERGE)
+                {
+                    continue;
+                }
+                nodes.push(node);
+            }
+            nodes
+        });
+        for node in placed.into_iter().flatten() {
+            fresh.push(self.push_node(node));
         }
         // The openings the data names, and points along every ramp, wherever the lattice fell:
         // a ramp narrower than the lattice lies between its columns and joins nothing
@@ -1203,6 +1253,7 @@ impl Draft<'_> {
             (-1, -1),
             (-1, 1),
         ];
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
         for &i in &fresh {
             let (gx, gy) = self.node(i).column;
             for (k, (dx, dy)) in DIRS.iter().enumerate() {
@@ -1217,46 +1268,61 @@ impl Draft<'_> {
                 } else if !nav.built.contains(&other) {
                     continue;
                 }
-                for j in self.ids(col).to_vec() {
-                    let (fwd, back) = ground.hop(&self.node(i), &self.node(j), &cap);
-                    if let Some(kind) = fwd {
-                        self.add_edge(i, j, kind);
-                    }
-                    if let Some(kind) = back {
-                        self.add_edge(j, i, kind);
-                    }
-                }
+                pairs.extend(self.ids(col).iter().map(|&j| (i, j)));
             }
         }
+        let hops = map_in_parallel(&pairs, |&(i, j)| {
+            ground.hop(&self.node(i), &self.node(j), &cap)
+        });
+        for (&(i, j), (fwd, back)) in pairs.iter().zip(hops) {
+            if let Some(kind) = fwd {
+                self.add_edge(i, j, kind);
+            }
+            if let Some(kind) = back {
+                self.add_edge(j, i, kind);
+            }
+        }
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
         for &i in &seeded {
             let col = self.node(i).column;
-            for j in self.ids(col).to_vec() {
-                if j == i {
-                    continue;
-                }
-                let (fwd, back) = ground.hop(&self.node(i), &self.node(j), &cap);
-                if let Some(kind) = fwd.filter(|_| !self.has_edge(i, j)) {
-                    self.add_edge(i, j, kind);
-                }
-                if let Some(kind) = back.filter(|_| !self.has_edge(j, i)) {
-                    self.add_edge(j, i, kind);
+            pairs.extend(self.ids(col).iter().filter(|&&j| j != i).map(|&j| (i, j)));
+        }
+        let hops = map_in_parallel(&pairs, |&(i, j)| {
+            ground.hop(&self.node(i), &self.node(j), &cap)
+        });
+        for (&(i, j), (fwd, back)) in pairs.iter().zip(hops) {
+            if let Some(kind) = fwd.filter(|_| !self.has_edge(i, j)) {
+                self.add_edge(i, j, kind);
+            }
+            if let Some(kind) = back.filter(|_| !self.has_edge(j, i)) {
+                self.add_edge(j, i, kind);
+            }
+        }
+        // Worked out on the edges the hops made; a drop joined earlier in the same node's turn
+        // may since have made one into a later direction's column, which then has none.
+        let drops = map_in_parallel(&fresh, |&i| self.drops_of(ground, i, &cap));
+        for (&i, found) in fresh.iter().zip(drops) {
+            for (col, at, cell, landing) in found {
+                if !self.edges_of(i).any(|e| self.node(e.to).column == col) {
+                    self.join(i, at, cell, landing);
                 }
             }
         }
-        for &i in &fresh {
-            self.drops_from(ground, i, &cap);
-        }
         let waiting = std::mem::take(&mut self.waiting);
-        for (from, at, cell) in waiting {
-            self.land(ground, from, at, cell, &cap);
+        let landings = map_in_parallel(&waiting, |&(from, at, cell)| {
+            self.landing(ground, from, at, cell, &cap)
+        });
+        for (&(from, at, cell), landing) in waiting.iter().zip(landings) {
+            self.join(from, at, cell, landing);
         }
     }
 
-    /// The drop edges out of `node`: toward each neighbouring column it has no edge into and whose
-    /// floor falls away, a walk that goes over the edge, followed down to where it lands.
-    fn drops_from(&mut self, ground: &Ground, node: u32, cap: &Capsule) {
+    /// The drops out of `node`, read only: toward each neighbouring column it has no edge into and
+    /// whose floor falls away, the column, where the walk over the edge lands, and its [`Landing`].
+    fn drops_of(&self, ground: &Ground, node: u32, cap: &Capsule) -> Vec<DropFound> {
         let a = self.node(node);
         let spacing = self.nav.spacing;
+        let mut found = Vec::new();
         for k in 0..8 {
             let angle = k as f32 * std::f32::consts::FRAC_PI_4;
             let (dx, dy) = (angle.cos().round() as i32, angle.sin().round() as i32);
@@ -1279,21 +1345,21 @@ impl Draft<'_> {
                 continue;
             }
             if let Some((land, cell)) = ground.drop_toward(a.pos, a.cell, toward, cap) {
-                self.land(ground, node, land, cell, cap);
+                found.push((col, land, cell, self.landing(ground, node, land, cell, cap)));
             }
         }
+        found
     }
 
-    /// A drop from `from` landing at `at` (in `cell`) joined to the node on that floor within a
-    /// column the body walks to from there, or kept until the chunk it lands in is built.
-    fn land(&mut self, ground: &Ground, from: u32, at: Vec3, cell: u32, cap: &Capsule) {
+    /// Where a drop from `from` landing at `at` (in `cell`) joins, read only: kept for the chunk it
+    /// lands in when that is unbuilt, else the node on that floor within a column the body walks
+    /// to from there.
+    fn landing(&self, ground: &Ground, from: u32, at: Vec3, cell: u32, cap: &Capsule) -> Landing {
         let nav = self.nav;
         let (gx, gy) = nav.column_of(at);
         if !self.is_built(chunk_of(gx, gy)) {
-            if (nav.gx.0..=nav.gx.1).contains(&gx) && (nav.gy.0..=nav.gy.1).contains(&gy) {
-                self.waiting.push((from, at, cell));
-            }
-            return;
+            let inside = (nav.gx.0..=nav.gx.1).contains(&gx) && (nav.gy.0..=nav.gy.1).contains(&gy);
+            return if inside { Landing::Kept } else { Landing::Lost };
         }
         let onto = self
             .near(at, 1)
@@ -1305,12 +1371,34 @@ impl Draft<'_> {
                 let (a, b) = (self.node(from), self.node(id));
                 ground.body_reaches(at, cell, b.pos, cap) && is_dropped_to(ground, a, b, cap)
             });
-        if let Some(to) = onto {
-            if !self.has_edge(from, to) {
-                self.add_edge(from, to, EdgeKind::Drop);
+        onto.map_or(Landing::Lost, Landing::Onto)
+    }
+
+    /// A drop from `from` to `at` joined as its [`Landing`] says: a drop edge, or kept.
+    fn join(&mut self, from: u32, at: Vec3, cell: u32, landing: Landing) {
+        match landing {
+            Landing::Kept => self.waiting.push((from, at, cell)),
+            Landing::Onto(to) if !self.has_edge(from, to) => {
+                self.add_edge(from, to, EdgeKind::Drop)
             }
+            Landing::Onto(_) | Landing::Lost => {}
         }
     }
+}
+
+/// A drop found from a node: the column it is toward, where it lands and in which cell, and how
+/// it joins there.
+type DropFound = ((i32, i32), Vec3, u32, Landing);
+
+/// Where a drop joins the graph ([`Draft::landing`]).
+#[derive(Clone, Copy)]
+enum Landing {
+    /// In a chunk not yet built: kept till it is.
+    Kept,
+    /// To this node, by a drop edge.
+    Onto(u32),
+    /// Nowhere: off the area, or no node the body walks on to.
+    Lost,
 }
 
 /// Whether the follower's walk of a drop, at node `b` from node `a` at [`DROP_SPEED`], goes over
@@ -1356,6 +1444,20 @@ fn chunk_of(gx: i32, gy: i32) -> (i32, i32) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn work_shared_out_comes_back_in_the_order_given() {
+        // The graph is the one a single thread builds only while each answer keeps its place.
+        for n in [0usize, 1, 2, 5, 23, 1000] {
+            let items: Vec<u64> = (0..n as u64).collect();
+            let slow = |x: &u64| {
+                std::thread::sleep(std::time::Duration::from_micros(x % 7 * 50));
+                x * 3 + 1
+            };
+            let want: Vec<u64> = items.iter().map(slow).collect();
+            assert_eq!(map_in_parallel(&items, slow), want, "{n} items");
+        }
+    }
 
     /// A quad `a b c d`, counter-clockwise seen from its normal's side.
     pub(crate) fn quad(w: &mut CollisionWorld, a: Vec3, b: Vec3, c: Vec3, d: Vec3, cell: u32) {
