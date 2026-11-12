@@ -39,6 +39,15 @@ impl Client {
         there == Some(here) && self.underground()
     }
 
+    /// Whether the step under way is a portal whose mouth stands in the dungeon the body stands in.
+    fn is_dungeon_portal_step(&mut self) -> bool {
+        let Some(Step::Portal { mouth, .. }) = self.travel_step().cloned() else {
+            return false;
+        };
+        let here = self.player.as_ref().map_or(0, |pl| pl.cell >> 16);
+        mouth.is_indoors() && mouth.cell >> 16 == here && self.underground()
+    }
+
     /// As after a journey to `goal` flown to its hop and carried through it, still its goal.
     #[cfg(test)]
     pub(crate) fn flown_to_a_hop(&mut self, goal: Goal) {
@@ -66,15 +75,17 @@ impl Client {
     }
 
     /// The step under way has no way on foot (`why`): flown when the journey was flown already,
-    /// its last resort, though a hop is behind it (the Coral Tunnels' ledge past the portal in);
-    /// `false` leaves it to be refused.
+    /// its last resort, though a hop is behind it (the Coral Tunnels' ledge past the portal in),
+    /// or when it is to a portal in the dungeon stood in (0x018F's shaft); `false` leaves it to be
+    /// refused.
     pub(super) fn fly_step(&mut self, why: &str) -> bool {
         let to = self.travel_goal_xy();
         let flown = self
             .travel
             .fly_to
             .is_some_and(|f| to.is_some_and(|g| g.distance(f) <= 1.0));
-        if !self.movement_rules.limits().noclip || !flown || self.travel.state.flown {
+        let flies = flown || self.is_dungeon_portal_step();
+        if !self.movement_rules.limits().noclip || !flies || self.travel.state.flown {
             return false;
         }
         tracing::info!("travel: step {}: {why}; flown", self.travel.step);

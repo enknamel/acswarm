@@ -690,7 +690,10 @@ fn a_journey_that_loses_a_step_is_planned_again_without_it() {
     // Handed a trip whose next portal stands on the ledge, as if just arrived in the room: the
     // mouth is refused on the first frame, the trip planned again has no step at it, and the
     // journey arrives at its goal.
+    // Server-safe: a body that may fly flies to a dungeon's portal instead
+    // (a_dungeons_portal_no_walk_reaches_is_flown_to_where_the_body_may_fly).
     let mut c = Client::offline(crate::testkit::game_data());
+    c.movement_rules = crate::player::MovementRules::ServerSafe;
     let (start, ledge) = under_the_01f6_ledge(&mut c);
     let goal = c
         .standable_near(start, 10.0)
@@ -2231,4 +2234,68 @@ fn the_coral_tunnels_ledge_is_flown_to_the_western_isle_portal() {
         }
     }
     assert!(closest <= 1.5, "{closest:.1} m short of the western portal");
+}
+
+/// From the Carved Cave Portal's landing in 0x018F to the Direlands Midland Portal in 0x010A,
+/// across 0x0234 (a shaft for a floor, a landing at each door), as a journey's first step.
+fn journey_across_the_018f_shaft(rules: crate::player::MovementRules) -> (Client, Place) {
+    let o = |cell: u32| ac_world::landblock_origin(cell);
+    let mut c =
+        crate::testkit::standing_in_the_field(67, 0x018F_025C, Vec3::new(70.5, -77.7, 0.01));
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.movement_rules = rules;
+    let mouth = Place {
+        at: o(0x018F_010A) + Vec3::new(40.4, -52.5, -30.0),
+        cell: 0x018F_010A,
+    };
+    let exit = Place {
+        at: o(0x2E11_0031) + Vec3::new(155.5, 10.2, 56.0),
+        cell: 0x2E11_0031,
+    };
+    let trip = Trip {
+        steps: vec![
+            Step::Portal {
+                name: "Direlands Midland Portal".into(),
+                mouth,
+                exit,
+            },
+            Step::Walk(exit),
+        ],
+        seconds: 120.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
+    (c, mouth)
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_dungeons_portal_no_walk_reaches_is_flown_to_where_the_body_may_fly() {
+    // The landings of 0x0234 lie 2.7 m apart over its shaft: no way on foot, so every route to
+    // Aerlinthe went another way and round again. The step is flown, not left out.
+    let (mut c, mouth) = journey_across_the_018f_shaft(crate::player::MovementRules::Unrestricted);
+    c.refuse_step("no way there: Planner(Unreached)");
+    assert!(c.is_journey_flown(), "the step was not flown");
+    assert!(c.travel.refused.is_empty(), "the portal was left out");
+    let t0 = Instant::now();
+    let dt = 0.05;
+    let mut closest = f32::MAX;
+    for frame in 0..120 * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        c.pathfinder.settle(Duration::from_secs(5));
+        closest = closest.min(c.my_position().unwrap().distance(mouth.at));
+        if closest <= 1.5 {
+            break;
+        }
+    }
+    assert!(
+        closest <= 1.5,
+        "{closest:.1} m short of the Direlands portal"
+    );
+
+    // Where the body may not fly, the portal is left out and the journey planned again.
+    let (mut c, _) = journey_across_the_018f_shaft(crate::player::MovementRules::ServerSafe);
+    c.refuse_step("no way there: Planner(Unreached)");
+    assert!(!c.is_journey_flown(), "flown against the server's rules");
+    assert_eq!(c.travel.refused.len(), 1, "the portal was not left out");
 }
