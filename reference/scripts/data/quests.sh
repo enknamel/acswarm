@@ -1,6 +1,6 @@
 #!/bin/sh
 # Regenerate crates/ac-world/data/quests.csv, quest_givers.csv,
-# quest_sources.csv, summoned_portals.csv and npc_ways.csv (the portals and
+# quest_sources.csv, summoned_portals.csv, spawned_portals.csv and npc_ways.csv (the portals and
 # teleports an NPC opens for an item handed or a use) and arenas.csv (the
 # Colosseum's rooms, ways in and tickets): every quest a placed
 # NPC holds, XP or not (each path
@@ -208,6 +208,35 @@ select m.wcid, hex(e.landblock), e.cell_X, e.cell_Y, count(*) from encounter e
 join mon m on m.root = e.weenie_Class_Id
 group by m.wcid, e.landblock, e.cell_X, e.cell_Y;'
 
+# Portals a generator puts out (WeenieType Portal, 7), not into a container, hand or shop: where
+# each leads (Destination, PositionType 2), its level band (Int 86, 87) and flag (String 37), and
+# the encounter corners whose generators make one (the Small Hive Portals of the Marae Lassel
+# plateau's camps, a 3% pick of a camp's roll, the only way into their hives).
+q genportals 'select w.class_Id, hex(p.obj_Cell_Id), round(p.origin_X, 2), round(p.origin_Y, 2),
+  round(p.origin_Z, 2), coalesce(lo.value, 0), coalesce(hi.value, 0), coalesce(q.value, "")
+from weenie w
+join weenie_properties_position p on p.object_Id = w.class_Id and p.position_Type = 2
+left join weenie_properties_int lo on lo.object_Id = w.class_Id and lo.type = 86
+left join weenie_properties_int hi on hi.object_Id = w.class_Id and hi.type = 87
+left join weenie_properties_string q on q.object_Id = w.class_Id and q.type = 37
+where w.type = 7 and w.class_Id in
+  (select weenie_Class_Id from weenie_properties_generator where (where_Create & 56) = 0);'
+
+q portalmet 'with recursive spawn(root, wcid, depth) as (
+  select distinct e.weenie_Class_Id, e.weenie_Class_Id, 0 from encounter e
+  union all
+  select s.root, g.weenie_Class_Id, s.depth + 1 from spawn s
+  join weenie_properties_generator g on g.object_Id = s.wcid
+  where s.depth < 4 and (g.where_Create & 56) = 0
+),
+portal as (
+  select distinct s.root, s.wcid from spawn s
+  join weenie c on c.class_Id = s.wcid and c.type = 7
+)
+select m.wcid, hex(e.landblock), e.cell_X, e.cell_Y, count(*) from encounter e
+join portal m on m.root = e.weenie_Class_Id
+group by m.wcid, e.landblock, e.cell_X, e.cell_Y;'
+
 # The generators in the world themselves, where a spawn chain starts: placed, or an encounter.
 q roots 'select distinct weenie_Class_Id from landblock_instance
 union select distinct weenie_Class_Id from encounter;'
@@ -301,7 +330,8 @@ group by landblock, weenie_Class_Id;'
 
 for t in placed emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
   gens chestlist locks keys stuck nocorpse recipes combines encounters roots profiles genprops crit inst links \
-  encroots genevent summonspell linkportal deathsignals portalstamps spellpos reldest hearing; do
+  encroots genevent summonspell linkportal deathsignals portalstamps spellpos reldest hearing \
+  genportals portalmet; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 

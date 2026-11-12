@@ -270,6 +270,92 @@ impl Summoned {
     }
 }
 
+/// A portal a generator in the world puts out: a camp's rare pick, and the only way into some
+/// dungeons (the Small Hive Portals of the Marae Lassel plateau; `data/spawned_portals.csv`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spawned {
+    pub wcid: u32,
+    /// As it stands where it comes on one landblock (its generator's spot, or the encounter
+    /// table's busiest corner there): where it leads, its level band and its flag.
+    pub way: Portal,
+    /// How fast it comes on that landblock, taken as it comes.
+    pub rate: crate::quests::SpawnRate,
+}
+
+impl Spawned {
+    /// The landblock it comes on.
+    pub fn landblock(&self) -> u32 {
+        self.way.from_cell >> 16
+    }
+
+    /// Where it comes, to be looked for.
+    pub fn place(&self) -> crate::Place {
+        crate::Place {
+            at: self.way.from,
+            cell: self.way.from_cell,
+        }
+    }
+
+    /// The portal standing at `mouth` in `cell`: what a trip takes while it is in view.
+    pub fn standing_at(&self, cell: u32, mouth: Vec3) -> Portal {
+        Portal {
+            from_cell: cell,
+            from: mouth,
+            ..self.way.clone()
+        }
+    }
+}
+
+const SPAWNED: &str = include_str!("../data/spawned_portals.csv");
+
+/// Every portal a generator puts out, a row a landblock it comes on, parsed on first use.
+pub fn spawned() -> &'static [Spawned] {
+    static PARSED: OnceLock<Vec<Spawned>> = OnceLock::new();
+    PARSED.get_or_init(|| {
+        let row = |line: &str| {
+            let f: Vec<&str> = line.split(',').collect();
+            let num = |i: usize| f.get(i)?.parse::<f32>().ok();
+            let cell = u32::from_str_radix(f.get(2)?, 16).ok()?;
+            let to_cell = u32::from_str_radix(f.get(9)?, 16).ok()?;
+            let way = Portal {
+                name: crate::data_name(f.get(1)?),
+                from_cell: cell,
+                from: crate::landblock_origin(cell) + Vec3::new(num(3)?, num(4)?, num(5)?),
+                to_cell,
+                to: crate::landblock_origin(to_cell) + Vec3::new(num(10)?, num(11)?, num(12)?),
+                min_level: f.get(13)?.parse().ok()?,
+                max_level: f.get(14)?.parse().ok()?,
+                quest: f.get(15).map_or_else(String::new, |q| q.to_string()),
+                usable: 0,
+                bitmask: UNRESTRICTED,
+            };
+            Some(Spawned {
+                wcid: f.first()?.parse().ok()?,
+                way,
+                rate: crate::quests::SpawnRate {
+                    load: num(6)?,
+                    per_hour: num(7)?,
+                    others: num(8)?,
+                },
+            })
+        };
+        let lines = SPAWNED
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty());
+        lines.filter_map(row).collect()
+    })
+}
+
+/// A row of the portal of class `wcid` a generator puts out, any: each leads the same way.
+pub fn spawned_of(wcid: u32) -> Option<&'static Spawned> {
+    static BY_CLASS: OnceLock<std::collections::HashMap<u32, usize>> = OnceLock::new();
+    let by = BY_CLASS.get_or_init(|| {
+        let rows = spawned().iter().enumerate();
+        rows.rev().map(|(i, s)| (s.wcid, i)).collect()
+    });
+    spawned().get(*by.get(&wcid)?)
+}
+
 const SUMMONED: &str = include_str!("../data/summoned_portals.csv");
 
 /// Every portal a creature's death opens, parsed on first use.
@@ -560,5 +646,30 @@ mod tests {
         assert!(!v[0].usable_by(60, &[]));
         assert!(v[0].usable_by(20, &["quest".into()]));
         assert!(!v[0].works(), "usable 1 is No");
+    }
+
+    #[test]
+    fn a_small_hive_portal_comes_on_the_plateau_and_leads_into_its_hive() {
+        // The Royal Chest's hive (0x028A) has no other way in: a Marae Lassel plateau camp makes
+        // its portal on a 3% pick of a roll.
+        let hive: Vec<_> = super::spawned()
+            .iter()
+            .filter(|s| s.wcid == 11221)
+            .collect();
+        assert_eq!(hive.len(), 64, "the 64 landblocks it comes soonest on");
+        assert!(hive.iter().all(|s| s.way.name == "Small Hive Portal"
+            && s.way.to_cell == 0x028A_023F
+            && s.way.min_level == 40
+            && !s.place().is_indoors()));
+        let best = hive
+            .iter()
+            .find(|s| s.landblock() == 0x20B6)
+            .expect("0x20B6");
+        assert_eq!(best.place().cell, 0x20B6_0026);
+        assert!(
+            best.rate.load > 0.2 && best.rate.per_hour > 4.0,
+            "{:?}",
+            best.rate
+        );
     }
 }

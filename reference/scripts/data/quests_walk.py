@@ -568,7 +568,7 @@ class Sim:
 class Spawning:
     """Each landblock's root generators, and per root what it holds at load and makes an hour."""
 
-    def __init__(self, dump, events_on=False):
+    def __init__(self, dump, events_on=False, counted=()):
         self.profiles = defaultdict(list)
         for gen, prob, wcid, delay, init, mx, where in rows(dump, "profiles"):
             self.profiles[int(gen)].append(dict(
@@ -582,6 +582,8 @@ class Spawning:
                                         event)
         # Creatures, by whether one can be attacked (PropertyBool 19, default true).
         self.attackable = {int(w): a != "0" for w, a in rows(dump, "crit")}
+        # And what else is counted as one is: a portal a camp makes, taken as it comes.
+        self.attackable.update((w, True) for w in counted)
         links, children = defaultdict(list), set()
         for parent, child, wcid in rows(dump, "links"):
             links[int(parent)].append(int(wcid))
@@ -1598,6 +1600,8 @@ def kept_uses(src, wants, sold, gate=lambda r: None):
 
 # Landblocks kept per creature the encounter table alone spawns: where it is likeliest.
 ENCOUNTER_BLOCKS = 64
+# Seconds to leave a landblock and come back to a fresh load (ac_world::quest_chain::ROTATE_SECS).
+ROTATE_SECS = 420.0
 
 # Columns of a quests.csv row a random reply's alternatives may differ in and still be one row.
 COL_GIVES, COL_DOES, COL_UNREAD = 14, 23, 24
@@ -1711,6 +1715,10 @@ def main():
         write_rows(f, [(str(c), data.name.get(c, ""), str(p), data.name.get(p, ""),
                         "%08X" % cell, x, y, z, str(lo), str(hi), quest)
                        for c, p, cell, x, y, z, lo, hi, quest in sorted(summoned)])
+    with open(os.path.join(out_dir, "spawned_portals.csv"), "w", encoding="utf-8",
+              newline="") as f:
+        f.write(SPAWNED_HEADER)
+        write_rows(f, spawned_portal_rows(data, dump))
     with open(os.path.join(out_dir, "npc_ways.csv"), "w", encoding="utf-8", newline="") as f:
         f.write(NPC_WAYS_HEADER)
         write_rows(f, ways)
@@ -1726,6 +1734,40 @@ def main():
     print("quests: %d rows, %d giver placements; %s; out: %s" % (
         len(rows_out), len(givers_out), ", ".join("%s %d" % (k, len(v)) for k, v in sorted(by_kind.items())),
         dict(sorted(reasons.items()))), file=sys.stderr)
+
+
+def spawned_portal_rows(data, dump):
+    """Each portal a generator in the world puts out, by landblock it comes on: where (the
+    generator's spot, or an encounter's busiest corner), how fast (as a creature's `rates`, the
+    portal taken as it comes) and where it leads. The Small Hive Portals come by the Marae Lassel
+    plateau's camps alone, and each is the only way into its hive."""
+    dest = {int(w): ("%08X" % int(c, 16), x, y, z, lo, hi, q)
+            for w, c, x, y, z, lo, hi, q in rows(dump, "genportals")}
+    sp = Spawning(dump, counted=set(dest))
+    met = defaultdict(lambda: defaultdict(list))
+    for w, lb, x, y, n in rows(dump, "portalmet"):
+        met[int(w)][int(lb, 16)].append((int(n), int(x), int(y)))
+    out = []
+    for w in sorted(dest):
+        found = []
+        spots = {}
+        for cell, x, y, z in data.made_on_ground(w):
+            if cell:
+                spots.setdefault(cell >> 16, (cell, num(x), num(y), num(z)))
+        for lb, cells in met[w].items():
+            x, y = corner(cells)
+            spots.setdefault(lb, ((lb << 16) | (int(x // 24) * 8 + int(y // 24) + 1), x, y, 0.0))
+        for lb in sorted(spots):
+            load, rate, others = sp.rates(w, lb)
+            if load > 0 or rate > 0:
+                found.append((max(rate, load * 3600 / ROTATE_SECS), lb, load, rate, others))
+        # The ENCOUNTER_BLOCKS soonest, as for a creature: a Destroyed Portal comes on 11,439.
+        found = sorted(found, key=lambda f: (-f[0], f[1]))[:ENCOUNTER_BLOCKS]
+        for _, lb, load, rate, others in sorted(found, key=lambda f: f[1]):
+            cell, x, y, z = spots[lb]
+            out.append((str(w), data.name.get(w, ""), "%08X" % cell, "%g" % x, "%g" % y, "%g" % z,
+                        figure(load, 2), figure(rate, 1), "%g" % round(others)) + dest[w])
+    return out
 
 
 def pickup_rows(data):
@@ -1817,6 +1859,16 @@ SOURCES_HEADER = """\
 # respawn: for a floor item, seconds its generator takes to put it back once taken (profile delay
 # and a regeneration interval); blank when unknown. count: for a kill a watcher hears, the deaths
 # it must hear before it starts the event (only written when more than 1).
+# Regenerate with reference/scripts/data/quests.sh.
+"""
+
+SPAWNED_HEADER = """\
+# Portals a generator in the world puts out, one row a landblock each comes on: a camp's rare pick
+# (the Small Hive Portals of the Marae Lassel plateau, the only ways into their hives).
+# wcid,name,cell,x,y,z,load,per_hour,others,to_cell,to_x,to_y,to_z,min_level,max_level,quest
+# cell, x/y/z: where it comes (the generator's spot, or the encounter table's busiest corner
+# there), local to the landblock; load, per_hour, others: as quest_sources.csv's rates, the portal
+# taken as it comes; to: where it leads; the portal's own level band and flag (0, blank: none).
 # Regenerate with reference/scripts/data/quests.sh.
 """
 
