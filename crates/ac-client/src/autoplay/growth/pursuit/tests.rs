@@ -4314,3 +4314,32 @@ fn a_follower_goes_into_the_arena_and_through_a_room_after_its_leader() {
     c.autoplay.growth.arena_deeding = None;
     assert_eq!(c.follow_arena(&leader, later), None);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_bar_carried_to_the_repair_golem_is_worked_by_the_pursuit_not_passed_to_the_hunt() {
+    // Blargerton took the Sluice Gate Bar, the board said to give it to the Repair Golem, and
+    // the pursuit answered nothing: the XP hunt sent him to the Colosseum instead.
+    let mut c = mage_pursuing("give:40913", "aerfalle");
+    let now = std::time::Instant::now();
+    for (guid, wcid, name) in [
+        (0x8000_0701, 28065, "Sacrificial Dagger"),
+        (0x8000_0702, 7411, "Pyreal Forge Bellows"),
+        (0x8000_0703, 7412, "Sluice Gate Bar"),
+    ] {
+        in_the_pack(&mut c, guid, wcid, name, 1);
+    }
+    let step = again(&mut c, now);
+    assert!(
+        matches!(&step, PursuitStep::GiveTo { source, item: 7412, .. } if source.wcid == 7404),
+        "{step:?}"
+    );
+    // From Holtburg the way to the golem is Garaena's, for a Trade Note: that is wanted first.
+    assert_eq!(c.grow_pursuit(now), Some(false), "the give passed over");
+    let gems = &c.autoplay.growth.pursuit_gems;
+    assert!(
+        gems.iter()
+            .any(|g| g.quest == "give:40913" && g.name.starts_with("Trade Note")),
+        "{gems:?}"
+    );
+}

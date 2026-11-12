@@ -1338,6 +1338,7 @@ impl Client {
             | PursuitStep::OpenChest { .. }
             | PursuitStep::UseOn { .. }
             | PursuitStep::AskFor { .. }
+            | PursuitStep::GiveTo { .. }
             | PursuitStep::Combine { .. } => self.grow_fetch(&line, now),
             PursuitStep::GoThrough { .. } | PursuitStep::Arena { .. } => {
                 self.grow_arena(&line, now)
