@@ -598,7 +598,10 @@ mod tests {
             all.windows(2).all(|w| w[0].wcid < w[1].wcid),
             "sorted by id"
         );
-        assert!(all.iter().all(|c| c.takes.iter().any(|t| t.is_some())));
+        // One with no multipliers takes 1 from each, its health still known: the Stockpile's.
+        let pile = creature_by_id(70701).expect("Dull Aetherium Ore Stockpile");
+        assert!(pile.takes.iter().all(|t| t.is_none()) && pile.health > 10_000);
+        assert!(ALL.iter().all(|e| pile.takes_from(*e) == 1.0));
         let spells = spells();
         assert!(spells.len() > 800, "{} spells", spells.len());
         assert!(spells.windows(2).all(|w| w[0].0 <= w[1].0), "sorted");

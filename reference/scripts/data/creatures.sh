@@ -27,6 +27,11 @@
 # ranks. A creature with no row still has the formula: ACE adds the skill
 # as untrained (Creature_Skills.cs:31), and it is usable untrained.
 #
+# A creature with no multipliers takes 1 from each (ACE's default), and
+# one whose stored health is 0 has it from its vital's init and ranks
+# plus half its Endurance (CreatureVital.cs:131): the Dull Aetherium Ore
+# Stockpile (70701) has both, and was fought blind of its health.
+#
 # tier is the loot tier of what it drops: its DeathTreasureType (DID 35)
 # looked up in treasure_death. The game's own measure of how hard a kind
 # of creature is, where its level is a number anyone could set.
@@ -34,7 +39,10 @@
 # Usage: reference/scripts/data/creatures.sh > crates/ac-world/data/creatures.csv
 set -e
 
-SQL='SET SESSION max_execution_time=20000; select w.class_Id, s.value, coalesce(max(h.current_Level), 0),
+SQL='SET SESSION max_execution_time=20000; select w.class_Id, s.value,
+  coalesce(nullif(max(h.current_Level), 0), max(h.init_Level + h.level_From_C_P)
+    + coalesce((select round((e.init_Level + e.level_From_C_P) / 2)
+      from weenie_properties_attribute e where e.object_Id = w.class_Id and e.type = 2), 0), 0),
   max(case when f.type=64 then round(f.value,3) end),
   max(case when f.type=65 then round(f.value,3) end),
   max(case when f.type=66 then round(f.value,3) end),
@@ -57,15 +65,14 @@ SQL='SET SESSION max_execution_time=20000; select w.class_Id, s.value, coalesce(
 from weenie w
 join weenie_properties_string s
   on s.object_Id = w.class_Id and s.type = 1
-join weenie_properties_float f
+left join weenie_properties_float f
   on f.object_Id = w.class_Id and f.type in (64,65,66,67,68,69,70,166)
 left join weenie_properties_attribute_2nd h
   on h.object_Id = w.class_Id and h.type = 1
 left join weenie_properties_int i
   on i.object_Id = w.class_Id and i.type in (25,67)
 where w.type = 10 and s.value <> ""
-group by w.class_Id, s.value
-having count(case when f.type in (64,65,66,67,68,69,70) then 1 end) > 0;'
+group by w.class_Id, s.value;'
 
 cat <<'HEADER'
 # What each kind of creature takes from each element: a damage
