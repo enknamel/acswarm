@@ -420,6 +420,9 @@ impl Client {
                 self.quest_board_at = None;
                 return Some(false);
             }
+            if self.want_portal_way((&line.id, &line.title), &label, &place, &quests, now) {
+                return Some(false);
+            }
             self.drop_source(key, format!("no way to {label}"), now);
             return Some(false);
         }

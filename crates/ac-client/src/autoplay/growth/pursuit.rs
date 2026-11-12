@@ -25,10 +25,12 @@ mod flag_way;
 mod gem_way;
 mod kept;
 pub(crate) mod pace;
+mod portal_way;
 mod section;
 mod sweep;
 pub(crate) use fetch::Fetching;
 pub(crate) use gem_way::GemWanted;
+pub(crate) use portal_way::PortalWanted;
 
 /// A pursued quest that could not go on is passed over this long before it is tried again (guess).
 pub const PURSUIT_RETRY: Duration = Duration::from_secs(10 * 60);
@@ -385,6 +387,8 @@ pub(crate) struct Ask<'a> {
     /// The flag each quest, by id, is had for first: no journey reaches its ground but past a
     /// portal asking it. Gone once held.
     pub(crate) flag_ways: &'a BTreeMap<String, String>,
+    /// The camp-made portal each quest, by id, hunts first (`portal_way`): not standing in view.
+    pub(crate) portal_ways: &'a BTreeMap<String, (u32, String)>,
     /// The landblock the character stands in, by its cell (a dungeon's rooms run past its square).
     pub(crate) here: Option<u32>,
     /// The pursued ground the character set off for, by landblock.
@@ -612,6 +616,9 @@ impl Ask<'_> {
         }
         if let (Some((gem, name)), false) = (self.ways.get(&line.id), there) {
             return self.obtain(&[Want::Item(*gem)], 1, name, 0);
+        }
+        if let (Some((portal, name)), false) = (self.portal_ways.get(&line.id), there) {
+            return self.portal_hunt(*portal, name);
         }
         step
     }
@@ -907,6 +914,7 @@ impl Client {
             st.pursuit_paces.clear();
             st.pursuit_gems.clear();
             st.pursuit_flags.clear();
+            st.pursuit_portals.clear();
             st.pursuit_sought.clear();
             st.pursuit_droppers.clear();
             st.pursuit_items.clear();
@@ -916,6 +924,8 @@ impl Client {
             return;
         }
         self.keep_gem_ways();
+        self.keep_portal_ways();
+        let portal_ways = self.portal_hunts();
         let arena = self.arena_view(now);
         let held_flags = &facts.held;
         let st = &mut self.autoplay.growth;
@@ -988,6 +998,7 @@ impl Client {
             ways: &ways,
             gem_grounds: &gem_grounds,
             flag_ways: &flag_ways,
+            portal_ways: &portal_ways,
             here: self.player.as_ref().map(|p| p.cell >> 16),
             bound: self.autoplay.growth.bound_landblock(),
             kill_secs: &kill_secs,
@@ -1199,6 +1210,11 @@ impl Client {
                 Some(false)
             }
             PursuitStep::Hunt { creature, .. } => {
+                // The portal hunted come in view: the board's step goes through it.
+                if self.is_sought_portal_seen() {
+                    self.quest_board_at = None;
+                    return Some(true);
+                }
                 let here = self.player.as_ref()?.cell >> 16;
                 let mut grounds = self.autoplay.growth.pursuit_grounds.clone();
                 // Worked out once: the sweep, the camp and the holds read one ground stood on.
@@ -1327,6 +1343,9 @@ impl Client {
                         st.skip.forget(lb);
                     }
                     self.quest_board_at = None;
+                    return Some(false);
+                }
+                if self.want_portal_way((&line.id, &line.title), creature, &every, &quests, now) {
                     return Some(false);
                 }
                 let why = format!("no journey reaches any place {creature} is found");

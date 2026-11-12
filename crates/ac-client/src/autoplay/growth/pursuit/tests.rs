@@ -215,6 +215,7 @@ fn work_in(
         ways: &BTreeMap::new(),
         gem_grounds: &Default::default(),
         flag_ways: &BTreeMap::new(),
+        portal_ways: &BTreeMap::new(),
         here: None,
         bound: None,
         kill_secs,
@@ -3930,6 +3931,7 @@ fn a_flag_a_standing_portal_stamps_is_had_by_going_through_it() {
         ways: &BTreeMap::new(),
         gem_grounds: &Default::default(),
         flag_ways: &BTreeMap::new(),
+        portal_ways: &BTreeMap::new(),
         here: None,
         bound: None,
         kill_secs: &|_| Some(20.0),
@@ -4435,4 +4437,68 @@ fn a_stockpile_with_no_corpse_is_hunted_and_its_fragment_taken_off_the_floor() {
         "{}",
         c.autoplay.status
     );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_chest_only_a_camp_made_portal_reaches_is_gone_to_through_it_once_seen() {
+    // To My Dear Uncle: the letter lies in the Royal Chest in a hive (0x028A) whose only way in is
+    // the Small Hive Portal (11221) a Marae Lassel plateau camp makes on a 3% pick. No journey
+    // reached the chest, and the letter was left; its camps are hunted as a rare creature's are.
+    let now = std::time::Instant::now();
+    let mut c = mage_pursuing("enricouncleletterturnin", "chained-quests");
+    let step = again(&mut c, now);
+    let PursuitStep::OpenChest { chest, at, .. } = &step else {
+        panic!("not the chest: {step:?}");
+    };
+    assert_eq!((chest.wcid, at.cell), (70044, 0x028A_011F));
+    assert_eq!(c.grow_pursuit(now), Some(false), "{}", c.autoplay.status);
+    let wanted = &c.autoplay.growth.pursuit_portals;
+    assert_eq!(
+        wanted.iter().map(|p| p.wcid).collect::<Vec<_>>(),
+        vec![11221]
+    );
+    // Its camps hunted: the plateau's landblocks, the portal sought.
+    let step = again(&mut c, now);
+    let PursuitStep::Hunt { creature, .. } = &step else {
+        panic!("not hunted: {step:?}");
+    };
+    assert_eq!(creature, "Small Hive Portal");
+    assert!(c.is_sought(11221));
+    let (lb, ground) = c.autoplay.growth.pursuit_grounds[0];
+    assert!(ac_world::portals::spawned()
+        .iter()
+        .any(|s| s.wcid == 11221 && s.landblock() == lb));
+    assert_eq!(c.grow_pursuit(now), Some(true), "{}", c.autoplay.status);
+    assert!(c.traveling(), "{}", c.autoplay.status);
+    // There, and the portal comes in view: the board is worked out again.
+    c.cancel_travel();
+    c.stop_going(None, "arrived");
+    let local = ground.at - ac_world::landblock_origin(ground.cell);
+    crate::testkit::stand(&mut c, ground.cell, local);
+    let me = c.my_position().unwrap();
+    let mut portal = crate::testkit::creature(0x7000_0A01, "Small Hive Portal");
+    portal.weenie_class_id = 11221;
+    portal.item_type = 0;
+    portal.position = crate::testkit::placed(ground.cell, me + glam::Vec3::new(8.0, 0.0, 0.0));
+    c.world.objects.insert(portal.guid, portal);
+    assert_eq!(c.grow_pursuit(now), Some(true), "{}", c.autoplay.status);
+    assert_eq!(c.quest_board_at, None);
+    // The chest again, and the journey to it goes through the portal standing there.
+    let step = again(&mut c, now);
+    assert!(matches!(step, PursuitStep::OpenChest { .. }), "{step:?}");
+    assert_eq!(c.grow_pursuit(now), Some(true), "{}", c.autoplay.status);
+    let through = c.travel_trip().is_some_and(|t| {
+        t.steps.iter().any(|s| {
+            matches!(s, ac_world::trip::Step::Portal { name, .. } if name == "Small Hive Portal")
+        })
+    });
+    assert!(through, "{:?}", c.travel_trip());
+    // Come out in the hive: the portal is wanted no more.
+    c.cancel_travel();
+    c.world.objects.remove(&0x7000_0A01);
+    crate::testkit::stand(&mut c, 0x028A_023F, glam::Vec3::new(110.0, -20.0, -30.0));
+    let step = again(&mut c, now);
+    assert!(c.autoplay.growth.pursuit_portals.is_empty());
+    assert!(matches!(step, PursuitStep::OpenChest { .. }), "{step:?}");
 }
