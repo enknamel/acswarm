@@ -1,14 +1,17 @@
 //! The portal step at its mouth: waited in, jumped into, stepped out of and come into again, and
-//! stepped back from when the server turns the journey away as teleported too recently.
+//! stepped back from when the server turns the journey away as teleported too recently; one that
+//! ignores collisions is used instead.
 
 use std::time::{Duration, Instant};
 
-use ac_world::Place;
+use ac_world::{item_type, object, Place};
 use glam::Vec2;
 
 use super::{PORTAL_COOLDOWN, PORTAL_GIVE_UP, PORTAL_STEP_BACK, TELEPORTED_TOO_RECENTLY};
 use crate::Client;
 
+/// How near (m) a portal stands to a step's mouth to be the step's: the table's place is ACE's.
+const MOUTH_MATCH: f32 = 3.0;
 /// Not taken this long at the mouth, the jumps tried, it is stepped out of and come into again.
 const STEP_OUT_AFTER: Duration = Duration::from_secs(8);
 
@@ -79,6 +82,20 @@ impl Client {
             self.travel.replan_due = true;
             return false;
         }
+        // Walked into, it would never fire: used, as the player double-clicks it.
+        if let Some(portal) = self.use_only_portal() {
+            let due = self.travel.state.last_hop;
+            if due.is_none_or(|t| now.duration_since(t) > Duration::from_secs(2))
+                && !self.hands_busy(now)
+            {
+                self.travel.state.last_hop = Some(now);
+                tracing::info!("travel: using the portal, which walking into does not take");
+                self.session
+                    .send_action(ac_net::messages::action::USE, &portal.to_le_bytes());
+                self.hop_sent(now, crate::autoplay::cast::HOP_LANDS);
+            }
+            return true;
+        }
         // Still here after the jumps: a portal fires only on a move into it (ACE
         // `PhysicsObj.cs:4357`), not on one stood or bobbing in it; stepped out of once, come in again.
         if now.duration_since(since) > STEP_OUT_AFTER && !self.travel.state.stepped_out {
@@ -105,6 +122,25 @@ impl Client {
             self.jump(1.0);
         }
         true
+    }
+
+    /// The portal standing at the step's mouth when it ignores collisions, so only a use takes it.
+    fn use_only_portal(&self) -> Option<u32> {
+        let (_, mouth) = self.travel_portal()?;
+        let ignores = |o: &&ac_world::WorldObject| {
+            o.item_type & item_type::PORTAL != 0
+                && o.physics_state & object::PHYSICS_STATE_IGNORE_COLLISIONS != 0
+        };
+        let near = |o: &&ac_world::WorldObject| {
+            o.world_pos()
+                .is_some_and(|p| p.truncate().distance(mouth) <= MOUTH_MATCH)
+        };
+        self.world
+            .objects
+            .values()
+            .filter(ignores)
+            .find(near)
+            .map(|o| o.guid)
     }
 
     /// [`PORTAL_STEP_BACK`] out of the portal step's mouth, on the side the body stands: at the

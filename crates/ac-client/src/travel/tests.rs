@@ -2299,3 +2299,61 @@ fn a_dungeons_portal_no_walk_reaches_is_flown_to_where_the_body_may_fly() {
     assert!(!c.is_journey_flown(), "flown against the server's rules");
     assert_eq!(c.travel.refused.len(), 1, "the portal was not left out");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_portal_that_ignores_collisions_is_used_at_its_mouth_not_jumped_into() {
+    // The Colosseum's portal (34508) carries IgnoreCollisions: Blargerton stood in it jumping,
+    // and a walk-in is never reported to ACE (PhysicsObj.cs:3348); a use sends (Portal.cs:269).
+    let holtburg = 0xA9B4_0019;
+    let mut c = crate::testkit::standing_at(holtburg, Vec3::new(84.0, 7.1, 94.0));
+    let me = c.my_position().unwrap();
+    let mouth = c.place_at(me);
+    let exit = Place::on_map(Vec2::new(44_170.4, 9_636.1));
+    let trip = Trip {
+        steps: vec![Step::Portal {
+            name: "The Colosseum".into(),
+            mouth,
+            exit,
+        }],
+        seconds: 10.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
+    let cell = c.player.as_ref().unwrap().cell;
+    let mut portal = crate::testkit::creature(0x7AE7_1004, "The Colosseum");
+    portal.item_type = ac_world::item_type::PORTAL;
+    portal.physics_state = 0x414;
+    portal.position = crate::testkit::placed(cell, me);
+    c.world.objects.insert(portal.guid, portal);
+    let used = |c: &Client| {
+        let game_action = ac_net::messages::opcode::GAME_ACTION.to_le_bytes();
+        let use_ = ac_net::messages::action::USE.to_le_bytes();
+        let portal = 0x7AE7_1004u32.to_le_bytes();
+        c.session.queued().iter().any(|(_, m)| {
+            m.starts_with(&game_action)
+                && m.get(8..12) == Some(&use_)
+                && m.get(12..16) == Some(&portal)
+        })
+    };
+    let now = Instant::now();
+    assert!(c.wait_at_mouth(now));
+    assert!(used(&c), "not used");
+    // A portal walked into as usual is not used.
+    let mut c2 = crate::testkit::standing_at(holtburg, Vec3::new(84.0, 7.1, 94.0));
+    let trip = Trip {
+        steps: vec![Step::Portal {
+            name: "Portal to Town Network".into(),
+            mouth,
+            exit,
+        }],
+        seconds: 10.0,
+    };
+    crate::testkit::set_out_on(&mut c2, trip, within_reach(exit));
+    let mut plain = crate::testkit::creature(0x7AE7_1004, "Portal to Town Network");
+    plain.item_type = ac_world::item_type::PORTAL;
+    plain.physics_state = 0xC;
+    plain.position = crate::testkit::placed(cell, me);
+    c2.world.objects.insert(plain.guid, plain);
+    assert!(c2.wait_at_mouth(now));
+    assert!(!used(&c2), "a portal walked into was used");
+}

@@ -87,6 +87,9 @@ pub const PHYSICS_STATE_STATIC: u32 = 0x1;
 /// an open door, a portal's swirl, a corpse, a hook's ghost item. The
 /// retail client collided with nothing carrying it.
 pub const PHYSICS_STATE_ETHEREAL: u32 = 0x4;
+/// `PhysicsState` bit for things nothing collides with: a portal carrying it is never walked
+/// into (PhysicsObj.cs:3348), only used (Portal.cs:269), as The Colosseum's.
+pub const PHYSICS_STATE_IGNORE_COLLISIONS: u32 = 0x10;
 /// `PhysicsState` bit that hides an object.
 pub const PHYSICS_STATE_NO_DRAW: u32 = 0x20;
 /// `PhysicsState` bit the server sets when the object's Setup carries
