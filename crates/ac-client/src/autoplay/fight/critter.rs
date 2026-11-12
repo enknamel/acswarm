@@ -243,6 +243,11 @@ impl Client {
         if self.is_clearing_ground() {
             return Critter::Fight;
         }
+        // A pursued quest's creature is the errand, judged or not: the Dull Aetherium Ore Stockpile's
+        // appraisal brings no level (a_fight_is_let_go_for_the_pursued_source_come_in_reach).
+        if self.is_sought(o.weenie_class_id) {
+            return Critter::Fight;
+        }
         if !cfg.skip_critters || name_matches(&o.name, &cfg.only) {
             return Critter::Fight;
         }

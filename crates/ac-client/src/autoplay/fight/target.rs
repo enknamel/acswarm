@@ -216,11 +216,36 @@ impl Client {
     /// Whether the fight in hand goes on, asked by the swing and the spell alike: not gone (see
     /// [`Self::fight_target_gone`]) nor left behind on the road; never where the leader stands.
     pub(super) fn can_keep_target(&mut self, guid: u32, underground: bool, now: Instant) -> bool {
-        !self.fight_target_gone(guid, underground) && !self.left_behind_on_the_road(guid, now)
+        !self.fight_target_gone(guid, underground)
+            && !self.left_behind_on_the_road(guid, now)
+            && !self.is_sought_instead(guid, underground, now)
     }
 
-    /// The nearest [`Self::would_fight`] allows in `cfg.radius`, one the attack reaches, then a
-    /// pursued quest's; a follower's is by its leader or hitting it, else none (`follow` gets it).
+    /// Whether a pursued quest's creature in `cfg.radius` would be fought while `guid`, not one,
+    /// is: it is let go for it (the Dull Aetherium Ore Stockpile left among its troopers).
+    fn is_sought_instead(&self, guid: u32, underground: bool, now: Instant) -> bool {
+        let st = &self.autoplay.growth;
+        if st.pursuit_sought.is_empty() && st.pursuit_road.is_empty() {
+            return false;
+        }
+        let sought = |g: u32| {
+            let o = self.world.objects.get(&g);
+            o.is_some_and(|o| self.is_sought(o.weenie_class_id))
+        };
+        let (Some(me), false) = (self.my_position(), sought(guid)) else {
+            return false;
+        };
+        let cfg = &self.autoplay.config.fight;
+        self.world.objects.values().any(|o| {
+            self.is_sought(o.weenie_class_id)
+                && o.world_pos()
+                    .is_some_and(|at| at.distance(me) <= cfg.radius)
+                && self.would_fight(o, cfg, underground, now)
+        })
+    }
+
+    /// The nearest [`Self::would_fight`] allows in `cfg.radius`, a pursued quest's first, then one
+    /// the attack reaches; a follower's is by its leader or hitting it, else none (`follow` gets it).
     pub(super) fn pick_target(&mut self, cfg: &Fight, now: Instant) -> Option<u32> {
         let underground = self.underground();
         let me = self.my_position()?;
@@ -274,14 +299,15 @@ impl Client {
                 // and then the nearest is as good an answer as any.
                 let how = self.attack_kind(stance, &ready, guid);
                 let seen = how.is_none_or(|how| self.shot_clears(guid, how));
-                // A pursued quest's creature before a nearer namesake: the jaw's Engorged Eater
-                // (28849) shares its name with the common one (28642).
+                // A pursued quest's creature first, in sight or not (the fight walks round to it),
+                // and before a nearer namesake: the jaw's Engorged Eater (28849) shares its name
+                // with the common one (28642).
                 let sought = self
                     .world
                     .objects
                     .get(&guid)
                     .is_some_and(|o| self.is_sought(o.weenie_class_id));
-                (((!seen) as u8, (!sought) as u8), at.distance(me), guid)
+                (((!sought) as u8, (!seen) as u8), at.distance(me), guid)
             })
             .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)))
             .map(|(_, _, g)| g)

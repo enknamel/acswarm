@@ -632,3 +632,30 @@ fn a_pursued_source_is_picked_before_a_nearer_namesake() {
     c.autoplay.growth.pursuit_sought = vec![28849];
     assert_eq!(c.pick_target(&cfg, now), Some(far), "the jaw's eater first");
 }
+
+#[test]
+fn a_fight_is_let_go_for_the_pursued_source_come_in_reach() {
+    // Blargerton fought the Stockpile's troopers one after another and never the Dull Aetherium
+    // Ore Stockpile (70701) the quest's ore comes from, whose appraisal brings no level.
+    let now = Instant::now();
+    let mut c = in_the_field();
+    let trooper = testkit::standing_by(&mut c, 0x8000_0001, "Copper Cog Trooper", 3.0).guid;
+    let pile = testkit::standing_by(&mut c, 0x8000_0002, "Dull Aetherium Ore Stockpile", 20.0);
+    c.world.objects.get_mut(&pile.guid).unwrap().weenie_class_id = 70701;
+    assert!(c.can_keep_target(trooper, false, now), "nothing sought");
+    c.autoplay.growth.pursuit_sought = vec![70701];
+    assert!(
+        !c.can_keep_target(trooper, false, now),
+        "the trooper kept with the Stockpile in reach"
+    );
+    assert!(
+        c.can_keep_target(pile.guid, false, now),
+        "the Stockpile let go"
+    );
+    let cfg = c.autoplay.config.fight.clone();
+    assert_eq!(
+        c.pick_target(&cfg, now),
+        Some(pile.guid),
+        "the Stockpile first"
+    );
+}
