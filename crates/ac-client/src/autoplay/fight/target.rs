@@ -223,7 +223,7 @@ impl Client {
 
     /// Whether a pursued quest's creature in `cfg.radius` would be fought while `guid`, not one,
     /// is: it is let go for it (the Dull Aetherium Ore Stockpile left among its troopers).
-    fn is_sought_instead(&self, guid: u32, underground: bool, now: Instant) -> bool {
+    pub(crate) fn is_sought_instead(&self, guid: u32, underground: bool, now: Instant) -> bool {
         let st = &self.autoplay.growth;
         if st.pursuit_sought.is_empty() && st.pursuit_road.is_empty() {
             return false;

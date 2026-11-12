@@ -451,3 +451,28 @@ fn a_debuffer_casts_at_the_boards_target_but_not_at_one_it_avoids() {
     );
     assert!(c.autoplay.debuffed.contains(&avoided));
 }
+
+#[test]
+fn a_team_order_never_takes_a_fight_off_the_pursued_source() {
+    // The planner put Blargerton on each Stockpile Guardian and trooper after him, and the order
+    // let the Dull Aetherium Ore Stockpile (70701) go the tick after it was picked.
+    let now = Instant::now();
+    let mut c = beside_the_leader_over(crate::testkit::no_data());
+    let trooper = crate::testkit::standing_by(&mut c, 0x8000_0001, "Copper Cog Trooper", 3.0).guid;
+    let pile =
+        crate::testkit::standing_by(&mut c, 0x8000_0002, "Dull Aetherium Ore Stockpile", 6.0);
+    c.world.objects.get_mut(&pile.guid).unwrap().weenie_class_id = 70701;
+    ordered_onto(&mut c, trooper, now);
+    let cfg = c.autoplay.config.fight.clone();
+    assert!(
+        c.ordered_elsewhere(pile.guid, &cfg, false, now),
+        "nothing sought"
+    );
+    c.autoplay.growth.pursuit_sought = vec![70701];
+    assert!(
+        !c.ordered_elsewhere(pile.guid, &cfg, false, now),
+        "the Stockpile let go for the order"
+    );
+    assert!(!c.can_take_on(trooper, &cfg, false, now), "the order taken");
+    assert!(c.can_take_on(pile.guid, &cfg, false, now));
+}

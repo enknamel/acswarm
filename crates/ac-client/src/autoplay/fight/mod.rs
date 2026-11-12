@@ -261,6 +261,7 @@ impl Client {
 
     /// [`Self::would_join`] asked of `guid`: the one gate a target the team proposes -- the leader's
     /// order or its target on the board -- passes before a fight takes it, so neither goes round it.
+    /// Nor off a pursued quest's creature in reach (a_team_order_never_takes_a_fight_off_the_pursued_source).
     pub(crate) fn can_take_on(
         &self,
         guid: u32,
@@ -272,6 +273,7 @@ impl Client {
             .objects
             .get(&guid)
             .is_some_and(|o| self.would_join(o, cfg, underground, now))
+            && !self.is_sought_instead(guid, underground, now)
     }
 }
 
