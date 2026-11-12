@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use ac_world::Place;
 
 use super::pace::{Missed, Pace, MISSED_FOR};
-use super::HUNT_GROUNDS;
+use super::{PursuitStep, HUNT_GROUNDS};
 use crate::autoplay::fight::melee::GIVE_UP_FOR;
 use crate::autoplay::Doing;
 use crate::Client;
@@ -537,5 +537,66 @@ impl Client {
             return Some(Some(true));
         }
         None
+    }
+
+    /// Whether the working pursuit hunts in `lb`, at spots a creature it seeks spawns at.
+    pub(crate) fn hunts_spawn_spots(&self, lb: u32) -> bool {
+        let hunting = matches!(
+            self.working_pursuit().map(|l| &l.step),
+            Some(PursuitStep::Hunt { .. })
+        );
+        hunting && self.pursued_place(lb).is_some() && !self.spawn_spots(lb).is_empty()
+    }
+
+    /// The spots of `lb` a creature the pursuit seeks spawns at, dungeon rooms and outdoors alike,
+    /// by class: the key Putrid Moarsman (8866) is not its thirteen namesakes (4248).
+    fn spawn_spots(&self, lb: u32) -> Vec<Place> {
+        let sought = &self.autoplay.growth.pursuit_sought;
+        ac_world::spawns::in_block(lb << 16)
+            .iter()
+            .filter(|s| sought.contains(&s.wcid))
+            .map(|s| Place {
+                at: s.at,
+                cell: s.cell,
+            })
+            .collect()
+    }
+
+    /// The nearest of the pursuit's spawn spots in `lb` not gone round yet, the one stood at
+    /// counted; `None` once the round is done, or with none known.
+    pub(super) fn next_spawn_spot(&mut self, lb: u32) -> Option<Place> {
+        let me = self.my_position()?;
+        let spots = self.spawn_spots(lb);
+        let walked = &mut self.autoplay.growth.spawns_walked;
+        walked.retain(|c| *c >> 16 == lb);
+        for r in spots
+            .iter()
+            .filter(|r| r.at.distance(me) <= super::super::hunt::ROOM_HELD)
+        {
+            if !walked.contains(&r.cell) {
+                walked.push(r.cell);
+            }
+        }
+        spots
+            .into_iter()
+            .filter(|r| !walked.contains(&r.cell))
+            .min_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)))
+    }
+
+    /// Start the round of `lb`'s spawn spots again, the one stood at counted as gone round.
+    pub(super) fn start_spawn_round(&mut self, lb: u32) {
+        let Some(me) = self.my_position() else {
+            return;
+        };
+        let near: Vec<u32> = self
+            .spawn_spots(lb)
+            .iter()
+            .filter(|r| r.at.distance(me) <= super::super::hunt::ROOM_HELD)
+            .map(|r| r.cell)
+            .collect();
+        self.autoplay
+            .growth
+            .spawns_walked
+            .retain(|c| near.contains(c));
     }
 }
