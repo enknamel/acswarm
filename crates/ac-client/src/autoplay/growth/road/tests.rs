@@ -550,10 +550,6 @@ fn a_quest_hunt_walks_past_all_but_its_creature() {
         via: None,
     }];
     c.autoplay.growth.pursuit_sought = vec![4124];
-    assert!(
-        c.passing_by(&skeleton, &fight),
-        "a skeleton is no part of it"
-    );
     assert!(!c.passing_by(&boss, &fight), "the Overseer is the errand");
     // On the road to its ground the rest are run past, but the Overseer met there is fought.
     let far = ac_world::Place {
@@ -570,4 +566,38 @@ fn a_quest_hunt_walks_past_all_but_its_creature() {
         !c.passing_by(&boss, &fight),
         "the Overseer walked past on the road"
     );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_quest_hunt_stood_fights_what_is_about() {
+    // "while waiting, it might make sense to clear the area of monsters. So the player doesnt
+    // just sit there tanking hits" -- the player, of Blargerton at the Dull Aetherium Ore
+    // Stockpile, hit by its troopers while he waited.
+    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 51;
+    let fight = c.autoplay.config.fight.clone();
+    let mut boss = standing_by(&mut c, 0x8000_0001, "Lich Overseer", 5.0);
+    boss.weenie_class_id = 4124;
+    c.world.objects.insert(boss.guid, boss.clone());
+    let skeleton = standing_by(&mut c, 0x8000_0002, "Skeleton Warrior", 4.0);
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: "give:8904".into(),
+        title: "Focusing Stone".into(),
+        step: crate::autoplay::PursuitStep::Hunt {
+            landblock: 0x0188,
+            creature: "Lich Overseer".into(),
+            place: "Mines of Despair".into(),
+            more: 1,
+        },
+        working: true,
+        via: None,
+    }];
+    c.autoplay.growth.pursuit_sought = vec![4124];
+    assert!(!c.on_its_way());
+    assert!(
+        !c.passing_by(&skeleton, &fight),
+        "a skeleton beside him stood waiting is walked past"
+    );
+    assert!(!c.passing_by(&boss, &fight), "the Overseer is the errand");
 }

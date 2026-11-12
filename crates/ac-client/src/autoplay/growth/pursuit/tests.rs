@@ -3263,6 +3263,8 @@ fn a_dropper_met_on_the_road_is_fought_only_when_its_chance_beats_the_plan() {
     let mut tiatus = crate::testkit::creature(0x5000_0904, "Gotrok Tiatus");
     tiatus.weenie_class_id = gotrok;
     let cfg = c.autoplay.config.fight.clone();
+    assert_eq!(c.grow_pursuit(now), Some(true), "set off");
+    assert!(c.on_its_way());
     c.autoplay.growth.plan_secs = Some(secs / chance * 0.5);
     c.keep_road_droppers();
     assert!(c.passing_by(&tiatus, &cfg), "fought, the plan near");

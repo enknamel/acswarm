@@ -110,7 +110,7 @@ impl Client {
             return false;
         }
         // A pursued quest's errand is its creature, or for any other step nothing: the rest are
-        // walked past, at its ground too (a_quest_hunt_walks_past_all_but_its_creature).
+        // walked past on its road (a_quest_hunt_walks_past_all_but_its_creature).
         let sought = &self.autoplay.growth.pursuit_sought;
         // A dropper worth the plan (`pursuit_road`) only once on the character: one gone out to
         // was let go on the road the next tick, and back (the K'nath K'ram, test:
@@ -128,8 +128,11 @@ impl Client {
             sought.contains(&wcid) || road
         };
         let it = self.is_pursued_hunt() && worth;
-        let not_it =
-            self.is_pursuing() && (!self.is_pursued_hunt() || (!sought.is_empty() && !worth));
+        // Stood waiting for its creature or an unload, what is about is fought, its creature
+        // first (`pick_target`), not let hit him (a_quest_hunt_stood_fights_what_is_about).
+        let waits = !self.on_its_way() && st.sought_kill.is_none();
+        let not_it = self.is_pursuing()
+            && (!self.is_pursued_hunt() || (!sought.is_empty() && !worth && !waits));
         // The pursued creature itself is never walked past, on the road to its ground or there
         // (the Putrid Moarsman met at the catacombs' door, left behind on the road). By its body
         // what hits the character is walked past too: the body is opened under blows.
