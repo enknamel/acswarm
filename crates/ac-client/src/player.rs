@@ -856,6 +856,15 @@ impl Player {
         (self.cell & 0xFFFF) >= 0x100
     }
 
+    /// Metres a second along the ground, world axes: in the air, the take-off's.
+    pub fn moving_at(&self) -> Vec3 {
+        if self.airborne {
+            self.air_velocity
+        } else {
+            self.ground_velocity
+        }
+    }
+
     pub fn world_position(&self) -> Vec3 {
         ac_world::landblock_origin(self.cell) + self.local
     }

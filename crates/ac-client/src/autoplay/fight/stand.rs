@@ -674,31 +674,47 @@ impl Client {
         let rings = self.spreading_rings(me);
         let reach = self.reach_at(target, how);
         let side = self.autoplay.keep_off.side;
+        let mut why: Vec<&str> = Vec::new();
         for s in [side, -side, 0.0] {
             let ideal = anchor + (across * JIGGLE * s).extend(0.0);
             if ideal.truncate().distance(me.truncate()) <= AT_JIGGLE {
+                why.push("stood on");
                 continue;
             }
             let home = s == 0.0;
             let place = self.place_at(ideal);
             let Ok(Some(p)) = self.pathfinder.put_on_floor(here, place, cap) else {
+                why.push("no floor");
                 continue;
             };
-            let fits = p.at.truncate().distance(ideal.truncate()) <= AT_JIGGLE
-                && (p.at.z - anchor.z).abs() <= SAME_FLOOR
-                && p.at.distance(at) <= reach
-                && (home
-                    || (nearest_of(&attackers, p.at) >= floor && !is_in_rings(&reaches, p.at)))
-                && !is_in_rings(&rings, p.at)
-                && !self.is_dud_spot(p.at)
-                && self.pathfinder.can_walk(here, p.at, cap);
-            if fits && self.throws_from(p.at, target, how) {
-                if !home {
-                    self.autoplay.keep_off.side = -s;
-                }
-                return Some(p);
+            let off = if p.at.truncate().distance(ideal.truncate()) > AT_JIGGLE
+                || (p.at.z - anchor.z).abs() > SAME_FLOOR
+            {
+                Some("off the floor")
+            } else if p.at.distance(at) > reach {
+                Some("out of reach")
+            } else if !home && (nearest_of(&attackers, p.at) < floor || is_in_rings(&reaches, p.at))
+            {
+                Some("nearer an attacker")
+            } else if is_in_rings(&rings, p.at) || self.is_dud_spot(p.at) {
+                Some("a ring or a dud spot")
+            } else if !self.pathfinder.can_walk(here, p.at, cap) {
+                Some("no walk")
+            } else if !self.throws_from(p.at, target, how) {
+                Some("no shot")
+            } else {
+                None
+            };
+            if let Some(w) = off {
+                why.push(w);
+                continue;
             }
+            if !home {
+                self.autoplay.keep_off.side = -s;
+            }
+            return Some(p);
         }
+        tracing::info!("stand: no step aside: {}", why.join(", "));
         None
     }
 

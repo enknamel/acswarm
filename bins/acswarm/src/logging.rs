@@ -60,7 +60,8 @@ pub fn init(saved: Option<&str>) {
 /// refusals, journeys, what it asked the server for), not chat, appraisals or the wire.
 const FILE_FILTER: &str = "warn,acswarm=info,ac_plugin::sessions=info,ac_client::session=info,\
                            ac_client::session::chat=warn,ac_client::autoplay=info,\
-                           ac_client::refused=info,ac_client::travel=info,ac_client::actions=info";
+                           ac_client::refused=info,ac_client::travel=info,ac_client::actions=info,\
+                           ac_client::dodge=info";
 
 /// Log files kept in the folder, this process's included.
 const KEEP_FILES: usize = 10;

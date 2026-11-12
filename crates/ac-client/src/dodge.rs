@@ -1048,6 +1048,17 @@ pub fn threat(pos: Vec3, velocity: Vec3, gravity: f32, me: Vec3, radius: f32) ->
     Some(t)
 }
 
+/// [`threat`] to `me` running at `running` (flat) and keeping on: ACE aims a tracking spell where
+/// its target's velocity at the launch takes it (`WorldObject_Magic.cs:1728`, `Trajectory.cs:568-614`).
+pub fn led(pos: Vec3, velocity: Vec3, gravity: f32, me: Vec3, running: Vec3) -> Option<f32> {
+    threat(pos, velocity - flat(running), gravity, me, MISS_BY)
+}
+
+/// `v` along the ground.
+fn flat(v: Vec3) -> Vec3 {
+    Vec3::new(v.x, v.y, 0.0)
+}
+
 /// Unit vectors to the left and to the right of a projectile's path,
 /// flat.
 pub fn sides(velocity: Vec3) -> (Vec3, Vec3) {
@@ -1122,7 +1133,11 @@ impl Client {
         if !self.autoplay.config.survive.dodge {
             return false;
         }
-        let Some((me, cell)) = self.player.as_ref().map(|p| (p.world_position(), p.cell)) else {
+        let Some((me, cell, running)) = self
+            .player
+            .as_ref()
+            .map(|p| (p.world_position(), p.cell, flat(p.moving_at())))
+        else {
             return false;
         };
         // Flying, there is no floor to step along.
@@ -1211,7 +1226,7 @@ impl Client {
             self.dodge_to = None;
         }
         // The soonest projectile on its way to us that can hurt us; with none, a ring being cast.
-        let soonest = self.soonest(now, me);
+        let soonest = self.soonest(now, me, running);
         let Some((guid, eta)) = soonest else {
             return self.step_out_of_rings(now, me, cell);
         };
@@ -1227,7 +1242,9 @@ impl Client {
             .and_then(|g| self.world.name_of(g).map(str::to_string));
         // Room to either side, measured with the walker's own collision
         // half a metre at a time.
-        let (left, right) = sides(track.velocity);
+        // Its path as seen running along with us: aimed where our running took us (`led`).
+        let closing = track.velocity - running;
+        let (left, right) = sides(closing);
         let assets = &self.assets;
         let Some(pl) = self.player.as_mut() else {
             return false;
@@ -1257,7 +1274,7 @@ impl Client {
             room_left = LOOK;
             room_right = LOOK;
         }
-        let lean = lean(track.at(now), track.velocity, me);
+        let lean = lean(track.at(now), closing, me);
         if let Some(t) = self.dodge.tracks.get_mut(&guid) {
             t.dodged = true;
         }
@@ -1265,7 +1282,7 @@ impl Client {
             .as_ref()
             .map(|c| format!(" from {c}"))
             .unwrap_or_default();
-        let Some(goal) = sidestep(me, track.velocity, room_left, room_right, lean) else {
+        let Some(goal) = sidestep(me, closing, room_left, room_right, lean) else {
             self.autoplay.note(
                 format!(
                     "no room to dodge {name}{from}: {room_left:.1} m left, {room_right:.1} m right"
@@ -1275,8 +1292,10 @@ impl Client {
             return false;
         };
         tracing::info!(
-            "dodge: {name}{from}{} arrives in {eta:.2} s, lean {lean:.2}, room {room_left:.1} left {room_right:.1} right{}, stepping to {:.1} {:.1}",
+            "dodge: {name}{from}{} arrives in {eta:.2} s, {:.1} m off, running {:.1} m/s, lean {lean:.2}, room {room_left:.1} left {room_right:.1} right{}, stepping to {:.1} {:.1}",
             if track.can_hurt { "" } else { ", which cannot hurt us," },
+            track.at(now).distance(me),
+            running.length(),
             if blind { " (blind: the walk test failed both ways)" } else { "" },
             goal.x,
             goal.y
@@ -1288,14 +1307,15 @@ impl Client {
         true
     }
 
-    /// The soonest tracked projectile that can hurt us on its way to `me` within [`HORIZON`].
-    fn soonest(&self, now: Instant, me: Vec3) -> Option<(u32, f32)> {
+    /// The soonest tracked projectile that can hurt us on its way to `me`, running at `running`,
+    /// within [`HORIZON`] (see [`led`]).
+    fn soonest(&self, now: Instant, me: Vec3, running: Vec3) -> Option<(u32, f32)> {
         let mut best: Option<(u32, f32)> = None;
         for (g, t) in &self.dodge.tracks {
             if t.dodged || !t.can_hurt {
                 continue;
             }
-            if let Some(eta) = threat(t.at(now), t.velocity, t.gravity, me, MISS_BY) {
+            if let Some(eta) = led(t.at(now), t.velocity, t.gravity, me, running) {
                 if eta <= HORIZON && best.is_none_or(|(_, s)| eta < s) {
                     best = Some((*g, eta));
                 }
@@ -1483,6 +1503,22 @@ mod tests {
         let (pos, v) = aimed(Vec3::new(100.0, 90.0, 10.0), 20.0);
         let t = threat(pos, v, 0.0, ME, MISS_BY).expect("a hit");
         assert!((t - 0.5).abs() < 1e-3, "{t}");
+    }
+
+    #[test]
+    fn a_bolt_led_at_a_runner_is_a_threat_to_him_running_not_standing() {
+        // ACE aims a tracking bolt where the target's velocity takes it: from ten metres south,
+        // at 20 m/s, at where a character running east at 4 m/s is in half a second.
+        let running = Vec3::new(4.0, 0.0, 0.0);
+        let from = Vec3::new(102.0, 90.0, ME.z);
+        let v = Vec3::new(0.0, 20.0, 0.0);
+        let t = led(from, v, 0.0, ME, running).expect("kept running, it hits");
+        assert!((t - 0.5).abs() < 0.05, "{t}");
+        assert_eq!(
+            led(from, v, 0.0, ME, Vec3::ZERO),
+            None,
+            "stopped, it passes"
+        );
     }
 
     #[test]
