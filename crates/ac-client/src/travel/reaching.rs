@@ -94,13 +94,18 @@ impl Client {
     }
 
     /// The portals standing in view that a creature's death or an NPC opened
-    /// (`portals::summoned`): ways a trip takes while they stand, as the Relic Watchman's into
-    /// Aerfalle's Keep. And the NPCs that open a way, their item carried (`portals::npc_ways`).
+    /// (`portals::summoned`), or a camp put out (`portals::spawned`): ways a trip takes while they
+    /// stand, as the Relic Watchman's into Aerfalle's Keep, or a Small Hive Portal into its hive.
+    /// And the NPCs that open a way, their item carried (`portals::npc_ways`).
     pub(crate) fn standing_ways(&self) -> trip::Ways {
         let summoned = ac_world::portals::summoned();
         let portals = self.world.objects.values().filter_map(|o| {
-            let s = summoned.iter().find(|s| s.wcid == o.weenie_class_id)?;
-            Some(s.standing_at(o.position?.cell, o.world_pos()?))
+            let (cell, mouth) = (o.position?.cell, o.world_pos()?);
+            let class = o.weenie_class_id;
+            match summoned.iter().find(|s| s.wcid == class) {
+                Some(s) => Some(s.standing_at(cell, mouth)),
+                None => Some(ac_world::portals::spawned_of(class)?.standing_at(cell, mouth)),
+            }
         });
         let level = self.world.stats.level.max(1) as u32;
         let quests = &self.travel.quests_done;
