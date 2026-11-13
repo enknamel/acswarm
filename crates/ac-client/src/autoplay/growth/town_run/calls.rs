@@ -569,6 +569,11 @@ impl Client {
                     self.autoplay.note(why, now);
                     return self.giver_done(run, now, cfg);
                 }
+                // Its own visit is ticked here, as the run acts: from the player's tick no row
+                // runs, and one waiting out the run's journey never set off (a_giver_visit_set_off_after_the_runs_journey).
+                if self.is_own_visit() {
+                    self.tick_visit(now);
+                }
                 if self.visits.current.is_some() {
                     // Asked again each frame in reach, so the XP before the visit's use is kept.
                     if self.giver_in_reach(row).is_some() {

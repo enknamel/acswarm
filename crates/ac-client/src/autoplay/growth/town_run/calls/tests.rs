@@ -269,6 +269,50 @@ fn a_giver_in_a_dungeon_is_priced_and_called_on_with_its_cell() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_giver_visit_set_off_after_the_runs_journey() {
+    // Blargerton's run went to Holtburg for Boddry the Chancy with a hand-in to Shoichi due too:
+    // the visit to Shoichi waited out that journey, and once it ended stood 15 minutes, set off
+    // only from the player's tick, where no row runs.
+    let mut c =
+        crate::testkit::standing_in_the_field(25, HOLTBURG, glam::Vec3::new(84.0, 7.1, 94.0));
+    let row = ac_world::quests::rows_of("fachubfolthid")
+        .find(|r| r.kind == Kind::Item)
+        .unwrap();
+    let at = row.places[0];
+    let now = Instant::now();
+    let mut run = run_to(Vec2::new(32_587.2, 34_578.3), now);
+    c.autoplay.running = Some("town run");
+    // Boddry the Chancy's counter, where the live run went.
+    let boddry = Place {
+        at: glam::Vec3::new(32_538.6, 34_266.0, 94.0),
+        cell: 0xA9B2_010B,
+    };
+    let counter = crate::Goal::At {
+        place: boddry,
+        within: 2.0,
+    };
+    let set = c.set_off(crate::Owner::Step("town run"), counter, now);
+    assert!(c.traveling(), "{set:?}");
+    assert!(c.make_call(&mut run, giver_call(row, at), now));
+    let goal = c.journey_goal().and_then(crate::Goal::place);
+    assert_ne!(
+        goal.map(|p| p.cell),
+        Some(at.cell),
+        "the case: the run's journey first"
+    );
+    // That journey over, the run's next turn sets the visit off to the Warden.
+    c.end_trip();
+    c.autoplay.running = None;
+    c.tick_visit(now);
+    c.autoplay.running = Some("town run");
+    let _ = c.giver_step(run, now, &c.autoplay.config.growth.clone());
+    c.autoplay.running = None;
+    let goal = c.journey_goal().and_then(crate::Goal::place);
+    assert_eq!(goal.map(|p| p.cell), Some(at.cell), "{goal:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_ready_talk_in_the_counters_town_joins_the_run_and_one_switched_off_does_not() {
     // Alcott stands in Holtburg, where the run's counter is.
     let mut c =
