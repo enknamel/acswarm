@@ -4710,7 +4710,7 @@ fn an_item_goal_hunts_its_fastest_way_hands_in_and_stops_at_its_count() {
         vec![7338],
         "not for the Diamond Heart"
     );
-    // The scarab and what quests take for one are kept; nothing further down their chains.
+    // The scarab and what its ways take are kept; not what quests further down give.
     let kept: Vec<String> = c
         .loot_profile()
         .unwrap()
@@ -4727,7 +4727,7 @@ fn an_item_goal_hunts_its_fastest_way_hands_in_and_stops_at_its_count() {
         kept.iter().any(|n| n.ends_with(": Diamond Scarab")),
         "{kept:?}"
     );
-    assert!(kept.len() <= 10, "{kept:?}");
+    assert!(!kept.iter().any(|n| n.contains("Pathwarden")), "{kept:?}");
     // A heart carried is handed in for its scarabs.
     in_the_pack(&mut c, 0x8000_0901, 7338, "Diamond Heart", 1);
     match again(&mut c, now) {
@@ -4739,4 +4739,93 @@ fn an_item_goal_hunts_its_fastest_way_hands_in_and_stops_at_its_count() {
     in_the_pack(&mut c, 0x8000_0902, 7299, "Diamond Scarab", 10);
     assert_eq!(again(&mut c, now), PursuitStep::Finished);
     assert_eq!(line(&c).title, "Diamond Scarab 10/10");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_chorizite_goal_works_its_chain_of_recipes_and_hand_ins() {
+    // Chorizite: Ground Chorizite with Vitriol; ground from a Refined Medium-Grade Chorizite with
+    // a Mortar and Pestle; refined by Feruza from a chunk struck off a Lugian Quarry deposit with
+    // a Lugian Pick Axe the Raiders there drop.
+    let mut c = mage_pursuing("give:24176", "chorizite-goal");
+    c.autoplay.config.quests.pursue.clear();
+    c.world.stats.level = 75;
+    c.autoplay.config.quests.pursue_item(7581, 40, 0);
+    let now = std::time::Instant::now();
+    let item_of = |s: &PursuitStep| match s {
+        PursuitStep::Buy { wcid, .. } | PursuitStep::PickUp { wcid, .. } => Some(*wcid),
+        PursuitStep::UseOn { source, .. } | PursuitStep::Combine { source, .. } => {
+            match source.want {
+                Want::Item(w) => Some(w),
+                _ => None,
+            }
+        }
+        PursuitStep::HandIn { row, .. } => match row.want {
+            Want::Item(w) => Some(w),
+            _ => None,
+        },
+        _ => None,
+    };
+    let step = |c: &mut Client| again(c, now);
+    assert_eq!(
+        item_of(&step(&mut c)),
+        Some(4751),
+        "the mortar bought first"
+    );
+    let buys: Vec<(String, u32)> = c
+        .loot_profile()
+        .unwrap()
+        .buy
+        .iter()
+        .filter(|b| b.quest == "item:7581")
+        .map(|b| (b.what.clone(), b.keep))
+        .collect();
+    assert_eq!(
+        buys,
+        vec![("Mortar and Pestle".to_string(), 1)],
+        "other recipes' tools bought"
+    );
+    in_the_pack(&mut c, 0x8000_0904, 4751, "Mortar and Pestle", 1);
+    let s = step(&mut c);
+    assert!(
+        matches!(
+            s,
+            PursuitStep::Hunt { .. } | PursuitStep::PickUp { wcid: 7549, .. }
+        ),
+        "no pick axe gone for: {s:?}"
+    );
+    in_the_pack(&mut c, 0x8000_0901, 7549, "Lugian Pick Axe", 1);
+    assert_eq!(item_of(&step(&mut c)), Some(7529), "the deposit not struck");
+    in_the_pack(
+        &mut c,
+        0x8000_0902,
+        7529,
+        "Chunk of Medium-Grade Chorizite",
+        1,
+    );
+    assert_eq!(
+        item_of(&step(&mut c)),
+        Some(7529),
+        "the chunk not handed in"
+    );
+    in_the_pack(&mut c, 0x8000_0902, 7529, "", 0);
+    in_the_pack(
+        &mut c,
+        0x8000_0903,
+        7596,
+        "Refined Medium-Grade Chorizite",
+        1,
+    );
+    assert_eq!(
+        item_of(&step(&mut c)),
+        Some(7534),
+        "the refined chunk not ground"
+    );
+    in_the_pack(&mut c, 0x8000_0903, 7596, "", 0);
+    in_the_pack(&mut c, 0x8000_0905, 7534, "Ground Chorizite", 40);
+    assert_eq!(item_of(&step(&mut c)), Some(764), "no Vitriol bought");
+    in_the_pack(&mut c, 0x8000_0906, 764, "Vitriol", 40);
+    assert_eq!(item_of(&step(&mut c)), Some(7581), "not mixed");
+    in_the_pack(&mut c, 0x8000_0907, 7581, "Chorizite", 40);
+    assert_eq!(step(&mut c), PursuitStep::Finished);
 }

@@ -37,12 +37,12 @@ impl Client {
             let Some(item) = goal.goal_item() else {
                 continue;
             };
-            let open = self.pursuit.iter().any(|l| {
+            let line = self.pursuit.iter().find(|l| {
                 l.id == goal.id
                     && !matches!(l.step, PursuitStep::Finished | PursuitStep::Waiting { .. })
             });
-            if open {
-                let (r, b) = goal_entries(item, goal, &who, chains);
+            if let Some(line) = line {
+                let (r, b) = goal_entries(item, goal, &line.step, &who, chains);
                 rules.extend(r);
                 buy.extend(b);
             }
@@ -167,17 +167,29 @@ fn entries_for(quest: &QuestLine, who: &str, chains: &dyn Chains) -> (Vec<Rule>,
     (rules, buy)
 }
 
-/// An item goal's entries: the item kept, with all its chain can need (`chain_items`), and a buy
-/// line for the first of those a shop sells, the item itself sized to the goal.
+/// An item goal's entries: the item kept, with what its ways take (`goal_inputs`), and a buy line
+/// for what its `step` buys, a recipe part of the item itself sized to the goal: only the way
+/// chosen is bought, not every recipe's tools.
 fn goal_entries(
     item: u32,
     goal: &Pursuit,
+    step: &PursuitStep,
     who: &str,
     chains: &dyn Chains,
-) -> (Vec<Rule>, Option<Buy>) {
+) -> (Vec<Rule>, Vec<Buy>) {
     let goal_name = super::item_goal::goal_name(item);
+    let parts: Vec<u32> = ac_world::quests::sources_of(&Want::Item(item))
+        .flat_map(|s| s.keys.iter().map(|k| k.0))
+        .collect();
     let mut items = vec![(item, goal_name.clone(), goal.count.max(1))];
-    items.extend(goal_inputs(item).into_iter().map(|(w, name)| (w, name, 1)));
+    items.extend(goal_inputs(item).into_iter().map(|(w, name)| {
+        let count = if parts.contains(&w) {
+            goal.count.max(1)
+        } else {
+            1
+        };
+        (w, name, count)
+    }));
     let rules = items
         .iter()
         .map(|(wcid, name, _)| Rule {
@@ -192,53 +204,69 @@ fn goal_entries(
             ..Default::default()
         })
         .collect();
+    let bought = match step {
+        PursuitStep::Buy { wcid, .. } => Some(*wcid),
+        _ => None,
+    };
     let buy = items
         .iter()
-        .find_map(|(wcid, name, count)| buy_line(*wcid, name, *count, chains))
+        .filter(|(wcid, ..)| Some(*wcid) == bought)
+        .filter_map(|(wcid, name, count)| buy_line(*wcid, name, *count, chains))
         .map(|b| Buy {
             when: vec![Mine::Name(who.to_string())],
             group: QUESTS.into(),
             quest: goal.id.clone(),
             ..b
-        });
+        })
+        .collect();
     (rules, buy)
 }
 
-/// What an item goal's ways take: each quest giving the item's hand-in, and the keys or parts
-/// that item's own sources ask (a chest's key, a combine's halves); no further down the chain.
+/// What an item goal's ways take, [`GOAL_DEPTH`] links down: each source's keys and parts (a
+/// chest's key, a recipe's tool and halves), and the hand-in of a quest giving an item that comes
+/// no other way (the Refined Chorizite's chunk); the goal item's own givers' hand-ins too.
 fn goal_inputs(item: u32) -> Vec<(u32, String)> {
     use ac_world::quests::Handing;
     let mut out: Vec<(u32, String)> = Vec::new();
-    let add = |w: u32, name: &str, out: &mut Vec<(u32, String)>| {
-        if w != item && !out.iter().any(|(o, _)| *o == w) {
-            let name = if name.is_empty() {
-                key_name(w)
-            } else {
-                name.to_string()
+    let mut todo = vec![(item, 0)];
+    while let Some((w, depth)) = todo.pop() {
+        if depth >= GOAL_DEPTH {
+            continue;
+        }
+        let mut next: Vec<(u32, &str)> = Vec::new();
+        let sources: Vec<_> = ac_world::quests::sources_of(&Want::Item(w)).collect();
+        for s in &sources {
+            next.extend(s.keys.iter().map(|(k, name)| (*k, name.as_str())));
+        }
+        if w == item || sources.is_empty() {
+            let gives = |r: &&ac_world::quests::Row| {
+                r.hand == Handing::Give
+                    && r.want != Want::Item(w)
+                    && r.gives.iter().any(|(g, _)| *g == w)
             };
-            out.push((w, name));
+            for r in ac_world::quests::all().iter().filter(gives) {
+                if let Want::Item(input) = r.want {
+                    next.push((input, r.item.as_ref().map_or("", |i| i.name)));
+                }
+            }
         }
-    };
-    let gives = |r: &&ac_world::quests::Row| {
-        r.hand == Handing::Give
-            && r.want != Want::Item(item)
-            && r.gives.iter().any(|(g, _)| *g == item)
-    };
-    let mut inputs = vec![item];
-    for r in ac_world::quests::all().iter().filter(gives) {
-        if let Want::Item(input) = r.want {
-            add(input, r.item.as_ref().map_or("", |i| i.name), &mut out);
-            inputs.push(input);
-        }
-    }
-    for w in inputs {
-        for (key, name) in ac_world::quests::sources_of(&Want::Item(w)).flat_map(|s| s.keys.iter())
-        {
-            add(*key, name, &mut out);
+        for (k, name) in next {
+            if k != item && !out.iter().any(|(o, _)| *o == k) {
+                let name = if name.is_empty() {
+                    key_name(k)
+                } else {
+                    name.to_string()
+                };
+                out.push((k, name));
+                todo.push((k, depth + 1));
+            }
         }
     }
     out
 }
+
+/// Links an item goal's keep list follows down its ways (Chorizite's pick axe is the fifth).
+const GOAL_DEPTH: usize = 5;
 
 /// A key's name, as a chest it opens lists it.
 fn key_name(key: u32) -> String {
