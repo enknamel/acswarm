@@ -4544,3 +4544,44 @@ fn a_crystal_reached_only_by_a_teleport_gem_has_the_gem_wanted_first() {
         ac_world::quests::sources_of(&ac_world::quests::Want::Item(8115)).any(|s| s.wcid == 8016);
     assert!(made, "by the Caulnalain Key on the Caulnalain Gate");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_wanted_gems_key_is_kept() {
+    // Blargerton left a Caulnalain Key on the first Shadow Lieutenant he killed for one and
+    // hunted on: the Quests section kept the Caulnalain Portal Gem, not the key it is made from.
+    let mut c = mage_pursuing("give:8111:28324", "chained-quests");
+    let now = std::time::Instant::now();
+    again(&mut c, now);
+    let _ = c.grow_hunt(now, &crate::autoplay::growth::Growth::default());
+    let gems: Vec<u32> = c
+        .autoplay
+        .growth
+        .pursuit_gems
+        .iter()
+        .map(|g| g.wcid)
+        .collect();
+    assert_eq!(gems, vec![8115], "the Caulnalain Portal Gem wanted");
+    let step = again(&mut c, now + std::time::Duration::from_secs(1));
+    let kept = |c: &Client, wcid: u32| {
+        c.loot_profile().is_some_and(|p| {
+            p.rules.iter().any(|r| {
+                r.all.iter().any(|a| {
+                    matches!(a, crate::profile::Ask::Item(crate::items::Term::Num(crate::items::NumKey::Class, crate::items::Op::Eq, w)) if *w == wcid as f64)
+                })
+            })
+        })
+    };
+    assert!(kept(&c, 8115), "the gem kept: {step:?}");
+    assert!(kept(&c, 8019), "and the Caulnalain Key it is made from");
+    // Carried, the next step is no longer the key's hunt.
+    in_the_pack(&mut c, 0x8000_0801, 8019, "Caulnalain Key", 1);
+    let t = now + std::time::Duration::from_secs(2);
+    again(&mut c, t);
+    let _ = c.grow_hunt(t, &crate::autoplay::growth::Growth::default());
+    let step = again(&mut c, t + std::time::Duration::from_secs(1));
+    assert!(
+        matches!(&step, PursuitStep::UseOn { source, with: 8019, .. } if source.wcid == 8016),
+        "to the Caulnalain Gate with it: {step:?}"
+    );
+}

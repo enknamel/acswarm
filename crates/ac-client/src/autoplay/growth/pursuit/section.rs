@@ -41,7 +41,7 @@ impl Client {
         });
         for gem in &self.autoplay.growth.pursuit_gems {
             let (r, b) = super::gem_way::gem_entries(gem, &who);
-            rules.push(r);
+            rules.extend(r);
             buy.extend(b);
         }
         let mut profile = (*profile).clone();

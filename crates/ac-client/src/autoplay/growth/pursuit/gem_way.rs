@@ -233,26 +233,35 @@ impl State {
 }
 
 /// `who`'s Quests section entries for `gem`: kept, one at a time, and bought when a shop sells it.
-pub(super) fn gem_entries(gem: &GemWanted, who: &str) -> (Rule, Option<Buy>) {
-    let rule = Rule {
-        name: format!("{}: {}", gem.quest, gem.name),
-        group: QUESTS.into(),
-        action: LootAction::Keep,
-        all: vec![
-            Ask::Me(Mine::Name(who.to_string())),
-            Ask::Item(Term::Num(NumKey::Class, Op::Eq, gem.wcid as f64)),
-        ],
-        keep_up_to: Some(1),
-        quest: gem.quest.clone(),
-        ..Default::default()
-    };
+pub(super) fn gem_entries(gem: &GemWanted, who: &str) -> (Vec<Rule>, Option<Buy>) {
+    // And what its chain needs, the gem not yet had: the Caulnalain Key its gate makes it from,
+    // left on a Shadow Lieutenant while he hunted on for one (a_wanted_gems_key_is_kept).
+    let mut items = vec![(gem.wcid, gem.name.clone())];
+    if !gem.had {
+        items.extend(crate::quest_log::chain_items(gem.wcid));
+    }
+    let rules = items
+        .into_iter()
+        .map(|(wcid, name)| Rule {
+            name: format!("{}: {name}", gem.quest),
+            group: QUESTS.into(),
+            action: LootAction::Keep,
+            all: vec![
+                Ask::Me(Mine::Name(who.to_string())),
+                Ask::Item(Term::Num(NumKey::Class, Op::Eq, wcid as f64)),
+            ],
+            keep_up_to: Some(1),
+            quest: gem.quest.clone(),
+            ..Default::default()
+        })
+        .collect();
     let buy = buy_line(gem.wcid, &gem.name, 1, &ChainData).map(|b| Buy {
         when: vec![Mine::Name(who.to_string())],
         group: QUESTS.into(),
         quest: gem.quest.clone(),
         ..b
     });
-    (rule, buy)
+    (rules, buy)
 }
 
 /// An item's name, as a shop or a quest source has it.
