@@ -221,6 +221,13 @@ impl Client {
             && !self.is_sought_instead(guid, underground, now)
     }
 
+    /// Whether [`Self::can_keep_target`] would let `guid` go as soon as it is taken: left behind on
+    /// the road, or a pursued quest's creature wanted instead (test: a_creature_left_behind_on_the_road_is_not_picked).
+    fn is_dropped_at_once(&self, guid: u32, underground: bool, now: Instant) -> bool {
+        self.road_fight_end(guid).is_some_and(|(over, _)| over)
+            || self.is_sought_instead(guid, underground, now)
+    }
+
     /// Whether a pursued quest's creature in `cfg.radius` would be fought while `guid`, not one,
     /// is: it is let go for it (the Dull Aetherium Ore Stockpile left among its troopers).
     pub(crate) fn is_sought_instead(&self, guid: u32, underground: bool, now: Instant) -> bool {
@@ -246,7 +253,7 @@ impl Client {
 
     /// The nearest [`Self::would_fight`] allows in `cfg.radius`, a pursued quest's first, then one
     /// the attack reaches; a follower's is by its leader or hitting it, else none (`follow` gets it).
-    pub(super) fn pick_target(&mut self, cfg: &Fight, now: Instant) -> Option<u32> {
+    pub(crate) fn pick_target(&mut self, cfg: &Fight, now: Instant) -> Option<u32> {
         let underground = self.underground();
         let me = self.my_position()?;
         // A follower fights beside its leader, not wherever a monster happens to be. Not in the
@@ -263,6 +270,9 @@ impl Client {
             .objects
             .values()
             .filter(|o| self.would_fight(o, cfg, underground, now))
+            // Nor one the fight in hand would let go at once: picked and dropped each tick, two
+            // troopers left behind on the road had him turn between them for 90 s.
+            .filter(|o| !self.is_dropped_at_once(o.guid, underground, now))
             .filter_map(|o| {
                 let at = o.world_pos()?;
                 // Or hitting the character: a fight it is in, not one it chooses, as

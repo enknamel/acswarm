@@ -338,21 +338,11 @@ impl Client {
             || !self.area_allows_guid(guid, underground)
     }
 
-    /// Whether `guid`, the creature being fought, has dropped out of a
-    /// fight taken on the road (see [`road_fight_over`]), and say so
-    /// when it has. Asked of the fight in hand each tick, beside
-    /// [`Self::fight_target_gone`].
-    pub(super) fn left_behind_on_the_road(&mut self, guid: u32, now: Instant) -> bool {
-        let Some(o) = self.world.objects.get(&guid) else {
-            return false;
-        };
-        let Some(away) = o
-            .world_pos()
-            .zip(self.my_position())
-            .map(|(at, me)| at.distance(me))
-        else {
-            return false;
-        };
+    /// Whether a fight with `guid` taken on the road is over ([`road_fight_over`]), and how far off
+    /// it stands; `None` with either unplaced.
+    pub(crate) fn road_fight_end(&self, guid: u32) -> Option<(bool, f32)> {
+        let o = self.world.objects.get(&guid)?;
+        let away = o.world_pos()?.distance(self.my_position()?);
         let mates = &self.autoplay.team.mates;
         let ours = |g: u32| self.world.player_guid == Some(g) || mates.iter().any(|m| m.guid == g);
         let over = road_fight_over(
@@ -362,8 +352,19 @@ impl Client {
             self.a_mate_on_the_road_is_on(guid),
             away,
         );
+        Some((over, away))
+    }
+
+    /// Whether `guid`, the creature being fought, has dropped out of a
+    /// fight taken on the road (see [`road_fight_over`]), and say so
+    /// when it has. Asked of the fight in hand each tick, beside
+    /// [`Self::fight_target_gone`].
+    pub(super) fn left_behind_on_the_road(&mut self, guid: u32, now: Instant) -> bool {
+        let Some((over, away)) = self.road_fight_end(guid) else {
+            return false;
+        };
         if over {
-            let name = o.name.clone();
+            let name = self.world.name_or_hex(guid);
             self.autoplay.note(
                 format!("letting {name} go: it stopped following on the road ({away:.0} m)"),
                 now,

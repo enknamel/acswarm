@@ -601,3 +601,39 @@ fn a_quest_hunt_stood_fights_what_is_about() {
     );
     assert!(!c.passing_by(&boss, &fight), "the Overseer is the errand");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_creature_left_behind_on_the_road_is_not_picked() {
+    // Blargerton on the road to Kierien the Watcher turned between two troopers 27 m off for 90 s:
+    // each was picked, let go the next tick as left behind on the road, and the other picked.
+    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 51;
+    let fight = c.autoplay.config.fight.clone();
+    let mut boss = standing_by(&mut c, 0x8000_0001, "Lich Overseer", 15.0);
+    boss.weenie_class_id = 4124;
+    c.world.objects.insert(boss.guid, boss.clone());
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: "give:8904".into(),
+        title: "Focusing Stone".into(),
+        step: crate::autoplay::PursuitStep::Hunt {
+            landblock: 0x0188,
+            creature: "Lich Overseer".into(),
+            place: "Mines of Despair".into(),
+            more: 1,
+        },
+        working: true,
+        via: None,
+    }];
+    c.autoplay.growth.pursuit_sought = vec![4124];
+    let far = c.my_position().unwrap() + glam::Vec3::new(0.0, 900.0, 0.0);
+    c.travel_to(far.truncate());
+    let now = Instant::now();
+    assert!(c.would_fight(&boss, &fight, false, now), "the case: fought");
+    assert_eq!(
+        c.road_fight_end(boss.guid).map(|e| e.0),
+        Some(true),
+        "and let go"
+    );
+    assert_eq!(c.pick_target(&fight, now), None, "so never picked");
+}
