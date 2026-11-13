@@ -596,6 +596,54 @@ impl Client {
         kill
     }
 
+    /// [`Self::best_kill`], unless its attack strikes something on the way from where the character
+    /// stands: then the fastest whose attack flies clear, a bolt under a ceiling an arc bursts on
+    /// (test: an_arc_that_would_strike_the_ceiling_gives_way_to_a_bolt_that_flies_clear). None does: the best.
+    pub(crate) fn kill_from_here(&mut self, guid: u32, cfg: &Fight, now: Instant) -> Option<Kill> {
+        let best = self.best_kill(guid, cfg, now)?;
+        if self.is_dud_here() || self.is_shot_clear(guid, best.attack) {
+            return Some(best);
+        }
+        let ready: Vec<u32> = self.ready_spells(cfg).iter().map(|(id, _)| *id).collect();
+        let wands = self.wands_to_hand(cfg);
+        let mut clear: Vec<(u32, bool)> = Vec::new();
+        let mut flying = Vec::new();
+        for k in self.kills(guid, &ready, &wands) {
+            let flies = match clear.iter().find(|(id, _)| *id == k.attack) {
+                Some((_, f)) => *f,
+                None => {
+                    let f = self.is_shot_clear(guid, k.attack);
+                    clear.push((k.attack, f));
+                    f
+                }
+            };
+            if flies {
+                flying.push(k);
+            }
+        }
+        let Some(instead) = fastest(flying) else {
+            return Some(best);
+        };
+        let name = |c: &Self, id: u32| c.spell(id).map(|s| s.name).unwrap_or_default();
+        tracing::info!(
+            "autoplay: {} would strike on the way to {} from here; {} flies clear",
+            name(self, best.attack),
+            self.world.name_or_hex(guid),
+            name(self, instead.attack),
+        );
+        Some(instead)
+    }
+
+    /// Whether spell `attack` thrown from here at `guid` gets there (`Client::shot_clears`).
+    fn is_shot_clear(&mut self, guid: u32, attack: u32) -> bool {
+        self.shot_clears(guid, crate::dodge::How::Spell(attack))
+    }
+
+    /// Whether the character stands where two shots burst as they left: no shape is trusted there.
+    fn is_dud_here(&self) -> bool {
+        self.my_position().is_some_and(|me| self.is_dud_spot(me))
+    }
+
     /// The fastest way with the wand in hand only, for judging many targets at once.
     pub(crate) fn kill_in_hand(&self, guid: u32, ready: &[u32]) -> Option<Kill> {
         let cfg = Fight {

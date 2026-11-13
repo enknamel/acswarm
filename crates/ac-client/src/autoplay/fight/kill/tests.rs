@@ -342,3 +342,58 @@ fn a_wounded_creature_is_finished_with_the_spell_that_flies_first() {
     let (kill, said) = fastest_at_guard(&c, &ids);
     assert_eq!(kill.attack, ids[1], "{said}");
 }
+
+/// A caster knowing `names` in the camp's halls under 0x8852 at local `me` in `cell`, a Tusker
+/// Guard at `at` in `its`.
+fn in_the_halls(
+    names: &[&str],
+    cell: u32,
+    me: glam::Vec3,
+    its: u32,
+    at: glam::Vec3,
+) -> (crate::Client, Vec<u32>) {
+    let (mut c, ids) = at_a_tusker_guard(names);
+    crate::testkit::stand(&mut c, cell, me);
+    if let Some(it) = c.world.objects.get_mut(&0x8000_0103) {
+        it.position = Some(ac_world::object::Position::new_flat(its, at));
+    }
+    (c, ids)
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_bolt_in_a_hall_below_the_grass_flies() {
+    // Where Blargerton stood under the Aetherium camp, 23 m below its grass, the trooper 1.8 m
+    // off: every flight was taken for one into the ground, so no shot or spot to cast from cleared.
+    let me = glam::Vec3::new(84.7, 60.4, -23.6);
+    let at = glam::Vec3::new(83.7, 58.9, -23.6);
+    let (mut c, ids) = in_the_halls(&["Acid Stream VI"], 0x8852_02D0, me, 0x8852_02CF, at);
+    assert!(c.shot_clears(0x8000_0103, crate::dodge::How::Spell(ids[0])));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_arc_that_would_strike_the_ceiling_gives_way_to_a_bolt_that_flies_clear() {
+    // Blargerton threw Acid Arc VI in the camp's halls ten times running from a spot it burst at
+    // as it left; Acid Stream VI does as much and flies flat under the ceiling an arc rises into.
+    let me = glam::Vec3::new(72.0, 176.0, -23.6);
+    let at = glam::Vec3::new(76.0, 176.0, -23.6);
+    let names = ["Acid Arc VI", "Acid Stream VI"];
+    let (mut c, ids) = in_the_halls(&names, 0x8852_02AC, me, 0x8852_02AC, at);
+    let cfg = c.autoplay.config.fight.clone();
+    let now = Instant::now();
+    let best = c.best_kill(0x8000_0103, &cfg, now).expect("a kill");
+    let ways = c.kills_said(0x8000_0103, &cfg, 4);
+    assert_eq!(best.attack, ids[0], "the case: the arc is fastest, {ways}");
+    let how = |id| crate::dodge::How::Spell(id);
+    assert!(
+        !c.shot_clears(0x8000_0103, how(ids[0])),
+        "and strikes on the way"
+    );
+    assert!(
+        c.shot_clears(0x8000_0103, how(ids[1])),
+        "the bolt flies clear"
+    );
+    let kill = c.kill_from_here(0x8000_0103, &cfg, now).expect("a kill");
+    assert_eq!(kill.attack, ids[1], "{ways}");
+}

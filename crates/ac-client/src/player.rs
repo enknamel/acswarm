@@ -1040,14 +1040,18 @@ impl Player {
 
     /// Whether a projectile flying `path` (world points in order, as
     /// `crate::aim::flight` gives them) gets to its end without striking
-    /// static geometry or going into the ground on the way.
+    /// static geometry or going into the ground on the way. A point in a room is under no ground:
+    /// the camp's halls under 0x8852 lie 23 m below its grass (a_bolt_in_a_hall_below_the_grass_flies).
     pub fn flies_clear(&mut self, assets: &Assets, path: &[Vec3]) -> bool {
         let worlds = self.collision_along(assets, path);
         let this = &*self;
         crate::aim::clears(
             path,
             |a, b| worlds.iter().any(|c| c.world.segment_hit(a, b).is_some()),
-            |x, y| this.terrain_height(x, y),
+            |p| {
+                let in_room = worlds.iter().any(|c| c.world.in_known_cell(p));
+                this.terrain_height(p.x, p.y).filter(|_| !in_room)
+            },
         )
     }
 

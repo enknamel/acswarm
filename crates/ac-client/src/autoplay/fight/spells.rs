@@ -109,9 +109,9 @@ impl Client {
             return true;
         }
         self.select(Some(guid));
-        // The fastest kill with what is to hand (see `kill`): its wand taken up first, behind the
-        // throttle so the choice costs a look per cast.
-        let kill = self.best_kill(guid, cfg, now);
+        // The fastest kill with what is to hand that flies clear from here (see `kill`): its wand
+        // taken up first, behind the throttle so the choice costs a look per cast.
+        let kill = self.kill_from_here(guid, cfg, now);
         if let Some(wand) = kill
             .as_ref()
             .map(|k| k.wand.clone())

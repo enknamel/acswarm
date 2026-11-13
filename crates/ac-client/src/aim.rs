@@ -245,16 +245,16 @@ pub fn segment_box(a: Vec3, b: Vec3, lo: Vec3, hi: Vec3) -> Option<f32> {
 
 /// Whether a flight along `path` gets to its end: no stretch of it is
 /// struck by what `strikes` says stops a segment, and no point of it is
-/// under the ground `ground` gives at that spot (`None` where there is
-/// no terrain, as in a dungeon).
+/// under the ground `ground` gives for it (`None` where no terrain is over
+/// it: a dungeon, a room below the ground).
 pub fn clears(
     path: &[Vec3],
     mut strikes: impl FnMut(Vec3, Vec3) -> bool,
-    mut ground: impl FnMut(f32, f32) -> Option<f32>,
+    mut ground: impl FnMut(Vec3) -> Option<f32>,
 ) -> bool {
     if path
         .iter()
-        .any(|p| ground(p.x, p.y).is_some_and(|z| p.z < z - GROUND_GRAZE))
+        .any(|p| ground(*p).is_some_and(|z| p.z < z - GROUND_GRAZE))
     {
         return false;
     }
@@ -373,19 +373,19 @@ mod tests {
     #[test]
     fn a_wall_or_the_ground_in_the_way_stops_it() {
         let path = flight(Shot::Bolt, person(0.0, 0.0), person(0.0, 20.0)).unwrap();
-        let open = |_: f32, _: f32| Some(0.0);
+        let open = |_: Vec3| Some(0.0);
         assert!(clears(&path, |_, _| false, open));
         // A wall across y = 10.
         let wall = |a: Vec3, b: Vec3| a.y < 10.0 && b.y >= 10.0;
         assert!(!clears(&path, wall, open));
         // A rise between, higher than the bolt flies.
-        let hill = |_: f32, y: f32| Some(if (8.0..12.0).contains(&y) { 2.0 } else { 0.0 });
+        let hill = |p: Vec3| Some(if (8.0..12.0).contains(&p.y) { 2.0 } else { 0.0 });
         assert!(!clears(&path, |_, _| false, hill));
         // One it passes over.
-        let bump = |_: f32, y: f32| Some(if (8.0..12.0).contains(&y) { 1.0 } else { 0.0 });
+        let bump = |p: Vec3| Some(if (8.0..12.0).contains(&p.y) { 1.0 } else { 0.0 });
         assert!(clears(&path, |_, _| false, bump));
         // No terrain at all (a dungeon): only walls count.
-        assert!(clears(&path, |_, _| false, |_, _| None));
+        assert!(clears(&path, |_, _| false, |_| None));
     }
 
     #[test]
@@ -397,7 +397,7 @@ mod tests {
             let crosses = (a.y < 10.0) != (b.y < 10.0);
             crosses && a.lerp(b, (10.0 - a.y) / (b.y - a.y)).z < 3.0
         };
-        let flat = |_: f32, _: f32| Some(0.0);
+        let flat = |_: Vec3| Some(0.0);
         let bolt = flight(Shot::Bolt, from, to).unwrap();
         assert!(!clears(&bolt, wall, flat));
         let arc = flight(Shot::Arc { speed: 10.0 }, from, to).unwrap();
