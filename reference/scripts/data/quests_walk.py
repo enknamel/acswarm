@@ -998,6 +998,11 @@ def read_path(data, root, branches, effects, never):
                 r["unread"].append("solve-count ranges")
                 continue
         elif t == INQ_QUEST and quest is not None and quest[0] > 0:
+            if ok and stamped and q not in stamped:
+                # Held inside its wait, stamping another flag: a chain's step asking it done
+                # lately (EmoteManager.cs:627-631): the Fir Tree's HeartofInnocence, OswaldLair.
+                r["needs"].append(q)
+                continue
             if ok:
                 r["waiting"] = True  # the giver's reply during the wait: the same quest
                 continue
