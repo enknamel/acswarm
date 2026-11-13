@@ -144,6 +144,10 @@ impl Ask<'_> {
                 let Some(at) = s.nearest(me).or(combine) else {
                     continue;
                 };
+                // No way into its dungeon is in the game: no journey could ever end there.
+                if ac_world::quest_chain::is_sealed(&at) {
+                    continue;
+                }
                 let step = match s.kind {
                     Yield::Vendor => PursuitStep::Buy {
                         wcid,

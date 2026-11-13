@@ -386,3 +386,31 @@ fn the_heart_of_jaleh_has_her_things_in_the_same_place() {
     }
     assert!(same_place("give:24176").contains(&"heartinnocenttaken"));
 }
+
+#[test]
+fn a_room_nothing_leads_into_is_sealed() {
+    // Master Yado's room in 0x018A: no portal, gem, recall or NPC lands there.
+    let yado = Place {
+        at: glam::Vec3::new(96.07, -77.57, 0.0),
+        cell: 0x018A_0225,
+    };
+    assert!(is_sealed(&yado));
+    // Jaleh's dungeon has a camp's portal in; Holtburg's outdoors is no dungeon.
+    let jaleh = Place {
+        at: glam::Vec3::ZERO,
+        cell: 0x5F46_0154,
+    };
+    assert!(!is_sealed(&jaleh));
+    let holtburg = Place {
+        at: glam::Vec3::ZERO,
+        cell: 0xA9B4_0011,
+    };
+    assert!(!is_sealed(&holtburg));
+}
+
+#[test]
+fn an_item_is_found_by_part_of_its_name() {
+    let found = items_named("diamond scar");
+    assert_eq!(found.first().map(|f| f.0), Some(7299), "{found:?}");
+    assert!(items_named("  ").is_empty());
+}

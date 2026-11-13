@@ -193,6 +193,24 @@ fn surface_blocks() -> &'static BTreeSet<u32> {
     })
 }
 
+/// Whether `place` is in a dungeon nothing leads into: no portal, camp or summoned portal, gem,
+/// recall or NPC lands in its landblock (Master Yado's 0x018A, a developer's room).
+pub fn is_sealed(place: &Place) -> bool {
+    let block = block_of(place.cell);
+    if !place.is_indoors() || is_surface(block) || !ways_in(block).is_empty() {
+        return false;
+    }
+    let lands = |cell: u32| block_of(cell) == block;
+    let gems = crate::gems::all().iter().any(|g| lands(g.cell));
+    let recalls = crate::recalls::all().iter().any(|r| lands(r.cell));
+    let summoned = crate::portals::summoned().iter().any(|p| lands(p.to_cell));
+    let spawned = crate::portals::spawned()
+        .iter()
+        .any(|p| lands(p.way.to_cell));
+    let npcs = crate::portals::npc_ways().iter().any(|n| lands(n.to_cell));
+    !(gems || recalls || summoned || spawned || npcs)
+}
+
 fn is_surface(landblock: u32) -> bool {
     surface_blocks().contains(&landblock)
 }
@@ -570,6 +588,22 @@ fn item_names() -> &'static BTreeMap<u32, String> {
 /// An item's name from the quest and shop data, by weenie class.
 pub fn reward_name(wcid: u32) -> Option<&'static str> {
     item_names().get(&wcid).map(String::as_str)
+}
+
+/// The items the quest and shop data name whose name holds `words` (any case), shortest name
+/// first: what an item goal is picked from.
+pub fn items_named(words: &str) -> Vec<(u32, &'static str)> {
+    let needle = words.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let mut found: Vec<(u32, &'static str)> = item_names()
+        .iter()
+        .filter(|(_, n)| n.to_ascii_lowercase().contains(&needle))
+        .map(|(w, n)| (*w, n.as_str()))
+        .collect();
+    found.sort_by_key(|(w, n)| (n.len(), *n, *w));
+    found
 }
 
 fn is_internal(title: &str) -> bool {
