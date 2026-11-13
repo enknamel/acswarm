@@ -124,6 +124,18 @@ pub enum PursuitStep {
 }
 
 impl PursuitStep {
+    /// The landblock of the thing this step fetches from where it lies: an item, chest or NPC.
+    pub(crate) fn fetch_landblock(&self) -> Option<u32> {
+        match self {
+            PursuitStep::PickUp { at, .. }
+            | PursuitStep::OpenChest { at, .. }
+            | PursuitStep::UseOn { at, .. }
+            | PursuitStep::AskFor { at, .. }
+            | PursuitStep::GiveTo { at, .. } => Some(at.cell >> 16),
+            _ => None,
+        }
+    }
+
     /// Whether autoplay can act on it now.
     pub fn can_progress(&self) -> bool {
         matches!(
@@ -474,9 +486,13 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
             && h.as_ref()
                 .is_some_and(|h| h.grounds.iter().any(|(lb, _)| Some(*lb) == ask.here))
     };
+    // Then anything pursued fetched in the landblock under foot, before any hand-in: leaving
+    // for one item and coming back for the next costs the way in again (Jaleh's things).
+    let fetched_here = |l: &PursuitLine| ask.here.is_some() && l.step.fetch_landblock() == ask.here;
     let first = lines
         .iter()
-        .position(|(l, h)| l.step.can_progress() && on_ground(l, h));
+        .position(|(l, h)| l.step.can_progress() && on_ground(l, h))
+        .or_else(|| lines.iter().position(|(l, _)| fetched_here(l)));
     let mut out = Pursued::default();
     for (i, (mut line, hunt)) in lines.into_iter().enumerate() {
         line.working = match first {

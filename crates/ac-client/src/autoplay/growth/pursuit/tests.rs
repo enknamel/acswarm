@@ -4648,3 +4648,39 @@ fn a_ring_past_a_camp_portals_flag_works_the_flags_chain() {
         "{s:?}"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_pursued_item_in_the_landblock_stood_in_is_fetched_before_a_hand_in() {
+    // Jaleh's ring and slippers lie in 0x5F46, reached by a rare camp portal: the ring carried,
+    // the slippers are picked up before he leaves to hand the ring in.
+    let mut c = mage_pursuing("give:24178", "fetched-where-it-stands");
+    c.world.stats.level = 73;
+    c.autoplay
+        .config
+        .quests
+        .pursue_quest("give:24176", false, 0);
+    c.travel.quests_done.push("HeartofInnocence".into());
+    in_the_pack(&mut c, 0x8000_0901, 24176, "Jaleh's Wedding Ring", 1);
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let working = |c: &Client| {
+        let l = c.pursuit.iter().find(|l| l.working).expect("a line worked");
+        (l.id.clone(), l.step.clone())
+    };
+    let (id, step) = working(&c);
+    assert!(
+        id == "give:24176" && matches!(step, PursuitStep::HandIn { .. }),
+        "away from the dungeon the ring is handed in: {id} {step:?}"
+    );
+    let at = ac_world::quests::sources_of(&Want::Item(24178))
+        .find_map(|s| s.places.first())
+        .expect("the slippers' place");
+    crate::testkit::stand(&mut c, at.cell, at.at);
+    again(&mut c, now);
+    let (id, step) = working(&c);
+    assert!(
+        id == "give:24178" && matches!(step, PursuitStep::PickUp { wcid: 24178, .. }),
+        "left the slippers: {id} {step:?}"
+    );
+}
