@@ -437,6 +437,17 @@ impl Client {
     }
 
     /// The character's MotionTable, the human one until the server names it (session/apply.rs).
+    /// How long the server keeps the character busy after a take lands: the stoop for a body's or
+    /// the floor's item in the table's default style (Player_Inventory.cs:661-694, :765-788).
+    pub(crate) fn pickup_time(&self) -> std::time::Duration {
+        let style = ac_scene::anim::motion::STANCE_NON_COMBAT;
+        let pickup = ac_scene::anim::motion::PICKUP;
+        let secs = self
+            .assets
+            .motion_seconds(self.motion_table_id(), style, pickup);
+        std::time::Duration::from_secs_f32(secs.max(0.0))
+    }
+
     fn motion_table_id(&self) -> u32 {
         self.world
             .player()
@@ -820,6 +831,15 @@ mod tests {
         );
         // The human turns at 1.5 rad/s, a player half as fast again: a quarter turn in 0.7 s.
         assert!(near(c.turn_seconds(std::f32::consts::FRAC_PI_2), 0.698));
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_pickup_keeps_the_server_busy_for_the_stoop() {
+        let c = Client::offline(crate::testkit::game_data());
+        let stoop = c.pickup_time().as_secs_f32();
+        eprintln!("pickup stoop {stoop:.3} s");
+        assert!((0.3..3.0).contains(&stoop), "{stoop}");
     }
 
     #[test]

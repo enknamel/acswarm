@@ -30,6 +30,8 @@ pub mod motion {
     pub const SIDE_STEP_RIGHT: u32 = 0x6500_000F;
     pub const SIDE_STEP_LEFT: u32 = 0x6500_0010;
     pub const DEAD: u32 = 0x4000_0011;
+    /// Stooping for something at foot height (ACE `MotionCommand.Pickup`).
+    pub const PICKUP: u32 = 0x4000_0018;
     pub const ATTACK_HIGH1: u32 = 0x1000_0062;
     pub const ATTACK_MED1: u32 = 0x1000_0063;
     pub const ATTACK_LOW1: u32 = 0x1000_0064;

@@ -237,6 +237,7 @@ impl Client {
         self.note_pack_counts();
         // The in-flight pickup is done once the item is ours, gone, or stale.
         if let Some((guid, since)) = self.loot_inflight {
+            let mut landed = false;
             let over = match self.loot_merge.as_ref() {
                 // A pour off the body onto a carried stack is answered
                 // the way a tidying pour is: the target's count grows,
@@ -265,6 +266,7 @@ impl Client {
                             // What the pile is for is settled now that
                             // the coin is on it, as a tidying pour's is.
                             self.autoplay.ledger.merged(from, to);
+                            landed = true;
                             true
                         }
                         // The refusal is left where it is for the loot
@@ -276,7 +278,7 @@ impl Client {
                     // Ours wherever it landed: a take named a side pack
                     // when the main one was full, and an item in a side
                     // pack is not in the character's own container.
-                    let landed = self
+                    landed = self
                         .world
                         .objects
                         .get(&guid)
@@ -286,6 +288,9 @@ impl Client {
             };
             if over {
                 self.loot_inflight = None;
+            }
+            if landed {
+                self.autoplay.stooped_until = Some(now + self.pickup_time());
             }
         }
         self.autoplay.take_in_air = self.loot_inflight.map(|(_, since)| since);

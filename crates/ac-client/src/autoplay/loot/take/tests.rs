@@ -110,6 +110,31 @@ fn a_take_in_the_air_holds_casts_until_it_lands() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_landed_take_holds_casts_and_uses_for_the_stoop() {
+    // Casts sent the moment a take landed were turned away busy (0x1D): ACE keeps the character
+    // busy the pickup's stoop after the item moves (Player_Inventory.cs:765-788).
+    let mut c = with_packs(game_data(), 2, 2, 24, 7);
+    const DAGGER: u32 = 0x8000_0401;
+    on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
+    let now = Instant::now();
+    c.take(DAGGER);
+    c.tick_loot(now);
+    c.world.objects.get_mut(&DAGGER).unwrap().container = Some(SACK);
+    let landed = now + Duration::from_millis(100);
+    c.tick_loot(landed);
+    let stoop = c.pickup_time();
+    assert!(
+        c.autoplay.cast_in_flight(landed + stoop / 2),
+        "still stooping"
+    );
+    assert!(
+        !c.autoplay.cast_in_flight(landed + stoop),
+        "up again, the cast goes"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_servers_word_that_a_pack_is_full_sends_the_take_elsewhere_and_then_gives_up() {
     // The count said the main pack had two slots; the server said
     // "Unable to put Dagger into container". Believed, the next try

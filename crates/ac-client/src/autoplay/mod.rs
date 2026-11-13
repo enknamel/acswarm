@@ -195,6 +195,8 @@ pub struct Autoplay {
     pub(crate) hop_until: Option<Instant>,
     /// When the take in the air went out (`Client::loot_inflight`), kept by `tick_loot`: casts wait.
     pub(crate) take_in_air: Option<Instant>,
+    /// Casts and uses wait till then: the server stays busy a pickup's stoop after the item lands.
+    pub(crate) stooped_until: Option<Instant>,
     /// What the fight's own attack spell was thrown at and when, so a
     /// stop can tell it from a heal, a kit or a counter, which set
     /// `cast_sent` too. Cleared by the same answer as `cast_sent`.

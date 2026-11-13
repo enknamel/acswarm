@@ -47,7 +47,10 @@ impl Autoplay {
     pub(crate) fn cast_in_flight(&self, now: Instant) -> bool {
         // A take keeps the server busy until it lands, and a cast sent meanwhile is turned away
         // busy (0x1D) with no answer of its own to free the slot.
-        self.take_in_air.is_some() || self.casting(now)
+        // Landed, it keeps us busy the pickup's stoop more (Player_Inventory.cs:765-788, :1138).
+        self.take_in_air.is_some()
+            || self.stooped_until.is_some_and(|t| now < t)
+            || self.casting(now)
     }
 
     /// A spell of any kind is still going up: what a take or a wield waits on (`server_busy`).
