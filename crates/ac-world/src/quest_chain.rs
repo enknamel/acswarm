@@ -581,8 +581,23 @@ fn item_names() -> &'static BTreeMap<u32, String> {
             m.entry(ware.wcid)
                 .or_insert_with(|| ware.name.trim().replace(';', ","));
         }
+        for (wcid, name) in goal_items() {
+            m.entry(wcid).or_insert(name);
+        }
         m
     })
+}
+
+/// The spell components no shop sells that the data has a way to (`data/goal_items.csv`):
+/// item goals besides the quests' items.
+fn goal_items() -> impl Iterator<Item = (u32, String)> {
+    include_str!("../data/goal_items.csv")
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.is_empty())
+        .filter_map(|l| {
+            let (wcid, name) = l.split_once(',')?;
+            Some((wcid.parse().ok()?, name.trim().replace(';', ",")))
+        })
 }
 
 /// An item's name from the quest and shop data, by weenie class.

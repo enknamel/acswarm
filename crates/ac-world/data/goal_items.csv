@@ -1,0 +1,5 @@
+# Spell components no shop sells that the data has a way to, besides the quests' own items: what an
+# item goal can be set for (ac_world::quest_chain::items_named). Their ways are in
+# quest_sources.csv. wcid,name. Regenerate with reference/scripts/data/quests.sh.
+7299,Diamond Scarab
+7581,Chorizite

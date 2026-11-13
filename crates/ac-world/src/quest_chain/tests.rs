@@ -414,3 +414,22 @@ fn an_item_is_found_by_part_of_its_name() {
     assert_eq!(found.first().map(|f| f.0), Some(7299), "{found:?}");
     assert!(items_named("  ").is_empty());
 }
+
+#[test]
+fn chorizite_is_found_by_name_and_made_from_its_chain() {
+    // Chorizite no shop sells: Ground Chorizite with Vitriol, ground from a Refined Medium-Grade
+    // Chorizite with a Mortar and Pestle; the chunk struck from a deposit with a Lugian Pick Axe.
+    assert_eq!(items_named("chorizite").first().map(|f| f.0), Some(7581));
+    let kinds = |w: u32| -> Vec<Yield> {
+        crate::quests::sources_of(&Want::Item(w))
+            .map(|s| s.kind)
+            .collect()
+    };
+    assert!(kinds(7581).contains(&Yield::Combine));
+    assert!(kinds(7534).contains(&Yield::Combine));
+    let deposit = crate::quests::sources_of(&Want::Item(7529))
+        .find(|s| s.kind == Yield::Use)
+        .expect("the chunk struck from a deposit");
+    assert_eq!(deposit.keys.first().map(|k| k.0), Some(7549));
+    assert!(!kinds(7549).is_empty(), "the pick axe comes from nowhere");
+}

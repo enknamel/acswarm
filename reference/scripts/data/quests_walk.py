@@ -186,14 +186,20 @@ class Data:
         for key, code in rows(dump, "keys"):
             self.keys_of[code.lower()].append(int(key))
         self.stuck = {int(o) for (o,) in rows(dump, "stuck")}
+        self.components = {int(o) for (o,) in rows(dump, "components")}
         # What an item used on a placed object makes: made -> object -> items used on it.
         self.made_on = defaultdict(lambda: defaultdict(set))
         for made, used, on in rows(dump, "recipes"):
             self.made_on[int(made)][int(on)].add(int(used))
         # What one carried item used on another makes: made -> (item used, item it is used on).
+        # One used on a stuck object a generator places (a Deposit of Chorizite Ore, struck with a
+        # Lugian Pick Axe) is a use on that object where it stands, as never carried.
         self.combined = defaultdict(set)
         for made, used, on in rows(dump, "combines"):
-            self.combined[int(made)].add((int(used), int(on)))
+            if int(on) in self.stuck:
+                self.made_on[int(made)][int(on)].add(int(used))
+            else:
+                self.combined[int(made)].add((int(used), int(on)))
         # Items a shop sells (vendors.csv, joined at load): a source the walk does not write.
         self.sold = set()
         self.spawning = Spawning(dump)
@@ -1282,6 +1288,9 @@ def build(data, never):
                    | {str(w) for w in learnt} | {str(w) for w in data.gems}
                    | {"flag:" + f for f in data.stamps}
                    | {"flag:" + f for f in data.portal_stamps})
+    # And the spell components no shop sells: what an item goal is set for (Chorizite).
+    rewards = reward_items(rows_out)
+    wants = sorted(set(wants) | {str(c) for c in data.components - data.sold})
     seen = set(wants)
     todo = [(w, 0) for w in wants]
     while todo:
@@ -1382,7 +1391,7 @@ def build(data, never):
     def gate(r):
         return data.gate_of(r[2])[1] if r[1] in ("drop", "kill", "npc", "give") else None
 
-    src = kept_uses(src, wants, data.sold, gate)
+    src = kept_uses(src, wants, data.sold | rewards, gate)
     had = {r[0] for r in src} | {str(w) for w in data.sold}
     rows_out = rows_out + learn_rows(data, learnt, had)
     rows_out.sort(key=lambda r: (r[0], kind_order[r[1]], int(r[3]), int(r[7])))
@@ -1586,6 +1595,18 @@ def learn_rows(data, learnt, had):
     return out
 
 
+def reward_items(rows_out):
+    """Every item a quest row gives (its gives column, `wcid:count;...`, `|` between a random
+    reply's alternatives)."""
+    out = set()
+    for r in rows_out:
+        for alt in r[COL_GIVES].split("|"):
+            for g in alt.split(";"):
+                if g and g.split(":")[0].isdigit():
+                    out.add(int(g.split(":")[0]))
+    return out
+
+
 def kept_uses(src, wants, sold, gate=lambda r: None):
     """`src` less each use whose items used on it have no source, and less the rows of an item
     then wanted by nothing kept; an event a kept row's creature needs (`gate`) is wanted."""
@@ -1709,6 +1730,12 @@ def main():
               newline="") as f:
         f.write(SOURCES_HEADER)
         write_rows(f, src_out)
+    # The components an item goal can be set for: those the walk found a way to.
+    found = {int(r[0]) for r in src_out if r[0].isdigit()}
+    goals = sorted(c for c in data.components - data.sold if c in found)
+    with open(os.path.join(out_dir, "goal_items.csv"), "w", encoding="utf-8", newline="") as f:
+        f.write(GOAL_ITEMS_HEADER)
+        write_rows(f, [(str(c), data.name.get(c, "")) for c in goals])
     ways = npc_ways(data, asked - stamped)
     summoned = {(c,) + w for c, w in data.summons.items()}
     summoned |= {(int(r[0]),) + data.link_portal[(int(r[0]), d)]
@@ -1798,6 +1825,12 @@ ARENAS_HEADER = """\
 # Cells hex, x y z local to the cell's landblock. Regenerate with reference/scripts/data/quests.sh.
 """
 
+
+GOAL_ITEMS_HEADER = """\
+# Spell components no shop sells that the data has a way to, besides the quests' own items: what an
+# item goal can be set for (ac_world::quest_chain::items_named). Their ways are in
+# quest_sources.csv. wcid,name. Regenerate with reference/scripts/data/quests.sh.
+"""
 
 PICKUPS_HEADER = """\
 # Items whose pickup the server limits (an item's Quest, PropertyString 33): picked up while its

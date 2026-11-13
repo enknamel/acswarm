@@ -1,6 +1,6 @@
 #!/bin/sh
 # Regenerate crates/ac-world/data/quests.csv, quest_givers.csv,
-# quest_sources.csv, summoned_portals.csv, spawned_portals.csv and npc_ways.csv (the portals and
+# quest_sources.csv, goal_items.csv, summoned_portals.csv, spawned_portals.csv and npc_ways.csv (the portals and
 # teleports an NPC opens for an item handed or a use) and arenas.csv (the
 # Colosseum's rooms, ways in and tickets): every quest a placed
 # NPC holds, XP or not (each path
@@ -325,13 +325,17 @@ where w.type = 10 or li.weenie_Class_Id in (select distinct object_Id from weeni
 q links 'select l.parent_GUID, l.child_GUID, li.weenie_Class_Id
 from landblock_instance_link l join landblock_instance li on li.guid = l.child_GUID;'
 
+# Spell components (ItemType 0x1000): what an item goal is set for beyond the quests' items, the
+# shops' wares left out; the walk writes where each comes from (Chorizite, Diamond Scarabs).
+q components 'select object_Id from weenie_properties_int where type = 1 and value = 4096;'
+
 q encroots 'select hex(landblock), weenie_Class_Id, count(*) from encounter
 group by landblock, weenie_Class_Id;'
 
 for t in placed emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
   gens chestlist locks keys stuck nocorpse recipes combines encounters roots profiles genprops crit inst links \
   encroots genevent summonspell linkportal deathsignals portalstamps spellpos reldest hearing \
-  genportals portalmet; do
+  genportals portalmet components; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 
