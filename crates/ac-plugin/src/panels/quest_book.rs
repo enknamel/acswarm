@@ -56,6 +56,8 @@ pub(crate) struct BookState {
     /// The selected quest's steps in words, for that id and browse board.
     steps: Vec<Step>,
     steps_for: Option<(String, u64)>,
+    /// The quests worked where the selected one is, for that id.
+    together: Option<(String, Vec<&'static str>)>,
 }
 
 impl BookState {
@@ -679,6 +681,10 @@ fn detail_pane(
         );
         return;
     };
+    if st.together.as_ref().is_none_or(|(id, _)| *id != card.id) {
+        let same = ac_world::quest_chain::same_place(&card.id);
+        st.together = Some((card.id.clone(), same));
+    }
     let line = st.browse.line(&card.id);
     let acting = v.acting.iter().find(|l| l.id == card.id);
     egui::ScrollArea::vertical()
@@ -755,6 +761,8 @@ fn detail_pane(
             if !card.does.is_empty() {
                 caption(ui, format!("Does: {}", card.does.join(", ")));
             }
+            let others = st.together.as_ref().map_or(&[][..], |(_, o)| o);
+            together_rows(ui, v, cfg, others, &st.browse, card);
             if !card.unread.is_empty() {
                 ui.add_space(4.0);
                 ui.label(
@@ -770,6 +778,67 @@ fn detail_pane(
                 }
             }
         });
+}
+
+/// The quests worked in a landblock `card` is worked in, ticked when pursued, with All and
+/// None: ticked ones are pursued right after it, and autoplay fetches them all on one visit.
+fn together_rows(
+    ui: &mut egui::Ui,
+    v: &BookView,
+    cfg: &mut Quests,
+    others: &[&'static str],
+    browse: &Browse,
+    card: &QuestCard,
+) {
+    if others.is_empty() {
+        return;
+    }
+    ui.add_space(4.0);
+    title(ui, "Done in the same place");
+    let mut changes: Vec<(&str, bool)> = Vec::new();
+    ui.horizontal(|ui| {
+        if ui
+            .button("All")
+            .on_hover_text("Pursue every one, right after this quest")
+            .clicked()
+        {
+            changes = others.iter().map(|&q| (q, true)).collect();
+        }
+        if ui
+            .button("None")
+            .on_hover_text("Pursue none of them")
+            .clicked()
+        {
+            changes = others.iter().map(|&q| (q, false)).collect();
+        }
+    });
+    for &id in others {
+        let Some(c) = v.cards.iter().find(|c| c.id == id) else {
+            continue;
+        };
+        let xp = match xp_of(c, browse.line(id)) {
+            0 => "no XP".to_string(),
+            xp => format!("{} XP", short_xp(xp)),
+        };
+        let mut on = cfg.is_pursued(id);
+        if ui
+            .checkbox(&mut on, format!("{} · {xp}", c.title))
+            .on_hover_text(format!("{id}: pursued right after this quest"))
+            .changed()
+        {
+            changes.push((id, on));
+        }
+    }
+    // Each ticked one after the last, in the list's order; one pursued already stays put.
+    let mut after = card.id.clone();
+    for (id, on) in changes {
+        if !on {
+            cfg.stop_pursuing(id);
+        } else if !cfg.is_pursued(id) {
+            cfg.pursue_after(id, &after, v.now);
+            after = id.to_string();
+        }
+    }
 }
 
 /// The quest's state for the character, what autoplay does with it now, and its pursuit line.

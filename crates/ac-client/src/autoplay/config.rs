@@ -464,6 +464,23 @@ impl Quests {
         }
     }
 
+    /// Pursue `id` once from `now`, right after `after` (first when `after` is not pursued).
+    pub fn pursue_after(&mut self, id: &str, after: &str, now: u64) {
+        self.stop_pursuing(id);
+        let at = self
+            .pursue
+            .iter()
+            .position(|p| p.id == after)
+            .map_or(0, |i| i + 1);
+        let p = Pursuit {
+            id: id.to_string(),
+            again: false,
+            since: now,
+            outcome: QuestEnd::HandIn,
+        };
+        self.pursue.insert(at, p);
+    }
+
     /// End the pursued quest `id` as `outcome`; false when it is not pursued.
     pub fn set_outcome(&mut self, id: &str, outcome: QuestEnd) -> bool {
         let Some(p) = self.pursue.iter_mut().find(|p| p.id == id) else {

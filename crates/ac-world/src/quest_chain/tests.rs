@@ -365,3 +365,24 @@ fn the_virindiisland_flag_is_had_by_killing_the_guardian_of_the_singularity() {
         .collect();
     assert_eq!(killed, [10824], "{by:?}");
 }
+
+#[test]
+fn the_heart_of_jaleh_has_her_things_in_the_same_place() {
+    // The Body of Jaleh hands the heart over in 0x5F46, where her ring, slippers, shirt, turban
+    // and necklace lie and her chest holds the leggings and chain shirt.
+    let t = std::time::Instant::now();
+    let same = same_place("heartinnocenttaken");
+    eprintln!("{:?} {same:?}", t.elapsed());
+    for id in [
+        "give:24173",
+        "give:24174",
+        "give:24176",
+        "give:24177",
+        "give:24178",
+        "give:24180",
+        "give:24183",
+    ] {
+        assert!(same.contains(&id), "{id} left out: {same:?}");
+    }
+    assert!(same_place("give:24176").contains(&"heartinnocenttaken"));
+}

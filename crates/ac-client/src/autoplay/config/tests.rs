@@ -222,3 +222,24 @@ fn unchecking_all_leaves_on_only_the_quests_ticked_after() {
     let old: Config = serde_json::from_str(r#"{"quests":{"on":true}}"#).unwrap();
     assert!(!old.quests.only_chosen && old.quests.is_on(tusk));
 }
+
+#[test]
+fn a_quest_pursued_after_another_goes_right_behind_it() {
+    let mut q = Quests::default();
+    q.pursue_quest("heartinnocenttaken", false, 0);
+    q.pursue_quest("engorgedeaterjaw", true, 0);
+    q.pursue_after("give:24176", "heartinnocenttaken", 0);
+    q.pursue_after("give:24178", "give:24176", 0);
+    q.pursue_after("give:24180", "not pursued", 0);
+    let ids: Vec<&str> = q.pursue.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "give:24180",
+            "heartinnocenttaken",
+            "give:24176",
+            "give:24178",
+            "engorgedeaterjaw"
+        ]
+    );
+}

@@ -732,5 +732,50 @@ pub fn quest_cards() -> &'static [QuestCard] {
     })
 }
 
+/// The landblocks quest `id` is worked in: where its wanted things are fetched or best hunted,
+/// else, a talk, where its givers stand.
+fn work_blocks(id: &str) -> BTreeSet<u32> {
+    let rows: Vec<&'static Row> = crate::quests::rows_of(id)
+        .filter(|r| r.kind != Kind::Start)
+        .collect();
+    let mut blocks = BTreeSet::new();
+    for r in rows.iter().filter(|r| r.want != Want::Nothing) {
+        if let Some(g) = source_grounds(&r.want).first() {
+            blocks.insert(g.landblock);
+        }
+        let fetched = crate::quests::sources_of(&r.want).filter(|s| !s.kind.is_hunted());
+        blocks.extend(fetched.flat_map(|s| s.places.iter().map(|p| block_of(p.cell))));
+    }
+    if blocks.is_empty() {
+        let at = rows.iter().flat_map(|r| r.places.iter());
+        blocks.extend(at.map(|p| block_of(p.cell)));
+    }
+    blocks
+}
+
+/// The other quests worked in a landblock quest `id` is worked in, in the data's order: done on
+/// the same visit (Jaleh's ring, slippers and turban beside the Heart of Jaleh).
+pub fn same_place(id: &str) -> Vec<&'static str> {
+    static BY_BLOCK: OnceLock<BTreeMap<u32, Vec<&'static str>>> = OnceLock::new();
+    let by_block = BY_BLOCK.get_or_init(|| {
+        let mut m: BTreeMap<u32, Vec<&'static str>> = BTreeMap::new();
+        for card in quest_cards() {
+            for b in work_blocks(&card.id) {
+                m.entry(b).or_default().push(card.id.as_str());
+            }
+        }
+        m
+    });
+    let mut ids: Vec<&'static str> = work_blocks(id)
+        .iter()
+        .flat_map(|b| by_block.get(b).into_iter().flatten().copied())
+        .filter(|&q| q != id)
+        .collect();
+    let order = |q: &str| quest_cards().iter().position(|c| c.id == q);
+    ids.sort_by_key(|q| order(q));
+    ids.dedup();
+    ids
+}
+
 #[cfg(test)]
 mod tests;
