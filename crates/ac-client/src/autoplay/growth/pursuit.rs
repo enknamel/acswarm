@@ -612,7 +612,7 @@ impl Ask<'_> {
         let there =
             matches!(step.0, PursuitStep::Hunt { landblock, .. } if Some(landblock) == self.here);
         if let (Some(flag), false) = (self.flag_ways.get(&line.id), there) {
-            return self.flag_step(flag, 0);
+            return self.flag_step_by(flag, 0, true);
         }
         if let (Some((gem, name)), false) = (self.ways.get(&line.id), there) {
             return self.obtain(&[Want::Item(*gem)], 1, name, 0);

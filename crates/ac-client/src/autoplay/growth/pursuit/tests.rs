@@ -4585,3 +4585,66 @@ fn a_wanted_gems_key_is_kept() {
         "to the Caulnalain Gate with it: {step:?}"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ring_past_a_camp_portals_flag_works_the_flags_chain() {
+    // "no way to Jaleh's Wedding Ring": it lies in 0x5F46, reached by the Heart of Innocence a
+    // camp at 0xB0A9 puts out, asking HeartofInnocence: the Fir Tree's, after Oswald's Lair's
+    // chain (Celcynd's mug and bark, Ro Bi-Jor's silk, Ulgrim's cider, the Chunk of Wood).
+    let mut c = mage_pursuing("give:24176", "chained-quests");
+    c.world.stats.level = 73;
+    let t0 = std::time::Instant::now();
+    let mut tick = 0;
+    let mut step = |c: &mut Client| {
+        tick += 1;
+        let t = t0 + std::time::Duration::from_secs(tick);
+        again(c, t);
+        let _ = c.grow_hunt(t, &crate::autoplay::growth::Growth::default());
+        again(c, t)
+    };
+    let picks =
+        |s: &PursuitStep, w: u32| matches!(s, PursuitStep::PickUp { wcid, .. } if *wcid == w);
+    let hands = |s: &PursuitStep, giver: &[u32], w: Option<u32>| {
+        matches!(s, PursuitStep::HandIn { row, .. }
+            if giver.contains(&row.giver_wcid) && w.is_none_or(|w| row.want == Want::Item(w)))
+    };
+    let s = step(&mut c);
+    assert!(picks(&s, 24143), "the Empty Mug first: {s:?}");
+    assert_eq!(
+        c.autoplay
+            .growth
+            .pursuit_flags
+            .get("give:24176")
+            .map(String::as_str),
+        Some("HeartofInnocence")
+    );
+    // Each item carried is handed in; each flag held, the chain's next.
+    let chain: [(u32, &[u32], &str); 4] = [
+        (24143, &[4795], "mugoswaldgiven"),
+        (24141, &[4795], "oswaldstep3"),
+        (24144, &[24160], "oswaldstep2"),
+        (24142, &[6873, 26457], "oswaldstep1"),
+    ];
+    for (n, (item, giver, flag)) in chain.into_iter().enumerate() {
+        let s = step(&mut c);
+        assert!(picks(&s, item), "{n}: {item} picked up: {s:?}");
+        in_the_pack(&mut c, 0x8000_0900 + n as u32, item, "a chain's item", 1);
+        let s = step(&mut c);
+        assert!(hands(&s, giver, Some(item)), "{n}: {item} handed in: {s:?}");
+        in_the_pack(&mut c, 0x8000_0900 + n as u32, item, "", 0);
+        c.travel.quests_done.push(flag.to_string());
+    }
+    let s = step(&mut c);
+    assert!(hands(&s, &[24158], None), "the Chunk of Wood used: {s:?}");
+    c.travel.quests_done.push("oswaldlair".into());
+    let s = step(&mut c);
+    assert!(hands(&s, &[24161], None), "the Fir Tree used: {s:?}");
+    c.travel.quests_done.push("HeartofInnocence".into());
+    // The flag held, the camp's portal is hunted: its exit leads on to the ring.
+    let s = step(&mut c);
+    assert!(
+        matches!(&s, PursuitStep::Hunt { creature, .. } if creature == "Heart of Innocence"),
+        "{s:?}"
+    );
+}

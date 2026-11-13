@@ -81,7 +81,7 @@ pub(crate) struct Asking<'a> {
 
 impl Asking<'_> {
     /// `row`'s nearest placement it can be asked at: an open door, not lately refused.
-    fn open_at(&self, row: &'static Row) -> Option<(f32, &'static Row, Place)> {
+    pub(crate) fn open_at(&self, row: &'static Row) -> Option<(f32, &'static Row, Place)> {
         row.places
             .iter()
             .filter(|p| ac_world::quests::locked_at(p, self.held).is_none())

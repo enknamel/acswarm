@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use ac_world::quest_chain::FlagBy;
-use ac_world::quests::{Want, Yield};
+use ac_world::quests::{Row, Want, Yield};
 use ac_world::trip::Step;
 use ac_world::Place;
 
@@ -83,6 +83,18 @@ impl Ask<'_> {
     /// The step for a flag a way on asks: earned from an unlock NPC the level earns, else by a
     /// kill that stamps it ([`OBTAIN_DEPTH`] deep, as a key), else why not (a portal's, named).
     pub(super) fn flag_step(&self, flag: &str, depth: usize) -> (PursuitStep, Option<Hunting>) {
+        self.flag_step_by(flag, depth, false)
+    }
+
+    /// [`Self::flag_step`], a quest row stamping it worked with `work_rows`: for a flag wanted as a
+    /// way in alone; one a board line asks has that quest chained as a line of its own
+    /// (a_quest_needing_another_works_that_one_first).
+    pub(super) fn flag_step_by(
+        &self,
+        flag: &str,
+        depth: usize,
+        work_rows: bool,
+    ) -> (PursuitStep, Option<Hunting>) {
         let by = self.chains.givers(flag);
         let unlocks = || {
             by.iter().filter_map(|b| match b {
@@ -129,18 +141,54 @@ impl Ask<'_> {
                 return got;
             }
         }
+        // A quest row stamping it (the Fir Tree's HeartofInnocence): worked as a step, the first
+        // row that leads anywhere.
+        let rows = by.iter().filter_map(|b| match b {
+            FlagBy::Quest(row) => Some(*row),
+            _ => None,
+        });
+        let mut first_stuck = None;
+        for row in rows.filter(|_| work_rows && depth < OBTAIN_DEPTH) {
+            let got = self.row_step(row, depth + 1);
+            if !matches!(got.0, PursuitStep::Stuck { .. }) {
+                return got;
+            }
+            first_stuck.get_or_insert(got);
+        }
         match (quest, killed, portal) {
-            (Some(row), _, _) => {
+            (Some(row), _, _) => first_stuck.unwrap_or_else(|| {
                 let why = format!(
                     "the {flag} flag comes first, from {} ({})",
                     row.giver,
                     row.title.trim()
                 );
                 (stuck(why), None)
-            }
+            }),
             (None, Some(got), _) => got,
             (None, None, _) => (stuck(format!("nobody known gives the {flag} flag")), None),
         }
+    }
+}
+
+impl Ask<'_> {
+    /// Quest row `row` worked for the flag it stamps: each flag it needs first (a flag step), then
+    /// what it takes come by, then its giver used or handed it (Oswald's Lair, Ulgrim to the tree).
+    fn row_step(&self, row: &'static Row, depth: usize) -> (PursuitStep, Option<Hunting>) {
+        let held = |f: &String| self.facts.held.iter().any(|h| h.eq_ignore_ascii_case(f));
+        if let Some(need) = row.needs.iter().find(|n| !held(n)) {
+            return self.flag_step_by(need, depth, true);
+        }
+        let Some((_, row, at)) = self.asking.open_at(row) else {
+            return (stuck(format!("{} cannot be asked now", row.giver)), None);
+        };
+        if let Want::Item(item) = row.want {
+            let count = row.count.max(1);
+            if (self.asking.carried)(item) < count {
+                let name = row.item.as_ref().map_or("", |i| i.name);
+                return self.obtain(std::slice::from_ref(&row.want), count, name, depth);
+            }
+        }
+        (PursuitStep::HandIn { row, at }, None)
     }
 }
 

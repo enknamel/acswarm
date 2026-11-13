@@ -26,21 +26,31 @@ pub(crate) struct PortalWanted {
 }
 
 impl Client {
-    /// The camp-made portal letting this character through whose exit a journey goes on from to
-    /// one of `grounds`, the one whose landblocks put it out fastest; `None` when none does.
-    fn portal_way(&mut self, grounds: &[(u32, Place)], quests: &[String]) -> Option<PortalWanted> {
+    /// The camp-made portal whose exit a journey goes on from to one of `grounds`, the one whose
+    /// landblocks put it out fastest, and the flag it asks not held: one letting this character
+    /// through first, else one asking a flag alone (the Heart of Innocence's); `None` when none.
+    fn portal_way(
+        &mut self,
+        grounds: &[(u32, Place)],
+        quests: &[String],
+    ) -> Option<(PortalWanted, Option<String>)> {
         let level = self.world.stats.level.max(1) as u32;
         let goals: Vec<Place> = grounds.iter().map(|g| self.planning_place(g.1)).collect();
-        let mut best: Option<(f32, PortalWanted)> = None;
+        // (whether a flag is asked, -puts out a second), the portal, the flag
+        let mut best: Option<((bool, f32), PortalWanted, Option<String>)> = None;
         let mut tried: Vec<u32> = Vec::new();
         for s in ac_world::portals::spawned() {
             if tried.contains(&s.wcid) {
                 continue;
             }
             tried.push(s.wcid);
-            if !s.way.usable_by(level, quests) {
+            let mut with = quests.to_vec();
+            with.push(s.way.quest.clone());
+            let flag = (!s.way.usable_by(level, quests)).then(|| s.way.quest.clone());
+            if flag.is_some() && (s.way.quest.is_empty() || !s.way.usable_by(level, &with)) {
                 continue;
             }
+            let quests = &with;
             let exit = Place {
                 at: s.way.to,
                 cell: s.way.to_cell,
@@ -68,7 +78,8 @@ impl Client {
                 .filter(|r| r.wcid == s.wcid)
                 .map(|r| (r.rate.per_hour / 3600.0).max(r.rate.load / ROTATE_SECS))
                 .sum();
-            if best.as_ref().is_some_and(|(b, _)| *b >= per_sec) {
+            let key = (flag.is_some(), -per_sec);
+            if best.as_ref().is_some_and(|(b, ..)| *b <= key) {
                 continue;
             }
             let wanted = PortalWanted {
@@ -77,9 +88,9 @@ impl Client {
                 name: s.way.name.clone(),
                 exit_block: s.way.to_cell >> 16,
             };
-            best = Some((per_sec, wanted));
+            best = Some((key, wanted, flag));
         }
-        best.map(|(_, p)| p)
+        best.map(|(_, p, f)| (p, f))
     }
 
     /// With no journey to `grounds` (`what` in words), have quest `id` (`title`) hunt a
@@ -102,9 +113,21 @@ impl Client {
         {
             return false;
         }
-        let Some(portal) = self.portal_way(grounds, quests) else {
+        let Some((portal, flag)) = self.portal_way(grounds, quests) else {
             return false;
         };
+        // Its flag first: once held, the next plan with no way finds the portal usable.
+        if let Some(flag) = flag {
+            let why = format!(
+                "for {title}: the {flag} flag first, for the {} to reach {what}",
+                portal.name
+            );
+            tracing::info!("pursuit: {id}: {why}");
+            self.autoplay.note(why, now);
+            self.autoplay.growth.want_flag(id, flag);
+            self.quest_board_at = None;
+            return true;
+        }
         let why = format!(
             "for {title}: a {} first, to reach {what}: hunted where camps put it out",
             portal.name
