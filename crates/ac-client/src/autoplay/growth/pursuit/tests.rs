@@ -4684,3 +4684,59 @@ fn a_pursued_item_in_the_landblock_stood_in_is_fetched_before_a_hand_in() {
         "left the slippers: {id} {step:?}"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_item_goal_hunts_its_fastest_way_hands_in_and_stops_at_its_count() {
+    // Diamond Scarabs: no shop or drop has them; quests give them for a Diamond Heart (3, the
+    // Diamond Golems'), a Pyreal Nugget (5) or a Glowing Mosswart Shroud (5). Master Yado hands
+    // one out in a room nothing leads into, and a Musty Key chest starts a long Mosswart chain.
+    let mut c = mage_pursuing("give:24176", "scarab-goal");
+    c.autoplay.config.quests.pursue.clear();
+    c.world.stats.level = 75;
+    c.autoplay.config.quests.pursue_item(7299, 10, 0);
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let line = |c: &Client| c.pursuit[0].clone();
+    let l = line(&c);
+    assert_eq!(l.title, "Diamond Scarab 0/10");
+    match &l.step {
+        PursuitStep::Hunt { creature, .. } => assert!(creature.contains("Golem"), "{creature}"),
+        other => panic!("not hunting golems: {other:?}"),
+    }
+    assert!(l.working);
+    assert_eq!(
+        c.autoplay.growth.pursuit_items,
+        vec![7338],
+        "not for the Diamond Heart"
+    );
+    // The scarab and what quests take for one are kept; nothing further down their chains.
+    let kept: Vec<String> = c
+        .loot_profile()
+        .unwrap()
+        .rules
+        .iter()
+        .filter(|r| r.quest == "item:7299")
+        .map(|r| r.name.clone())
+        .collect();
+    assert!(
+        kept.iter().any(|n| n.ends_with(": Diamond Heart")),
+        "{kept:?}"
+    );
+    assert!(
+        kept.iter().any(|n| n.ends_with(": Diamond Scarab")),
+        "{kept:?}"
+    );
+    assert!(kept.len() <= 10, "{kept:?}");
+    // A heart carried is handed in for its scarabs.
+    in_the_pack(&mut c, 0x8000_0901, 7338, "Diamond Heart", 1);
+    match again(&mut c, now) {
+        PursuitStep::HandIn { row, .. } => assert_eq!(row.want, Want::Item(7338)),
+        other => panic!("not handed in: {other:?}"),
+    }
+    // The count carried: done.
+    in_the_pack(&mut c, 0x8000_0901, 7338, "", 0);
+    in_the_pack(&mut c, 0x8000_0902, 7299, "Diamond Scarab", 10);
+    assert_eq!(again(&mut c, now), PursuitStep::Finished);
+    assert_eq!(line(&c).title, "Diamond Scarab 10/10");
+}

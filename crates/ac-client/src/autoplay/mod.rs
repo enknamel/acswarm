@@ -66,6 +66,7 @@ mod vitals;
 pub use cast::cast_problem;
 pub use config::{
     quest_ends, Buffs, Config, Fight, Loot, Pursuit, QuestEnd, Quests, Role, Style, Survive, Team,
+    ITEM_GOAL,
 };
 #[cfg(any(test, feature = "testkit"))]
 pub(crate) use fight::critter::CREATURE_LEVEL;

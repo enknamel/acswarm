@@ -23,6 +23,7 @@ mod events;
 mod fetch;
 mod flag_way;
 mod gem_way;
+mod item_goal;
 mod kept;
 pub(crate) mod pace;
 mod portal_way;
@@ -312,6 +313,7 @@ pub(crate) fn with_chain(
                     again: true,
                     since: 0,
                     outcome: QuestEnd::HandIn,
+                    count: 0,
                 }),
                 via: Some(p.id.clone()),
             });
@@ -421,6 +423,10 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
     for c in chained {
         let id = c.pursuit.id.as_str();
         let line = board.iter().find(|l| l.id == id);
+        if let Some(item) = c.pursuit.goal_item() {
+            lines.push(ask.goal_line(&c.pursuit, item));
+            continue;
+        }
         let title = line.map_or_else(
             || ac_world::quests::rows_of(id).next().map_or(id, |r| r.title),
             |l| l.title.as_str(),
@@ -623,17 +629,26 @@ impl Ask<'_> {
         }
         let what = if of.is_empty() { line.title.trim() } else { of };
         let step = self.obtain(&wants, more, what, 0);
-        // No journey reaches where it comes from but from a gem's exit: the gem is had first,
-        // unless the character stands on the ground already (bought and used between boards).
+        self.way_first(&line.id, step)
+    }
+
+    /// Quest `id`'s `step`, or the way to its ground had first: a flag, a gem or a camp's portal
+    /// when no journey reaches it but past one, unless the character stands on the ground
+    /// already (bought and used between boards).
+    fn way_first(
+        &self,
+        id: &str,
+        step: (PursuitStep, Option<Hunting>),
+    ) -> (PursuitStep, Option<Hunting>) {
         let there =
             matches!(step.0, PursuitStep::Hunt { landblock, .. } if Some(landblock) == self.here);
-        if let (Some(flag), false) = (self.flag_ways.get(&line.id), there) {
+        if let (Some(flag), false) = (self.flag_ways.get(id), there) {
             return self.flag_step_by(flag, 0, true);
         }
-        if let (Some((gem, name)), false) = (self.ways.get(&line.id), there) {
+        if let (Some((gem, name)), false) = (self.ways.get(id), there) {
             return self.obtain(&[Want::Item(*gem)], 1, name, 0);
         }
-        if let (Some((portal, name)), false) = (self.portal_ways.get(&line.id), there) {
+        if let (Some((portal, name)), false) = (self.portal_ways.get(id), there) {
             return self.portal_hunt(*portal, name);
         }
         step
@@ -1219,7 +1234,12 @@ impl Client {
     pub(super) fn grow_pursuit(&mut self, now: Instant) -> Option<bool> {
         let line = self.working_pursuit()?.clone();
         // Handed in and not yet answered: the item gone, the board would have another made.
-        if let Some(giver) = self.quest_asked.as_ref().filter(|a| a.row.id == line.id) {
+        // An item goal's hand-in is another quest's row: that row's answer is waited for.
+        let handing = |id: &str| match &line.step {
+            PursuitStep::HandIn { row, .. } => row.id == id,
+            _ => id == line.id,
+        };
+        if let Some(giver) = self.quest_asked.as_ref().filter(|a| handing(a.row.id)) {
             let why = format!(
                 "for {}: waiting for {}'s answer",
                 line.title, giver.row.giver

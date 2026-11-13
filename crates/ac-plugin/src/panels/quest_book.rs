@@ -58,6 +58,9 @@ pub(crate) struct BookState {
     steps_for: Option<(String, u64)>,
     /// The quests worked where the selected one is, for that id.
     together: Option<(String, Vec<&'static str>)>,
+    /// The item goal being typed: words of its name, and how many.
+    goal_words: String,
+    goal_count: u32,
 }
 
 impl BookState {
@@ -265,6 +268,7 @@ pub(crate) fn draw(egui: &egui::Context, v: &BookView, st: &mut BookState) -> Op
             );
         });
         pursued_strip(ui, v, &mut cfg, st, &mut asks);
+        goal_adder(ui, v, &mut cfg, st);
         filter_bar(ui, v.me, &mut st.filter);
         ui.separator();
         let pane = ui.available_height();
@@ -308,6 +312,58 @@ pub(crate) fn draw(egui: &egui::Context, v: &BookView, st: &mut BookState) -> Op
     (cfg != *v.cfg).then_some(cfg)
 }
 
+/// Have so many of an item: its name typed, the items named so offered, one picked pursued first.
+fn goal_adder(ui: &mut egui::Ui, v: &BookView, cfg: &mut Quests, st: &mut BookState) {
+    ui.horizontal(|ui| {
+        ui.label("Get an item:");
+        ui.add(
+            egui::TextEdit::singleline(&mut st.goal_words)
+                .hint_text("item name")
+                .desired_width(160.0),
+        )
+        .on_hover_text(
+            "Autoplay comes by it the fastest way the game data has (hunted, bought, picked up, \
+             or handed in to a quest that gives it) until that many are carried",
+        );
+        if st.goal_count == 0 {
+            st.goal_count = 10;
+        }
+        ui.add(
+            egui::DragValue::new(&mut st.goal_count)
+                .range(1..=100_000)
+                .prefix("x "),
+        );
+    });
+    let found = ac_world::quest_chain::items_named(&st.goal_words);
+    if found.is_empty() {
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        for (wcid, name) in found.iter().take(GOAL_OFFERS) {
+            if ui
+                .small_button(*name)
+                .on_hover_text(format!("Have {} of it (class {wcid})", st.goal_count))
+                .clicked()
+            {
+                cfg.pursue_item(*wcid, st.goal_count, v.now);
+                st.goal_words.clear();
+            }
+        }
+        if found.len() > GOAL_OFFERS {
+            caption(
+                ui,
+                format!(
+                    "and {} more: type more of the name",
+                    found.len() - GOAL_OFFERS
+                ),
+            );
+        }
+    });
+}
+
+/// Items offered at once for a goal's typed name.
+const GOAL_OFFERS: usize = 8;
+
 /// One line per pursued quest, first first, with its step and up, down and remove.
 fn pursued_strip(
     ui: &mut egui::Ui,
@@ -325,9 +381,12 @@ fn pursued_strip(
         "Pursued, first first: autoplay works the first that can go on",
     );
     for (i, p) in v.cfg.pursue.iter().enumerate() {
-        let title = st
-            .card(v.cards, &p.id)
-            .map_or(p.id.as_str(), |c| c.title.as_str());
+        // An item goal has no card: its line says the item and how many are carried.
+        let line = v.pursuit.iter().find(|l| l.id == p.id);
+        let title = st.card(v.cards, &p.id).map_or_else(
+            || line.map_or(p.id.as_str(), |l| l.title.as_str()),
+            |c| c.title.as_str(),
+        );
         let said = v.pursuit.iter().find(|l| l.id == p.id).map_or_else(
             || "not worked out yet".to_string(),
             |l| line_words(l, v.now, v.place),

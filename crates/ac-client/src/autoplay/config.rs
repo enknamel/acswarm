@@ -328,6 +328,19 @@ pub struct Pursuit {
     pub since: u64,
     /// How it ends, chosen when it was asked for: worked to that end with no more asking.
     pub outcome: QuestEnd,
+    /// An item goal's count (`id` is [`ITEM_GOAL`] and the item's weenie class): worked until
+    /// that many are carried; 0 for a quest.
+    pub count: u32,
+}
+
+/// The id prefix of an item goal ([`Pursuit::count`]): `item:7299` for Diamond Scarabs.
+pub const ITEM_GOAL: &str = "item:";
+
+impl Pursuit {
+    /// The item goal's weenie class, `None` for a quest.
+    pub fn goal_item(&self) -> Option<u32> {
+        self.id.strip_prefix(ITEM_GOAL)?.parse().ok()
+    }
 }
 
 /// How a pursued quest ends (`Pursuit.outcome`).
@@ -456,12 +469,28 @@ impl Quests {
             again,
             since: now,
             outcome: QuestEnd::HandIn,
+            count: 0,
         };
         if again {
             self.pursue.push(p);
         } else {
             self.pursue.insert(0, p);
         }
+    }
+
+    /// Have `count` of item `wcid` from `now`, first on the list; one listed already is moved and
+    /// given the new count.
+    pub fn pursue_item(&mut self, wcid: u32, count: u32, now: u64) {
+        let id = format!("{ITEM_GOAL}{wcid}");
+        self.stop_pursuing(&id);
+        let p = Pursuit {
+            id,
+            again: false,
+            since: now,
+            outcome: QuestEnd::HandIn,
+            count: count.max(1),
+        };
+        self.pursue.insert(0, p);
     }
 
     /// Pursue `id` once from `now`, right after `after` (first when `after` is not pursued).
@@ -477,6 +506,7 @@ impl Quests {
             again: false,
             since: now,
             outcome: QuestEnd::HandIn,
+            count: 0,
         };
         self.pursue.insert(at, p);
     }

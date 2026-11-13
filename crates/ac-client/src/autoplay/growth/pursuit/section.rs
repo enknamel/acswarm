@@ -8,6 +8,7 @@ use ac_world::quests::{Kind, Want, Yield};
 
 use super::fetch::ware_name;
 use super::{Chains, PursuitLine, PursuitStep};
+use crate::autoplay::Pursuit;
 use crate::items::{NumKey, Op, Term};
 use crate::profile::{Ask, Buy, LootAction, Mine, Rule, QUESTS};
 use crate::quest_log::{QuestLine, QuestState};
@@ -31,6 +32,21 @@ impl Client {
             return;
         };
         let (mut rules, mut buy) = quest_entries(&self.pursuit, &self.quest_board, &who, chains);
+        // An item goal's item and its chain's, kept while short of the count.
+        for goal in &self.autoplay.config.quests.pursue {
+            let Some(item) = goal.goal_item() else {
+                continue;
+            };
+            let open = self.pursuit.iter().any(|l| {
+                l.id == goal.id
+                    && !matches!(l.step, PursuitStep::Finished | PursuitStep::Waiting { .. })
+            });
+            if open {
+                let (r, b) = goal_entries(item, goal, &who, chains);
+                rules.extend(r);
+                buy.extend(b);
+            }
+        }
         // A gem stays wanted while its quest is pursued and not done, passed over or not.
         let pursued = &self.pursuit;
         self.autoplay.growth.pursuit_gems.retain(|g| {
@@ -149,6 +165,79 @@ fn entries_for(quest: &QuestLine, who: &str, chains: &dyn Chains) -> (Vec<Rule>,
             ..b
         });
     (rules, buy)
+}
+
+/// An item goal's entries: the item kept, with all its chain can need (`chain_items`), and a buy
+/// line for the first of those a shop sells, the item itself sized to the goal.
+fn goal_entries(
+    item: u32,
+    goal: &Pursuit,
+    who: &str,
+    chains: &dyn Chains,
+) -> (Vec<Rule>, Option<Buy>) {
+    let goal_name = super::item_goal::goal_name(item);
+    let mut items = vec![(item, goal_name.clone(), goal.count.max(1))];
+    items.extend(goal_inputs(item).into_iter().map(|(w, name)| (w, name, 1)));
+    let rules = items
+        .iter()
+        .map(|(wcid, name, _)| Rule {
+            name: format!("{goal_name} goal: {name}"),
+            group: QUESTS.into(),
+            action: LootAction::Keep,
+            all: vec![
+                Ask::Me(Mine::Name(who.to_string())),
+                Ask::Item(Term::Num(NumKey::Class, Op::Eq, *wcid as f64)),
+            ],
+            quest: goal.id.clone(),
+            ..Default::default()
+        })
+        .collect();
+    let buy = items
+        .iter()
+        .find_map(|(wcid, name, count)| buy_line(*wcid, name, *count, chains))
+        .map(|b| Buy {
+            when: vec![Mine::Name(who.to_string())],
+            group: QUESTS.into(),
+            quest: goal.id.clone(),
+            ..b
+        });
+    (rules, buy)
+}
+
+/// What an item goal's ways take: each quest giving the item's hand-in, and the keys or parts
+/// that item's own sources ask (a chest's key, a combine's halves); no further down the chain.
+fn goal_inputs(item: u32) -> Vec<(u32, String)> {
+    use ac_world::quests::Handing;
+    let mut out: Vec<(u32, String)> = Vec::new();
+    let add = |w: u32, name: &str, out: &mut Vec<(u32, String)>| {
+        if w != item && !out.iter().any(|(o, _)| *o == w) {
+            let name = if name.is_empty() {
+                key_name(w)
+            } else {
+                name.to_string()
+            };
+            out.push((w, name));
+        }
+    };
+    let gives = |r: &&ac_world::quests::Row| {
+        r.hand == Handing::Give
+            && r.want != Want::Item(item)
+            && r.gives.iter().any(|(g, _)| *g == item)
+    };
+    let mut inputs = vec![item];
+    for r in ac_world::quests::all().iter().filter(gives) {
+        if let Want::Item(input) = r.want {
+            add(input, r.item.as_ref().map_or("", |i| i.name), &mut out);
+            inputs.push(input);
+        }
+    }
+    for w in inputs {
+        for (key, name) in ac_world::quests::sources_of(&Want::Item(w)).flat_map(|s| s.keys.iter())
+        {
+            add(*key, name, &mut out);
+        }
+    }
+    out
 }
 
 /// A key's name, as a chest it opens lists it.
