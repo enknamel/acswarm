@@ -4527,3 +4527,20 @@ fn a_sought_creature_deleted_in_reach_has_its_drop_looked_for() {
     let (spot, _) = c.autoplay.growth.sought_kill.expect("its kill noted");
     assert!(spot.distance(at) < 0.01);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_crystal_reached_only_by_a_teleport_gem_has_the_gem_wanted_first() {
+    // "no journey reaches any place Caulnalain Crystal is found": its one spawn (0x02DF028E) is
+    // reached only by the Caulnalain Portal Gem's Portal Sending, made by its key on the gate.
+    let mut c = mage_pursuing("give:8111:28324", "chained-quests");
+    let crystal = Place {
+        at: ac_world::landblock_origin(0x02DF_0000) + glam::Vec3::new(131.8, -60.0, -48.0),
+        cell: 0x02DF_028E,
+    };
+    let gem = c.gem_way(&[(0x02DF, crystal)], &[]);
+    assert_eq!(gem.map(|g| g.wcid), Some(8115), "the Caulnalain Portal Gem");
+    let made =
+        ac_world::quests::sources_of(&ac_world::quests::Want::Item(8115)).any(|s| s.wcid == 8016);
+    assert!(made, "by the Caulnalain Key on the Caulnalain Gate");
+}
