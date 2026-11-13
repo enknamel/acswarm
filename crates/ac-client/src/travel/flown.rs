@@ -101,6 +101,27 @@ impl Client {
         true
     }
 
+    /// A walk step with no way on foot (`why`), not to an end no floor holds: the journey flown
+    /// from here, as nothing is out of a flight's reach and every other route ends in the same
+    /// walk (Ayan Baqur's Empty Mug). `false` when it may not be flown.
+    pub(super) fn fly_walk(&mut self, why: &str) -> bool {
+        let Some(Step::Walk(to)) = self.travel_step().cloned() else {
+            return false;
+        };
+        let (Some(owner), Some(goal)) = (self.travel.owner, self.travel.goal) else {
+            return false;
+        };
+        if self.is_refused_off_floor(to.at) {
+            return false;
+        }
+        tracing::info!(
+            "travel: step {}: {why}; the journey is flown",
+            self.travel.step
+        );
+        let now = self.frame_at;
+        !matches!(self.fly_journey(owner, goal, now), Did::Blocked(_))
+    }
+
     /// The journey to `goal` set off flown, `owner`'s refusals forgotten; blocked when
     /// the body may not fly, it is flown already, or the trip planner still has no way. A flight
     /// to the same goal before a hop is no bar: the ruins flown, the catacombs are flown afresh.

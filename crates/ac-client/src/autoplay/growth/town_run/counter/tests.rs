@@ -789,7 +789,9 @@ fn a_counter_no_journey_reaches_is_passed_at_once() {
     // reaches) is refused on its first frame: the run goes on past it on the next turn, with no
     // walk clock.
     let now = Instant::now();
+    // A body that may not fly: one that may flies the walk (a_walk_with_no_way_is_flown_by_a_body_that_may_fly).
     let (mut c, ledge) = crate::testkit::under_the_ledge(20);
+    c.movement_rules = crate::player::MovementRules::ServerSafe;
     let cfg = Growth::default();
     let far = ledge.at.truncate() + Vec2::new(2_000.0, 0.0);
     let mut run = crate::autoplay::growth::tests::run_to(far, now);

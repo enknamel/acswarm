@@ -10,7 +10,7 @@ impl Client {
     /// The step's walk has no way: a portal is left out and the journey planned again next frame,
     /// and so is the walk to its end once carried into this region; else the journey is refused.
     pub(super) fn refuse_step(&mut self, why: &str) {
-        if self.fly_step(why) {
+        if self.fly_step(why) || self.fly_walk(why) {
             return;
         }
         let n = self.travel.step;

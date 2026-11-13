@@ -740,8 +740,10 @@ fn a_journey_that_loses_a_step_is_planned_again_without_it() {
 fn a_walk_with_no_way_after_a_hop_is_left_out_and_the_journey_planned_again() {
     // As if just come into the Holtburg Dungeon room by a portal, the ledge the trip's last walk:
     // the walk is refused on the first frame and the journey planned again from here without it
-    // (refused when nothing else reaches the ledge), never walked from here again.
+    // (refused when nothing else reaches the ledge), never walked from here again. A body that
+    // may fly flies it instead (a_walk_with_no_way_is_flown_by_a_body_that_may_fly).
     let mut c = Client::offline(crate::testkit::game_data());
+    c.movement_rules = crate::player::MovementRules::ServerSafe;
     let (start, ledge) = under_the_01f6_ledge(&mut c);
     let trip = Trip {
         steps: vec![Step::Walk(ledge)],
@@ -771,10 +773,54 @@ fn a_walk_with_no_way_after_a_hop_is_left_out_and_the_journey_planned_again() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_walk_with_no_way_is_flown_by_a_body_that_may_fly() {
+    // Blargerton walked for Ayan Baqur's Empty Mug, refused, and went through Black Spawn Den,
+    // the Panopticon, gems and recalls to walk the same way again: nothing is out of a flight's
+    // reach, so the journey is flown from where the walk was refused, and arrives.
+    let mut c = Client::offline(crate::testkit::game_data());
+    c.movement_rules = crate::player::MovementRules::Unrestricted;
+    let origin = ac_world::landblock_origin(0x1135_0000);
+    crate::testkit::stand(
+        &mut c,
+        0x1135_0020,
+        Vec3::new(3345.0, 10366.5, 2.7) - origin,
+    );
+    c.steering.reset();
+    let mug = Place {
+        at: Vec3::new(3399.17, 10064.21, 51.75),
+        cell: 0x1134_002C,
+    };
+    let trip = Trip {
+        steps: vec![Step::Walk(mug)],
+        seconds: 10.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(mug));
+    c.travel.hopped = true;
+    let mut now = Instant::now();
+    for _ in 0..2400 {
+        if !c.traveling() {
+            break;
+        }
+        c.frame_at = now;
+        c.tick_player(crate::player::Input::default(), 0.05, now);
+        c.pathfinder.settle(Duration::from_secs(5));
+        now += Duration::from_millis(50);
+    }
+    let me = c.my_position().unwrap();
+    assert_eq!(c.travel.why_refused, None);
+    assert!(
+        me.distance(mug.at) <= ARRIVE,
+        "stopped at {me}, short of the mug"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_walk_refused_after_a_recall_is_not_planned_again_from_its_landing() {
     // Blargerton, Portal Recall and a walk to Archmage Sammam al-Ashiz: refused 450 m into the
     // walk, the refusal held only there, and the same recall and walk were planned again for ever.
     let mut c = Client::offline(crate::testkit::game_data());
+    c.movement_rules = crate::player::MovementRules::ServerSafe;
     let (start, ledge) = under_the_01f6_ledge(&mut c);
     let landed = Place {
         at: start + Vec3::new(0.0, 100.0, 0.0),
@@ -883,7 +929,7 @@ fn a_journey_to_an_indoor_goal_arrives_in_its_cell() {
         "no way upstairs"
     );
     assert!(c.travel_route().is_some(), "not walked by a corridor");
-    walk_the_journey(&mut c, 120.0);
+    walk_the_journey(&mut c, 400.0);
     let pl = c.player.as_ref().unwrap();
     let me = pl.world_position();
     assert!(!c.traveling(), "still travelling at {me}");

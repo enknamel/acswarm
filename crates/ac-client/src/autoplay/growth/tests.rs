@@ -183,7 +183,9 @@ fn the_spells_cast_are_kept_a_second_and_worked_out_again_when_one_is_learned() 
 fn a_ground_no_journey_reaches_is_skipped_at_once() {
     // Bound for a ground, the journey's last walk (up to the Tusker ledge, which no walk reaches)
     // is refused on its first frame: the ground is skipped on the next turn, with no walk clock.
+    // A body that may not fly: one that may flies the walk (a_walk_with_no_way_is_flown_by_a_body_that_may_fly).
     let (mut c, ledge) = crate::testkit::under_the_ledge(20);
+    c.movement_rules = crate::player::MovementRules::ServerSafe;
     let ground = ac_world::hunting::all()
         .iter()
         .find(|g| g.landblock != 0x5C49 && !g.is_dungeon())
