@@ -3001,6 +3001,37 @@ fn a_sought_kill_s_body_the_looting_will_not_open_is_not_stood_by() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_sought_kill_s_body_off_the_floor_is_opened() {
+    // Blargerton stood by a Diamond Golem's body on a slope, his own kill, for minutes under
+    // wasps and drudges: the looting counted it off his floor and never opened it.
+    let now = std::time::Instant::now();
+    let (mut c, _) = at_a_mire_witch_ground(now);
+    let cfg = crate::autoplay::growth::config::Growth::default();
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    let spot = me + glam::Vec3::new(25.0, 0.0, 5.0);
+    let mut witch = crate::testkit::creature(0x5000_0901, "Mosswart Mire-Witch");
+    witch.weenie_class_id = 9163;
+    witch.position = crate::testkit::placed(cell, spot);
+    c.world.objects.insert(witch.guid, witch);
+    c.note_sought_kill(spot, now);
+    c.autoplay.kill_spots.clear();
+    c.world.objects.remove(&0x5000_0901);
+    let mut body = crate::testkit::corpse(0x5000_0903, "Corpse of Mosswart Mire-Witch");
+    body.position = crate::testkit::placed(cell, spot);
+    c.world.objects.insert(body.guid, body);
+    c.grow_hunt(now, &cfg);
+    assert!(c.autoplay.growth.sought_kill.is_some(), "stood by");
+    assert!(c.autoplay_loot(now), "the looting goes to it");
+    assert!(
+        c.autoplay.status.contains("Corpse of Mosswart"),
+        "{}",
+        c.autoplay.status
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_wait_for_another_hunts_ground_to_unload_is_not_kept() {
     // The rotating hold named a landblock and no hunt: taken up by the next quest, it walked out
     // of reach of a ground that quest never hunts and waited there.

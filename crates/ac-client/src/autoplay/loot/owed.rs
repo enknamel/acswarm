@@ -355,7 +355,17 @@ impl Client {
         let owed = o
             .world_pos()
             .is_some_and(|at| self.autoplay.corpse_owed(o.guid, at, me, now, room));
-        owed && self.can_open_corpse(o, me, now, room)
+        (owed || self.is_by_sought_kill(o)) && self.can_open_corpse(o, me, now, room)
+    }
+
+    /// Whether `o` lies where the pursued hunt's creature fell (`sought_kill`): a body stood by
+    /// is opened wherever it lies (a_sought_kill_s_body_off_the_floor_is_opened).
+    fn is_by_sought_kill(&self, o: &ac_world::WorldObject) -> bool {
+        let Some((at, _)) = self.autoplay.growth.sought_kill else {
+            return false;
+        };
+        o.world_pos()
+            .is_some_and(|p| p.truncate().distance(at.truncate()) <= KILL_SPOT)
     }
 
     /// The whose half of [`Self::corpse_for_us`], wherever the body lies: a corpse waiting to be
