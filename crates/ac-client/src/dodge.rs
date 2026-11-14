@@ -34,8 +34,8 @@
 //! either side of the projectile's path with the walker's own
 //! collision, picks a side with [`sidestep`], and hands the step to
 //! `Client::tick_player` as `dodge_to`, which outranks every other
-//! movement goal until the step is done. Everything else the character
-//! was doing (casting, swinging) resumes after.
+//! movement goal until the step is done. It takes the legs only: the
+//! tick is left to the rest, so a cast goes on while the step is taken.
 //!
 //! Our own projectiles start beside us and fly away, so they never
 //! come toward us and are never dodged. A fellow's are another matter:
@@ -1912,6 +1912,37 @@ mod tests {
         assert!(!c.autoplay_dodge(now), "stepped for our golem's bolt");
         assert!(!c.dodge.tracks[&shot].can_hurt);
         assert_eq!(c.dodge_to, None);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_dodge_leaves_the_tick_to_the_cast() {
+        // A spell can be cast on the move: the dodge row took the tick and every cast waited
+        // the step out.
+        let mut c = in_the_field();
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let (shaman, shot) = (0x6000_0001, 0x8000_0002);
+        let stands = me + Vec3::new(0.0, -12.0, 0.0);
+        c.world.objects.insert(
+            shaman,
+            creature(
+                shaman,
+                "Drudge Shaman",
+                ac_world::object_desc_flags::ATTACKABLE,
+                stands,
+            ),
+        );
+        c.world.objects.insert(shot, bolt(shot, stands, me, 15.0));
+        let row = crate::autoplay::steps::STEPS
+            .iter()
+            .find(|s| s.name == "dodge")
+            .unwrap();
+        assert!(
+            matches!((row.run)(&mut c, now), Did::Done),
+            "claimed the tick"
+        );
+        assert!(c.dodge_to.is_some(), "no step taken");
     }
 
     #[test]

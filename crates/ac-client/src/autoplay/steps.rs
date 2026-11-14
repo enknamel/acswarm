@@ -56,7 +56,7 @@ pub struct Step {
     /// What this is worth doing at this moment, for a goal. Higher
     /// wins. See [`Step::worth`].
     worth: fn(&Client, Instant) -> f32,
-    run: fn(&mut Client, Instant) -> Did,
+    pub(crate) run: fn(&mut Client, Instant) -> Did,
 }
 
 impl Step {
@@ -359,7 +359,12 @@ pub const STEPS: &[Step] = &[
         base: 180.0,
         why: "a spell already in the air is stepped out of before anything but healing",
         worth: by_place,
-        run: claimed!(Client::autoplay_dodge),
+        // The step takes the legs only (`dodge_to`): a cast goes on while moving, so the tick is
+        // never claimed (a_dodge_leaves_the_tick_to_the_cast).
+        run: |client: &mut Client, now: Instant| {
+            client.autoplay_dodge(now);
+            Did::Done
+        },
     },
     Step {
         name: "recover",
