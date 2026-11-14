@@ -13,8 +13,8 @@ mod hold;
 mod load;
 
 pub(crate) use hold::MULE_REFLEXES;
-pub use load::Meet;
 pub(crate) use load::Muling;
+pub use load::{Delivery, Meet};
 
 impl Client {
     /// Hand Give-tagged items to the player their rule names, when in view and in reach; true

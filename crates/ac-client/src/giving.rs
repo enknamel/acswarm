@@ -347,6 +347,10 @@ impl Client {
                 .ledger
                 .failed(item, why, crate::holdings::unix_now());
         }
+        // Whatever its tag: a mule's load or delivery does not ask again.
+        if !self.autoplay.muling.refused.contains(&item) {
+            self.autoplay.muling.refused.push(item);
+        }
         tracing::info!("give of {item:#010x} refused: {why}");
     }
 

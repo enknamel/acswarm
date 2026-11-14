@@ -157,3 +157,42 @@ fn a_low_pack_wants_a_mule_goes_to_it_loads_it_and_lets_it_go() {
     assert!(!c.is_mule_wanted(), "loaded: the mule may log off");
     assert!(!c.is_mule_full());
 }
+
+#[test]
+fn a_character_fetching_a_delivery_goes_to_the_mule_and_waits_by_it() {
+    let now = Instant::now();
+    let mut c = hunter();
+    let place = mule_at(&mut c, 60.0);
+    c.set_mule_fetch(Some(Meet {
+        name: "Mule".into(),
+        place,
+    }));
+    assert!(c.autoplay_mule(now), "set off for the mule");
+    assert!(c.autoplay.status.contains("for a delivery"));
+    mule_at(&mut c, 2.0);
+    assert!(c.autoplay_mule(now), "stands by while it hands things over");
+    assert!(c.autoplay.status.contains("taking a delivery from Mule"));
+    c.set_mule_fetch(None);
+    assert!(!c.autoplay_mule(now), "all come: nothing more to do");
+}
+
+#[test]
+fn what_a_mule_delivered_is_never_loaded_back() {
+    let mut c = hunter();
+    carried(
+        &mut c,
+        0x8000_0031,
+        "Breastplate",
+        kind::ARMOR,
+        LootAction::Keep,
+    );
+    carried(
+        &mut c,
+        0x8000_0032,
+        "Breastplate",
+        kind::ARMOR,
+        LootAction::Keep,
+    );
+    c.set_mule_kept(vec![0x8000_0031]);
+    assert_eq!(c.mule_load(), vec![0x8000_0032]);
+}

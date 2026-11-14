@@ -1,6 +1,7 @@
 //! Loading a mule: what the character keeps and does not use goes to a mule on another account,
 //! met where it stands once a mule host (`ac_plugin::mules`) has logged it in. Asked for once the
-//! pack runs low with something to load; nothing tinkered, inscribed or attuned ever goes.
+//! pack runs low with something to load; nothing tinkered, inscribed or attuned ever goes. A
+//! delivery the other way: the character goes to the mule and waits while it hands things over.
 
 use std::time::Instant;
 
@@ -48,6 +49,22 @@ pub(crate) struct Muling {
     pub(crate) meet: Option<Meet>,
     /// The last mule's packs filled with things still to load: its host picks another.
     pub(crate) mule_full: bool,
+    /// A mule with a delivery for this character, and where it stands.
+    pub(crate) fetch: Option<Meet>,
+    /// As a mule: what to hand over, and to whom.
+    pub(crate) deliver: Option<Delivery>,
+    /// Delivered from a mule because the player asked for them: never loaded back.
+    pub(crate) kept: Vec<u32>,
+    /// Gives the server refused this session (attuned, no room): not asked again of this mule.
+    pub(crate) refused: Vec<u32>,
+}
+
+/// What a mule hands to one character: items by guid, only those, only to it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Delivery {
+    /// The receiving character's name.
+    pub to: String,
+    pub items: Vec<u32>,
 }
 
 impl Client {
@@ -70,6 +87,8 @@ impl Client {
             tracing::info!("muling: the pack is low, a mule is wanted");
             self.autoplay.muling.loading = true;
             self.autoplay.muling.mule_full = false;
+            // Another mule may take what the last refused.
+            self.autoplay.muling.refused.clear();
         }
         self.autoplay.muling.loading
     }
@@ -82,6 +101,26 @@ impl Client {
         self.autoplay.muling.meet = meet;
     }
 
+    /// Go to a mule with a delivery for this character (`None`: all of it has come).
+    pub fn set_mule_fetch(&mut self, meet: Option<Meet>) {
+        self.autoplay.muling.fetch = meet;
+    }
+
+    /// Items a mule delivered, asked for by the player: none of them is loaded onto a mule again.
+    pub fn set_mule_kept(&mut self, items: Vec<u32>) {
+        self.autoplay.muling.kept = items;
+    }
+
+    /// As a mule: hand `delivery` over when its receiver is in reach (`None`: hand nothing).
+    pub fn set_mule_delivery(&mut self, delivery: Option<Delivery>) {
+        self.autoplay.muling.deliver = delivery;
+    }
+
+    /// Whether the server refused a give of `guid` this session.
+    pub fn is_give_refused(&self, guid: u32) -> bool {
+        self.autoplay.muling.refused.contains(&guid)
+    }
+
     /// The last mule filled before everything was given to it.
     pub fn is_mule_full(&self) -> bool {
         self.autoplay.muling.mule_full
@@ -89,8 +128,8 @@ impl Client {
 
     /// What goes to a mule: what the loot profile kept, of the kinds a mule holds, and every full
     /// salvage bag; never what is worn, the best weapon of each stance, the Quests section's
-    /// items, the buy list's, nor anything an appraisal showed tinkered, inscribed or attuned
-    /// (not yet appraised: not yet).
+    /// items, the buy list's, what a mule delivered (`set_mule_kept`), nor anything an
+    /// appraisal showed tinkered, inscribed or attuned (not yet appraised: not yet).
     pub fn mule_load(&self) -> Vec<u32> {
         let stats = self.item_stats();
         let Some(profile) = self.loot_profile() else {
@@ -129,6 +168,7 @@ impl Client {
             // A kit, a lockpick, a stone: what is used on something is a tool kept.
             .filter(|s| !self.is_tool(s.guid))
             .filter(|s| !quest_items.contains(&s.wcid) && !in_use.contains(&s.guid))
+            .filter(|s| !self.autoplay.muling.kept.contains(&s.guid))
             .filter(|s| !bought.contains(&s.name.trim().to_lowercase()))
             .filter(|s| {
                 if s.item_type & kind::TINKERING_MATERIAL != 0 {
@@ -150,15 +190,39 @@ impl Client {
             .is_some_and(|o| o.usable > 0xFFFF)
     }
 
-    /// The muling row: to the mule its host logged in, and everything to load handed over in
-    /// one run of gives; done when nothing is left, or the mule took no more.
+    /// The muling row: loading the mule its host logged in, else fetching a delivery from one.
     pub(crate) fn autoplay_mule(&mut self, _now: Instant) -> bool {
-        if !self.autoplay.muling.loading || self.autoplay.config.mule {
+        if self.autoplay.config.mule {
             return false;
         }
-        let Some(meet) = self.autoplay.muling.meet.clone() else {
+        let m = &self.autoplay.muling;
+        if let Some(meet) = m.meet.clone().filter(|_| m.loading) {
+            return self.load_mule(meet);
+        }
+        match self.autoplay.muling.fetch.clone() {
+            Some(meet) => self.fetch_from_mule(meet),
+            None => false,
+        }
+    }
+
+    /// To a mule with a delivery, and standing by it while it hands things over.
+    fn fetch_from_mule(&mut self, meet: Meet) -> bool {
+        let Some(me) = self.my_position() else {
             return false;
         };
+        if self.mule_in_reach(&meet.name, me).is_some() {
+            let said = format!("taking a delivery from {}", meet.name);
+            self.autoplay.say(Doing::Helping, said);
+            return true;
+        }
+        let said = format!("going to the mule {} for a delivery", meet.name);
+        self.autoplay.say(Doing::Traveling, said);
+        self.journey_to(meet.place, GIVE_REACH * 0.5)
+    }
+
+    /// Everything to load handed over in one run of gives; done when nothing is left, or the mule
+    /// took no more.
+    fn load_mule(&mut self, meet: Meet) -> bool {
         if let Some(g) = self.giving.as_ref() {
             return !g.by_hand;
         }
@@ -171,24 +235,9 @@ impl Client {
             return false;
         };
         if let Some(mule) = self.mule_in_reach(&meet.name, me) {
-            let held_back = load
-                .iter()
-                .filter(|g| {
-                    self.autoplay
-                        .ledger
-                        .why_failed(**g, crate::holdings::unix_now())
-                        .is_some()
-                })
-                .count();
-            let load: Vec<u32> = load
-                .into_iter()
-                .filter(|g| {
-                    self.autoplay
-                        .ledger
-                        .why_failed(*g, crate::holdings::unix_now())
-                        .is_none()
-                })
-                .collect();
+            let (held, load): (Vec<u32>, Vec<u32>) =
+                load.into_iter().partition(|g| self.is_give_refused(*g));
+            let held_back = held.len();
             if load.is_empty() {
                 // Given all it would take: what the server held back stayed for want of room.
                 self.autoplay.muling.mule_full = held_back > 0;

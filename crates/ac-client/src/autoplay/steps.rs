@@ -203,7 +203,7 @@ fn worth_town_run(client: &Client, now: Instant) -> f32 {
 /// Loading a mule: set off once its host says where it stands; under way, carried on as a run is.
 fn worth_muling(client: &Client, _now: Instant) -> f32 {
     let m = &client.autoplay.muling;
-    if !m.loading || m.meet.is_none() {
+    if !(m.loading && m.meet.is_some()) && m.fetch.is_none() {
         return 0.0;
     }
     if client.journey_row() == Some("mule") {

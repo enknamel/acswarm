@@ -90,7 +90,7 @@ use loot::owed::{corpse_within_reach, killed_by_us, whose_to_ask, Whose, KILL_SP
 pub(crate) use loot::room::Room;
 pub(crate) use loot::take::refused_item;
 pub(crate) use loot::walk::CorpseWalk;
-pub use mule::Meet;
+pub use mule::{Delivery, Meet};
 pub(crate) use team::fellowship::FELLOWSHIP_FULL;
 #[cfg(doc)]
 use team::fellowship::{FOUNDING_WAIT, HELD_OFF_FIRST, RECRUIT_AGAIN, RECRUIT_FLOOR, YIELD_AFTER};
