@@ -3032,6 +3032,36 @@ fn a_sought_kill_s_body_off_the_floor_is_opened() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_sought_body_is_opened_before_the_nearer_ones() {
+    // Hit by drudges, Blargerton's looting was worth only the Diamond Golem's body stood by but
+    // walked to a nearer golem's; the hunt walked him back, and he flipped between them.
+    let now = std::time::Instant::now();
+    let (mut c, _) = at_a_mire_witch_ground(now);
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    let spot = me + glam::Vec3::new(15.0, 0.0, 0.0);
+    let mut witch = crate::testkit::creature(0x5000_0901, "Mosswart Mire-Witch");
+    witch.weenie_class_id = 9163;
+    witch.position = crate::testkit::placed(cell, spot);
+    c.world.objects.insert(witch.guid, witch);
+    c.note_sought_kill(spot, now);
+    c.world.objects.remove(&0x5000_0901);
+    let mut near = crate::testkit::corpse(0x5000_0902, "Corpse of Mosswart Mire-Witch");
+    near.position = crate::testkit::placed(cell, me + glam::Vec3::new(-8.0, 0.0, 0.0));
+    c.world.objects.insert(near.guid, near);
+    let mut body = crate::testkit::corpse(0x5000_0903, "Corpse of Mosswart Mire-Witch");
+    body.position = crate::testkit::placed(cell, spot);
+    c.world.objects.insert(body.guid, body);
+    assert!(c.autoplay_loot(now));
+    assert!(
+        c.autoplay.status.contains("(15 m)"),
+        "{}",
+        c.autoplay.status
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_wait_for_another_hunts_ground_to_unload_is_not_kept() {
     // The rotating hold named a landblock and no hunt: taken up by the next quest, it walked out
     // of reach of a ground that quest never hunts and waited there.

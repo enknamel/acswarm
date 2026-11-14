@@ -886,11 +886,14 @@ impl Client {
         }
     }
 
-    /// The corpse to open next and how long it has left, how far off it is and its name: the one
-    /// closest to rotting first, and among the ones in no danger, the nearest.
+    /// The corpse to open next and how long it has left, how far off it is and its name: the
+    /// pursued hunt's creature's body first, which alone is worth looting under blows
+    /// (`worth_looting`; a_sought_body_is_opened_before_the_nearer_ones), then the one closest
+    /// to rotting, and among the ones in no danger, the nearest.
     fn corpse_to_open(&self, me: glam::Vec3, now: Instant) -> Option<(Duration, f32, u32, String)> {
         let seen_at = &self.autoplay.corpse_seen;
         let room = self.room_for_loot();
+        let sought = self.sought_body();
         self.world
             .objects
             .values()
@@ -909,8 +912,10 @@ impl Client {
             })
             .min_by(|a, b| {
                 let urgent = |l: Duration| l <= CORPSE_URGENT;
-                urgent(b.0)
-                    .cmp(&urgent(a.0))
+                let it = |g: u32| sought == Some(g);
+                it(b.2)
+                    .cmp(&it(a.2))
+                    .then_with(|| urgent(b.0).cmp(&urgent(a.0)))
                     .then_with(|| a.1.total_cmp(&b.1))
             })
     }
