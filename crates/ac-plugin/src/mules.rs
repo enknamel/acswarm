@@ -2,7 +2,8 @@
 //! When one wants a mule (`Client::is_mule_wanted`) the roster's mule with the most room is logged
 //! in, told it is a mule, and its place handed over; it is logged off once loaded. With none that
 //! has room a new account and character are made (ACE makes an account at its first login,
-//! AuthenticationHandler.cs:63); the password goes only to the servers store's logins.
+//! AuthenticationHandler.cs:63). The roster, passwords with it, is `mules.json` (owner-only),
+//! written the moment it changes: a host that never saves its settings must not lose an account.
 
 use std::hash::{BuildHasher, Hasher};
 use std::time::{Duration, Instant};
@@ -13,10 +14,10 @@ use ac_client::{Client, Event};
 use serde::{Deserialize, Serialize};
 
 use crate::servers::Servers;
-use crate::{Ctx, Plugin, Role, SessionSpec, Settings};
+use crate::{Ctx, Plugin, Role, SessionSpec};
 
-/// Settings key of the roster.
-const ROSTER_KEY: &str = "mules.roster";
+/// The roster's file in the config directory.
+const ROSTER_FILE: &str = "mules.json";
 /// How often the sessions are looked over.
 const LOOK_EVERY: Duration = Duration::from_secs(2);
 /// A mule with fewer free slots than this is full.
@@ -31,18 +32,23 @@ pub struct Mule {
     /// The server's `host:port`.
     pub host: String,
     pub account: String,
+    /// Made with the account; only in the owner-only roster file and the servers store.
+    pub password: String,
     pub character: String,
     /// Free slots over all its packs when last in the world; `None` before its first time.
     pub room: Option<u32>,
     /// Out of the Academy: somewhere a character can meet it.
     pub ready: bool,
+    /// Never came into the world (its name refused, its login failed): kept, its account being
+    /// made, but never picked.
+    pub failed: bool,
 }
 
 /// The mule logged in now, and for whom.
 #[derive(Clone, Debug)]
 struct Out {
-    /// Roster index.
-    mule: usize,
+    /// The mule's account.
+    mule: String,
     /// The account of the character loading it.
     hunter: String,
     since: Instant,
@@ -52,6 +58,8 @@ struct Out {
 #[derive(Default)]
 pub struct Mules {
     roster: Vec<Mule>,
+    /// The roster as last written, or `None` before it was read.
+    written: Option<Vec<Mule>>,
     out: Option<Out>,
     next_look: Option<Instant>,
     /// A creation the server refused: the roster entry to drop.
@@ -61,14 +69,6 @@ pub struct Mules {
 impl Plugin for Mules {
     fn name(&self) -> &str {
         "mules"
-    }
-
-    fn load(&mut self, settings: &Settings) {
-        self.roster = settings.get(ROSTER_KEY).unwrap_or_default();
-    }
-
-    fn save(&self, settings: &mut Settings) {
-        settings.set(ROSTER_KEY, &self.roster);
     }
 
     fn on_event(&mut self, cx: &mut Ctx, ev: &Event) {
@@ -86,8 +86,25 @@ impl Plugin for Mules {
             return;
         }
         self.next_look = Some(cx.now + LOOK_EVERY);
+        let path = ac_store::config_dir().join(ROSTER_FILE);
+        if self.written.is_none() {
+            self.roster = match ac_store::read_json(&path) {
+                Ok(r) => r.unwrap_or_default(),
+                Err(e) => {
+                    // Unreadable is not empty: nothing is made over a roster that may hold mules.
+                    tracing::warn!("mules: reading {}: {e}", path.display());
+                    return;
+                }
+            };
+            self.written = Some(self.roster.clone());
+        }
         self.look(cx);
-        cx.settings.set(ROSTER_KEY, &self.roster);
+        if self.written.as_ref() != Some(&self.roster) {
+            match ac_store::write_json_atomic(&path, &self.roster, ac_store::Visibility::Private) {
+                Ok(()) => self.written = Some(self.roster.clone()),
+                Err(e) => tracing::warn!("mules: writing {}: {e}", path.display()),
+            }
+        }
     }
 }
 
@@ -120,7 +137,11 @@ impl Mules {
 
     /// The mule out: its place to the character loading it, logged off once that is done.
     fn tend(&mut self, cx: &mut Ctx, out: &Out) {
-        let mule = self.roster[out.mule].clone();
+        let Some(i) = self.roster.iter().position(|m| m.account == out.mule) else {
+            self.out = None;
+            return;
+        };
+        let mule = self.roster[i].clone();
         let mule_at = session_of(cx, &mule.host, &mule.account);
         let hunter_at = cx
             .clients
@@ -157,7 +178,7 @@ impl Mules {
         let hunter = &mut cx.clients[h];
         if !hunter.is_mule_wanted() {
             if hunter.is_mule_full() {
-                self.roster[out.mule].room = Some(0);
+                self.roster[i].room = Some(0);
             }
             hunter.set_mule_meet(None);
             return self.let_go(cx, Some(m), "loaded");
@@ -170,19 +191,21 @@ impl Mules {
 
     /// The mule out logged off and its room noted.
     fn let_go(&mut self, cx: &mut Ctx, mule_at: Option<usize>, why: &str) {
-        if let (Some(out), Some(m)) = (self.out.as_ref(), mule_at) {
-            if self.roster[out.mule].ready {
-                let room = cx.clients[m].room_anywhere();
-                self.roster[out.mule].room = Some(room);
+        let out = self.out.take();
+        let i = out.and_then(|o| self.roster.iter().position(|m| m.account == o.mule));
+        if let (Some(i), Some(m)) = (i, mule_at) {
+            if self.roster[i].ready {
+                self.roster[i].room = Some(cx.clients[m].room_anywhere());
             }
-            tracing::info!("mules: {} logs off, {why}", self.roster[out.mule].character);
+            tracing::info!("mules: {} logs off, {why}", self.roster[i].character);
             cx.stop_session(m);
         }
-        self.out = None;
     }
 
-    /// A mule that could not be had: dropped from the roster, its session stopped.
+    /// A mule that could not be had this time: its session stopped, and one never in the world
+    /// marked failed; one that has been is tried again later, holding what it holds.
     fn give_up(&mut self, cx: &mut Ctx, account: &str, why: &str) {
+        self.out = None;
         let Some(i) = self.roster.iter().position(|m| m.account == account) else {
             return;
         };
@@ -190,8 +213,9 @@ impl Mules {
         if let Some(s) = session_of(cx, &self.roster[i].host, account) {
             cx.stop_session(s);
         }
-        self.roster.remove(i);
-        self.out = None;
+        if !self.roster[i].ready && self.roster[i].room.is_none() {
+            self.roster[i].failed = true;
+        }
     }
 
     /// A character wanting a mule gets the roster's roomiest, or a new one.
@@ -217,18 +241,21 @@ impl Mules {
             .iter()
             .map(|c| c.config.account.clone())
             .collect();
-        let mut servers = Servers::load(cx.settings);
         let (i, create) = match pick(&self.roster, &host, &running) {
             Some(i) => (i, None),
             None => {
-                let made = self.roster.iter().filter(|m| m.host == host).count() as u32;
+                // Numbered past every mule ever made here: a dropped one's name may be taken.
+                let made = self.made_on(&host);
                 let (account, character) = names_for(&hunter, &hunter_name, made + 1);
                 let password = password();
+                // Also offered on the connect screen, for logging a mule in by hand.
+                let mut servers = Servers::load(cx.settings);
                 servers.remember(&host, &account, &password, &character);
                 servers.save(cx.settings);
                 self.roster.push(Mule {
                     host: host.clone(),
                     account,
+                    password,
                     character: character.clone(),
                     ..Default::default()
                 });
@@ -237,27 +264,16 @@ impl Mules {
             }
         };
         let mule = self.roster[i].clone();
-        let Some(password) = servers
-            .accounts_for(&host)
-            .into_iter()
-            .find(|l| l.account == mule.account)
-            .map(|l| l.password.clone())
-            .filter(|p| !p.is_empty())
-        else {
-            tracing::warn!("mules: no saved login for {}", mule.character);
-            self.roster.remove(i);
-            return;
-        };
         tracing::info!("mules: {} logs in for {hunter_name}", mule.character);
         cx.start_session(SessionSpec {
             account: mule.account.clone(),
-            password,
+            password: mule.password.clone(),
             character: Some(mule.character.clone()),
             create,
             role: Role::default(),
         });
         self.out = Some(Out {
-            mule: i,
+            mule: mule.account.clone(),
             hunter,
             since: cx.now,
         });
@@ -268,6 +284,19 @@ impl Mules {
 const MULE_PROFILE: &str = "Mule";
 /// What a mule buys to fill its pack slots (ACE weenie 136, 24 slots).
 const PACK: &str = "Pack";
+
+impl Mules {
+    /// How many mules were ever made on `host`, failed ones too: the highest number in a roster
+    /// account's name.
+    fn made_on(&self, host: &str) -> u32 {
+        self.roster
+            .iter()
+            .filter(|m| m.host == host)
+            .filter_map(|m| m.account.rsplit("mule").next()?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0)
+    }
+}
 
 /// A mule's rules: autoplay on, the Academy done first, and a mule after it, buying only packs.
 fn mule_rules(c: &mut Client) {
@@ -339,7 +368,7 @@ fn pick(roster: &[Mule], host: &str, running: &[String]) -> Option<usize> {
     roster
         .iter()
         .enumerate()
-        .filter(|(_, m)| m.host == host && !running.contains(&m.account))
+        .filter(|(_, m)| m.host == host && !m.failed && !running.contains(&m.account))
         .filter(|(_, m)| m.room.is_none_or(|r| r >= ROOM_LEAST))
         .max_by_key(|(_, m)| m.room.unwrap_or(u32::MAX))
         .map(|(i, _)| i)

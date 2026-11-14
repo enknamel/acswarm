@@ -9,6 +9,7 @@ fn mule(account: &str, room: Option<u32>) -> Mule {
         character: format!("{account} char"),
         room,
         ready: room.is_some(),
+        ..Default::default()
     }
 }
 
@@ -54,4 +55,16 @@ fn a_password_is_long_and_never_the_same_twice() {
     assert_eq!(a.len(), 20);
     assert!(a.chars().all(|c| c.is_ascii_alphanumeric()));
     assert_ne!(a, b);
+}
+
+#[test]
+fn a_failed_mule_is_never_picked_and_its_number_never_used_again() {
+    let mut failed = mule("rawrmule2", None);
+    failed.failed = true;
+    let mules = Mules {
+        roster: vec![mule("rawrmule1", Some(3)), failed],
+        ..Default::default()
+    };
+    assert_eq!(pick(&mules.roster, HOST, &[]), None);
+    assert_eq!(mules.made_on(HOST), 2, "the next is rawrmule3");
 }
