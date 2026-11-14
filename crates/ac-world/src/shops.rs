@@ -410,6 +410,21 @@ pub fn selling(needle: &str, from: Vec2) -> Vec<&'static Shop> {
     v
 }
 
+/// Whether some shop sells a ware called exactly `name` (any case): a buy line naming one is
+/// filled by it alone, not by every ware with the name inside ("Pack", "Colosseum Backpack").
+pub fn is_ware_named(name: &str) -> bool {
+    static NAMES: OnceLock<std::collections::HashSet<String>> = OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            all()
+                .iter()
+                .flat_map(|s| &s.sells)
+                .map(|w| w.name.to_lowercase())
+                .collect()
+        })
+        .contains(&name.trim().to_lowercase())
+}
+
 /// The shops selling this exact item, nearest first.
 pub fn selling_wcid(wcid: u32, from: Vec2) -> Vec<&'static Shop> {
     let mut v: Vec<&Shop> = all().iter().filter(|s| s.stocks_wcid(wcid)).collect();

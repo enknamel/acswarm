@@ -385,3 +385,15 @@ fn a_counter_no_journey_reaches_is_passed_over_for_a_while() {
     assert!(routed.is_some_and(|f| !f.route.is_empty()));
     assert_eq!(tries, 0, "each plan spends a try");
 }
+
+#[test]
+fn a_line_naming_a_ware_is_filled_by_that_ware_not_one_with_its_name_inside() {
+    // A mule's "Pack" line was sent to the Colosseum Backpack and the Aerbax Pack Doll Orders.
+    let pack = NeedKind::Named("Pack".into());
+    assert!(answers_need(&pack, "Pack", "pack"));
+    assert!(!answers_need(&pack, "Colosseum Backpack", "pack"));
+    assert!(!answers_need(&pack, "Aerbax Pack Doll Orders", "pack"));
+    // Words no ware is named stay a search: any ware with them inside.
+    let tapers = NeedKind::Named("Prismatic Tap".into());
+    assert!(answers_need(&tapers, "Prismatic Taper", "prismatic tap"));
+}

@@ -183,9 +183,13 @@ fn shop_ware<'a>(
 }
 
 /// Whether a ware called `name` answers a need of `kind`: the one rule the trip planner picks a
-/// shop by and the counter buys by. `needle` is a named need's words, lowercased.
+/// shop by and the counter buys by. `needle` is a named need's words, lowercased: the ware so
+/// named when one is, else any with them inside.
 pub(crate) fn answers_need(kind: &NeedKind, name: &str, needle: &str) -> bool {
     match kind {
+        NeedKind::Named(_) if ac_world::shops::is_ware_named(needle) => {
+            name.trim().eq_ignore_ascii_case(needle.trim())
+        }
         NeedKind::Named(_) => contains_fold(name, needle),
         NeedKind::Ammo(kind) => ammo_stock(name, *kind),
     }
