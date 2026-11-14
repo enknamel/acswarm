@@ -194,6 +194,11 @@ impl Client {
         true
     }
 
+    /// Whether `at` stands in a doorway, open door or shut.
+    pub(crate) fn is_in_doorway(&mut self, at: Vec3) -> bool {
+        self.doors_near(&[at]).iter().any(|d| d.holds(at))
+    }
+
     fn pull_from_doorway(
         &mut self,
         target: u32,

@@ -919,6 +919,13 @@ impl Client {
         // drudge his arcs were hitting (a_caster_beside_its_target_with_nowhere_to_walk_casts).
         if !seen && spot.is_none() && at.distance(me) <= stop {
             self.stop_approaching();
+            // Unless nothing can land: from where two shots burst, or into a doorway the target
+            // was waited out of (doorway.rs), it is given up (Blargerton cast 12 arcs into a door).
+            let thrown = !matches!(how, How::Melee);
+            if thrown && (self.is_dud_spot(me) || self.is_in_doorway(at)) {
+                self.give_up_target(target, "no shot of ours lands on it", self.frame_at);
+                return Did::blocked("no shot lands");
+            }
             return Did::Done;
         }
         // Nothing to hit is ever a journey away: a target out of the region is an object left
@@ -2291,6 +2298,35 @@ mod tests {
             "the shot is thrown, not held for"
         );
         assert!(c.going.is_none(), "and no walk is left standing");
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_caster_where_its_shots_burst_with_nowhere_to_walk_gives_its_target_up() {
+        // Blargerton cast 12 Shock Arcs at a Diamond Golem in a doorway from where two had burst
+        // as they left, the door frame between: nothing of his lands from there, so none is cast.
+        let origin = ac_world::landblock_origin(0x01F6_0000);
+        let here = Vec3::new(229.8, 47212.8, 0.0) - origin;
+        let mut c = crate::testkit::standing_in_the_field(27, 0x01F6_0230, here);
+        let me = c.my_position().unwrap();
+        let drudge = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Servant", 0.0);
+        let at = me + Vec3::new(0.0, 1.5, 0.0);
+        c.world.objects.get_mut(&drudge.guid).unwrap().position = Some(
+            ac_world::object::Position::new_flat(0x01F6_0230, at - origin),
+        );
+        let (spell, _) = c
+            .assets
+            .spell_table()
+            .unwrap()
+            .find_by_name("Frost Arc III")
+            .map(|(id, sp)| (id, sp.clone()))
+            .expect("Frost Arc III");
+        c.dodge.dud_spots.push((me, Instant::now()));
+        let did = c.autoplay_approach(drudge.guid, "Drudge Servant", How::Spell(spell));
+        assert!(
+            matches!(did, Did::Blocked(_)),
+            "given up, not thrown: {did:?}"
+        );
     }
 
     #[test]
