@@ -184,3 +184,49 @@ fn a_walk_to_a_body_this_character_has_given_up_on_is_let_go_of() {
     assert_eq!(c.autoplay.walking_to.map(|w| w.guid), None, "still walking");
     assert_eq!(c.autoplay.corpse_claim(now), None, "still claiming it");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_body_walked_to_stays_chosen_as_it_crosses_the_loot_reach() {
+    // A Tusker Guard's body lay at the twenty-metre edge and his pet's kill thirty-one metres off:
+    // each step of the walk to one put the near body in or out of reach, and he turned every tick.
+    let holtburg = 0xA9B4_0019;
+    let at = glam::Vec3::new(84.0, 84.0, 10.0);
+    let mut c = standing_in_the_field(20, holtburg, at);
+    a_loot_profile(&mut c, "walk test");
+    c.autoplay.config.fight.radius = 60.0;
+    let me = c.player.as_ref().unwrap().world_position();
+    let now = Instant::now();
+    let put = |c: &mut crate::Client, guid: u32, off: glam::Vec3| {
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: "Corpse of Tusker Guard".into(),
+                object_desc_flags: ac_world::object_desc_flags::CORPSE,
+                position: Some(ac_world::object::Position::new_flat(
+                    holtburg,
+                    me + off - ac_world::landblock_origin(holtburg),
+                )),
+                ..Default::default()
+            },
+        );
+    };
+    let (near, far) = (0x8000_0001, 0x8000_0002);
+    put(&mut c, near, glam::Vec3::new(LOOT_NEAR - 0.5, 0.0, 0.0));
+    let pet_kill = me + glam::Vec3::new(-31.0, 0.0, 0.0);
+    put(&mut c, far, pet_kill - me);
+    c.autoplay.corpse_seen = corpses_seen([(near, now), (far, now)]);
+    c.autoplay.kill_spots.push((pet_kill, now));
+    assert!(c.autoplay_loot(now));
+    assert_eq!(c.autoplay.walking_to.map(|w| w.guid), Some(near));
+    // A step of the walk puts it just past the reach.
+    put(&mut c, near, glam::Vec3::new(LOOT_NEAR + 0.5, 0.0, 0.0));
+    assert!(c.autoplay_loot(now + Duration::from_millis(50)));
+    assert_eq!(
+        c.autoplay.walking_to.map(|w| w.guid),
+        Some(near),
+        "{}",
+        c.autoplay.status
+    );
+}

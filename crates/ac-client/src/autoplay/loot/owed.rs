@@ -355,7 +355,10 @@ impl Client {
         let owed = o
             .world_pos()
             .is_some_and(|at| self.autoplay.corpse_owed(o.guid, at, me, now, room));
-        (owed || self.is_by_sought_kill(o)) && self.can_open_corpse(o, me, now, room)
+        // The body walked to stays owed as the walk carries it past the reach, or each step
+        // turned him (a_body_walked_to_stays_chosen_as_it_crosses_the_loot_reach).
+        let walked = self.autoplay.walking_to.is_some_and(|w| w.guid == o.guid);
+        (owed || walked || self.is_by_sought_kill(o)) && self.can_open_corpse(o, me, now, room)
     }
 
     /// Whether `o` lies where the pursued hunt's creature fell (`sought_kill`): a body stood by
