@@ -192,6 +192,8 @@ pub(crate) struct State {
     /// The row shown in full: (account, character, item guid).
     #[serde(skip)]
     pub selected: Option<(String, String, u32)>,
+    /// How many of the shown items on mules one Deliver brings at most.
+    pub deliver_count: u32,
 }
 
 /// What the window draws.
@@ -213,6 +215,19 @@ pub(crate) struct HoldingsView {
     pub on_bus: bool,
     /// Seconds until Refresh may be pressed again, 0 when it may.
     pub refresh_in: f32,
+    /// The mules' accounts on this server (`crate::mules`), whose items can be delivered.
+    pub mules: Vec<String>,
+    /// The character at the window, whom a delivery comes to; `None` with nobody logged in.
+    pub me: Option<String>,
+}
+
+impl HoldingsView {
+    /// Whether `hit` is on a mule, so can be delivered.
+    fn is_on_mule(&self, hit: &Hit) -> bool {
+        self.mules
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case(&hit.account))
+    }
 }
 
 /// Build the view from a store.
@@ -247,6 +262,8 @@ pub(crate) fn view(
         now,
         on_bus,
         refresh_in,
+        mules: Vec::new(),
+        me: None,
     }
 }
 
@@ -258,6 +275,8 @@ pub(crate) struct Actions {
     pub sort: Option<Column>,
     /// A row was clicked: (account, character, item guid).
     pub select: Option<(String, String, u32)>,
+    /// Bring these (mule account, item guid) to the character at the window.
+    pub deliver: Vec<(String, u32)>,
 }
 
 /// A cell of fixed width, cut with an ellipsis, the whole on hover.
@@ -494,6 +513,7 @@ pub(crate) fn draw(egui: &egui::Context, v: &HoldingsView, st: &mut State) -> Ac
                 caption(ui, "· this process and the files only (no --bus)");
             }
         });
+        deliver_bar(ui, v, st, &mut a);
         if let Some(p) = &v.problem {
             ui.colored_label(egui::Color32::from_rgb(255, 160, 120), p);
         } else if v.needs_appraisal && v.unappraised > 0 {
@@ -544,10 +564,80 @@ pub(crate) fn draw(egui: &egui::Context, v: &HoldingsView, st: &mut State) -> Ac
                 acc.eq_ignore_ascii_case(&h.account) && ch == &h.character && *g == h.stats.guid
             }) {
                 detail(ui, hit);
+                if let Some(me) = v.me.as_ref().filter(|_| v.is_on_mule(hit)) {
+                    if ui.button(format!("Deliver to {me}")).clicked() {
+                        a.deliver = vec![(hit.account.clone(), hit.stats.guid)];
+                    }
+                }
             }
         }
     });
     a
+}
+
+/// With a search showing items on mules: bring up to `deliver_count` of them to the character
+/// at the window ("salvaged steel", 10: ten bags of steel).
+fn deliver_bar(ui: &mut egui::Ui, v: &HoldingsView, st: &mut State, a: &mut Actions) {
+    let Some(me) = v.me.as_ref() else {
+        return;
+    };
+    let on_mules: Vec<&Hit> = v.rows.iter().filter(|h| v.is_on_mule(h)).collect();
+    if st.search.trim().is_empty() || on_mules.is_empty() {
+        return;
+    }
+    ui.horizontal(|ui| {
+        if st.deliver_count == 0 {
+            st.deliver_count = 10;
+        }
+        ui.label(format!(
+            "{} of these on mules: deliver up to",
+            on_mules.len()
+        ));
+        ui.add(egui::DragValue::new(&mut st.deliver_count).range(1..=1000));
+        if ui
+            .button(format!("to {me}"))
+            .on_hover_text("Log in the mules holding them, and have each hand its share over")
+            .clicked()
+        {
+            a.deliver = on_mules
+                .iter()
+                .take(st.deliver_count as usize)
+                .map(|h| (h.account.clone(), h.stats.guid))
+                .collect();
+        }
+    });
+}
+
+/// The roster's mule accounts on `host`, as the mule host publishes them.
+fn mule_accounts(board: &crate::Blackboard, host: &str) -> Vec<String> {
+    let Some(serde_json::Value::Array(list)) = board.get(crate::mules::ACCOUNTS_KEY) else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter(|m| m["host"].as_str() == Some(host))
+        .filter_map(|m| m["account"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// Ask the mule host to bring `items` (mule account, guid) to the character on account `to`.
+fn ask_delivery(board: &mut crate::Blackboard, to: &str, items: &[(String, u32)]) {
+    let mut asked: Vec<crate::mules::Request> = board
+        .get(crate::mules::DELIVER_KEY)
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    asked.push(crate::mules::Request {
+        to: to.to_string(),
+        items: items
+            .iter()
+            .map(|(account, guid)| crate::mules::Wanted {
+                account: account.clone(),
+                guid: *guid,
+            })
+            .collect(),
+    });
+    if let Ok(v) = serde_json::to_value(asked) {
+        board.set_local(crate::mules::DELIVER_KEY, v);
+    }
 }
 
 /// What a session last published.
@@ -997,13 +1087,18 @@ impl Plugin for Holdings {
             .try_client()
             .map(|c| c.config.host.clone())
             .unwrap_or_default();
-        let v = match &self.source {
+        let mut v = match &self.source {
             Source::Demo(store) => view(store, DEMO_SERVER, &self.state, true, refresh_in),
             Source::Live => {
                 let store = holdings::store();
                 view(&store, &here, &self.state, on_bus, refresh_in)
             }
         };
+        v.mules = mule_accounts(cx.board, &here);
+        v.me = cx
+            .try_client()
+            .map(|c| c.world.stats.name.trim().to_string())
+            .filter(|n| !n.is_empty());
         let a = draw(egui, &v, &mut self.state);
         if super::closed(ID) {
             self.show = false;
@@ -1022,6 +1117,11 @@ impl Plugin for Holdings {
             } else {
                 Some(sel)
             };
+        }
+        if !a.deliver.is_empty() {
+            if let Some(to) = cx.try_client().map(|c| c.config.account.clone()) {
+                ask_delivery(cx.board, &to, &a.deliver);
+            }
         }
         if a.refresh && matches!(self.source, Source::Live) && refresh_in <= 0.0 {
             self.last_refresh = Some(cx.now);
@@ -1216,6 +1316,7 @@ mod tests {
             sort: Column::Value,
             descending: true,
             selected: Some(("a".into(), "b".into(), 1)),
+            deliver_count: 10,
         };
         let json = serde_json::to_value(&st).unwrap();
         let back: State = serde_json::from_value(json).unwrap();

@@ -1,7 +1,8 @@
 //! Mules: characters on accounts of their own holding what a character of this process keeps.
-//! When one wants a mule (`Client::is_mule_wanted`) the roster's mule with the most room is logged
-//! in, told it is a mule, and its place handed over; it is logged off once loaded. With none that
-//! has room a new account and character are made (ACE makes an account at its first login,
+//! A character wanting a mule (`Client::is_mule_wanted`) gets the roster's roomiest, logged in,
+//! told it is a mule, its place handed over; a delivery (`deliver`) logs in every mule holding
+//! some of it, as many at once as it needs. A mule is logged off once nothing wants it. With none
+//! that has room a new account and character are made (ACE makes an account at its first login,
 //! AuthenticationHandler.cs:63). The roster, passwords with it, is `mules.json` (owner-only),
 //! written the moment it changes: a host that never saves its settings must not lose an account.
 
@@ -15,6 +16,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::servers::Servers;
 use crate::{Ctx, Plugin, Role, SessionSpec};
+
+mod deliver;
+
+pub use deliver::{Request, Wanted, ACCOUNTS_KEY, DELIVER_KEY};
 
 /// The roster's file in the config directory.
 const ROSTER_FILE: &str = "mules.json";
@@ -44,25 +49,38 @@ pub struct Mule {
     pub failed: bool,
 }
 
-/// The mule logged in now, and for whom.
+/// The roster file: the mules, and what they delivered to whom (receiver account to guids),
+/// which is never loaded back.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+struct RosterFile {
+    mules: Vec<Mule>,
+    delivered: std::collections::BTreeMap<String, Vec<u32>>,
+}
+
+/// The mule being loaded, and by whom.
 #[derive(Clone, Debug)]
-struct Out {
+struct Loading {
     /// The mule's account.
     mule: String,
     /// The account of the character loading it.
     hunter: String,
-    since: Instant,
 }
 
 /// The mule host plugin.
 #[derive(Default)]
 pub struct Mules {
     roster: Vec<Mule>,
-    /// The roster as last written, or `None` before it was read.
-    written: Option<Vec<Mule>>,
-    out: Option<Out>,
+    /// Items delivered, by receiver account: never loaded back.
+    delivered: std::collections::BTreeMap<String, Vec<u32>>,
+    /// The roster file as last written, or `None` before it was read.
+    written: Option<RosterFile>,
+    loading: Option<Loading>,
+    deliveries: Vec<deliver::Delivery>,
+    /// Mule sessions this host started, and when: only these it logs off.
+    started: Vec<(String, Instant)>,
     next_look: Option<Instant>,
-    /// A creation the server refused: the roster entry to drop.
+    /// A creation the server refused: the roster entry to give up.
     refused: Option<String>,
 }
 
@@ -88,7 +106,7 @@ impl Plugin for Mules {
         self.next_look = Some(cx.now + LOOK_EVERY);
         let path = ac_store::config_dir().join(ROSTER_FILE);
         if self.written.is_none() {
-            self.roster = match ac_store::read_json(&path) {
+            let file: RosterFile = match ac_store::read_json(&path) {
                 Ok(r) => r.unwrap_or_default(),
                 Err(e) => {
                     // Unreadable is not empty: nothing is made over a roster that may hold mules.
@@ -96,12 +114,18 @@ impl Plugin for Mules {
                     return;
                 }
             };
-            self.written = Some(self.roster.clone());
+            self.roster = file.mules.clone();
+            self.delivered = file.delivered.clone();
+            self.written = Some(file);
         }
         self.look(cx);
-        if self.written.as_ref() != Some(&self.roster) {
-            match ac_store::write_json_atomic(&path, &self.roster, ac_store::Visibility::Private) {
-                Ok(()) => self.written = Some(self.roster.clone()),
+        let file = RosterFile {
+            mules: self.roster.clone(),
+            delivered: self.delivered.clone(),
+        };
+        if self.written.as_ref() != Some(&file) {
+            match ac_store::write_json_atomic(&path, &file, ac_store::Visibility::Private) {
+                Ok(()) => self.written = Some(file),
                 Err(e) => tracing::warn!("mules: writing {}: {e}", path.display()),
             }
         }
@@ -109,9 +133,21 @@ impl Plugin for Mules {
 }
 
 impl Mules {
-    /// The sessions looked over: mules kept mules, the one out met or let go, a new one asked for.
+    /// The sessions looked over: mules kept mules, the loading and deliveries tended, and the mule
+    /// sessions made to match what is wanted of them.
     fn look(&mut self, cx: &mut Ctx) {
+        self.take_requests(cx);
+        let accounts: Vec<_> = self
+            .roster
+            .iter()
+            .map(|m| serde_json::json!({ "host": m.host, "account": m.account, "character": m.character }))
+            .collect();
+        cx.board
+            .set_local(ACCOUNTS_KEY, serde_json::Value::Array(accounts));
         for c in cx.clients.iter_mut() {
+            if let Some(kept) = self.delivered.get(&c.config.account) {
+                c.set_mule_kept(kept.clone());
+            }
             let Some(i) = self.roster_of(c) else { continue };
             mule_rules(c);
             if c.is_mule_holding() {
@@ -122,10 +158,12 @@ impl Mules {
         if let Some(account) = self.refused.take() {
             self.give_up(cx, &account, "its making was refused");
         }
-        match self.out.clone() {
-            Some(out) => self.tend(cx, &out),
+        match self.loading.clone() {
+            Some(l) => self.tend_loading(cx, &l),
             None => self.send_for(cx),
         }
+        self.tend_deliveries(cx);
+        self.keep_sessions(cx);
     }
 
     /// The roster entry of session `c`, by its server and account.
@@ -135,77 +173,122 @@ impl Mules {
             .position(|m| m.host == c.config.host && m.account == c.config.account)
     }
 
-    /// The mule out: its place to the character loading it, logged off once that is done.
-    fn tend(&mut self, cx: &mut Ctx, out: &Out) {
-        let Some(i) = self.roster.iter().position(|m| m.account == out.mule) else {
-            self.out = None;
-            return;
-        };
-        let mule = self.roster[i].clone();
-        let mule_at = session_of(cx, &mule.host, &mule.account);
-        let hunter_at = cx
-            .clients
-            .iter()
-            .position(|c| c.config.account == out.hunter && c.config.host == mule.host);
-        let Some(h) = hunter_at else {
-            return self.let_go(cx, mule_at, "its character left");
-        };
-        let Some(m) = mule_at else {
-            // Not started yet, or dropped: given up once it never came.
-            if cx.now.duration_since(out.since) > LOGIN_LOST {
-                cx.clients[h].set_mule_meet(None);
-                self.give_up(cx, &mule.account, "it never logged in");
+    /// The mule accounts something wants logged in: the one being loaded, those with a delivery.
+    fn wanted(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.loading.iter().map(|l| l.mule.clone()).collect();
+        for d in &self.deliveries {
+            for (m, _) in &d.items {
+                if !out.contains(m) {
+                    out.push(m.clone());
+                }
             }
-            return;
-        };
-        let place = {
-            let c = &cx.clients[m];
-            match (c.is_mule_parked(), c.player.as_ref()) {
-                (true, Some(pl)) => Some(ac_world::Place {
-                    at: pl.world_position(),
-                    cell: pl.cell,
-                }),
-                _ => None,
-            }
-        };
-        if place.is_none()
-            && cx.clients[m].world.player_guid.is_none()
-            && cx.now.duration_since(out.since) > LOGIN_LOST
-        {
-            cx.clients[h].set_mule_meet(None);
-            return self.give_up(cx, &mule.account, "it never came into the world");
         }
+        out
+    }
+
+    /// Every wanted mule logged in, as many at once as there are; one this host started and
+    /// nothing wants logged off with its room noted; one that never came given up.
+    fn keep_sessions(&mut self, cx: &mut Ctx) {
+        let wanted = self.wanted();
+        for account in &wanted {
+            let Some(m) = self.roster.iter().find(|m| &m.account == account).cloned() else {
+                continue;
+            };
+            let running = session_of(cx, &m.host, account).is_some();
+            if running || self.started.iter().any(|(a, _)| a == account) {
+                continue;
+            }
+            tracing::info!("mules: {} logs in", m.character);
+            cx.start_session(SessionSpec {
+                account: m.account.clone(),
+                password: m.password.clone(),
+                character: Some(m.character.clone()),
+                // Made where the account lacks it: a new mule's first login.
+                create: (!m.ready).then(|| CreateSpec::named(m.character.clone())),
+                role: Role::default(),
+            });
+            self.started.push((account.clone(), cx.now));
+        }
+        for (account, since) in self.started.clone() {
+            let Some(i) = self.roster.iter().position(|m| m.account == account) else {
+                continue;
+            };
+            let at = session_of(cx, &self.roster[i].host, &account);
+            if !wanted.contains(&account) {
+                if let Some(s) = at {
+                    if self.roster[i].ready {
+                        self.roster[i].room = Some(cx.clients[s].room_anywhere());
+                    }
+                    tracing::info!("mules: {} logs off", self.roster[i].character);
+                    cx.stop_session(s);
+                }
+                self.started.retain(|(a, _)| a != &account);
+                continue;
+            }
+            let in_world = at.is_some_and(|s| cx.clients[s].world.player_guid.is_some());
+            if !in_world && cx.now.duration_since(since) > LOGIN_LOST {
+                self.give_up(cx, &account, "it never came into the world");
+            }
+        }
+    }
+
+    /// Where the mule on `account` can be met: in the world, out of the Academy, not shopping.
+    fn place_of(&self, cx: &Ctx, account: &str) -> Option<Meet> {
+        let m = self.roster.iter().find(|m| m.account == account)?;
+        let c = &cx.clients[session_of(cx, &m.host, account)?];
+        let pl = c.player.as_ref().filter(|_| c.is_mule_parked())?;
+        Some(Meet {
+            name: c.world.stats.name.trim().to_string(),
+            place: ac_world::Place {
+                at: pl.world_position(),
+                cell: pl.cell,
+            },
+        })
+    }
+
+    /// The mule being loaded: its place to the character loading it, let go once that is done.
+    fn tend_loading(&mut self, cx: &mut Ctx, l: &Loading) {
+        let Some(i) = self.roster.iter().position(|m| m.account == l.mule) else {
+            self.loading = None;
+            return;
+        };
+        let host = self.roster[i].host.clone();
+        let Some(h) = session_of(cx, &host, &l.hunter) else {
+            tracing::info!(
+                "mules: {} is let go, its character left",
+                self.roster[i].character
+            );
+            self.loading = None;
+            return;
+        };
+        let meet = self.place_of(cx, &l.mule);
         let hunter = &mut cx.clients[h];
         if !hunter.is_mule_wanted() {
             if hunter.is_mule_full() {
                 self.roster[i].room = Some(0);
             }
             hunter.set_mule_meet(None);
-            return self.let_go(cx, Some(m), "loaded");
+            tracing::info!("mules: {} loaded", self.roster[i].character);
+            self.loading = None;
+            return;
         }
-        if let Some(place) = place {
-            let name = cx.clients[m].world.stats.name.trim().to_string();
-            cx.clients[h].set_mule_meet(Some(Meet { name, place }));
-        }
-    }
-
-    /// The mule out logged off and its room noted.
-    fn let_go(&mut self, cx: &mut Ctx, mule_at: Option<usize>, why: &str) {
-        let out = self.out.take();
-        let i = out.and_then(|o| self.roster.iter().position(|m| m.account == o.mule));
-        if let (Some(i), Some(m)) = (i, mule_at) {
-            if self.roster[i].ready {
-                self.roster[i].room = Some(cx.clients[m].room_anywhere());
-            }
-            tracing::info!("mules: {} logs off, {why}", self.roster[i].character);
-            cx.stop_session(m);
+        if meet.is_some() {
+            hunter.set_mule_meet(meet);
         }
     }
 
-    /// A mule that could not be had this time: its session stopped, and one never in the world
-    /// marked failed; one that has been is tried again later, holding what it holds.
+    /// A mule that could not be had this time: its session stopped, what it was wanted for let
+    /// go, and one never in the world marked failed; one that has been is tried again later.
     fn give_up(&mut self, cx: &mut Ctx, account: &str, why: &str) {
-        self.out = None;
+        self.started.retain(|(a, _)| a != account);
+        if self.loading.as_ref().is_some_and(|l| l.mule == account) {
+            if let Some(l) = self.loading.take() {
+                if let Some(h) = cx.clients.iter().position(|c| c.config.account == l.hunter) {
+                    cx.clients[h].set_mule_meet(None);
+                }
+            }
+        }
+        self.drop_mule_deliveries(cx, account);
         let Some(i) = self.roster.iter().position(|m| m.account == account) else {
             return;
         };
@@ -236,13 +319,15 @@ impl Mules {
         let Some((host, hunter, hunter_name)) = wanting else {
             return;
         };
-        let running: Vec<String> = cx
+        // One out for a delivery may be loaded too; one being logged off may not be had.
+        let busy: Vec<String> = cx
             .clients
             .iter()
             .map(|c| c.config.account.clone())
+            .filter(|a| !self.wanted().contains(a))
             .collect();
-        let (i, create) = match pick(&self.roster, &host, &running) {
-            Some(i) => (i, None),
+        let i = match pick(&self.roster, &host, &busy) {
+            Some(i) => i,
             None => {
                 // Numbered past every mule ever made here: a dropped one's name may be taken.
                 let made = self.made_on(&host);
@@ -260,22 +345,16 @@ impl Mules {
                     ..Default::default()
                 });
                 tracing::info!("mules: making {character} for {hunter_name}");
-                (self.roster.len() - 1, Some(CreateSpec::named(character)))
+                self.roster.len() - 1
             }
         };
-        let mule = self.roster[i].clone();
-        tracing::info!("mules: {} logs in for {hunter_name}", mule.character);
-        cx.start_session(SessionSpec {
-            account: mule.account.clone(),
-            password: mule.password.clone(),
-            character: Some(mule.character.clone()),
-            create,
-            role: Role::default(),
-        });
-        self.out = Some(Out {
-            mule: mule.account.clone(),
+        tracing::info!(
+            "mules: {} is for {hunter_name} to load",
+            self.roster[i].character
+        );
+        self.loading = Some(Loading {
+            mule: self.roster[i].account.clone(),
             hunter,
-            since: cx.now,
         });
     }
 }

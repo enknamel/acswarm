@@ -68,3 +68,60 @@ fn a_failed_mule_is_never_picked_and_its_number_never_used_again() {
     assert_eq!(pick(&mules.roster, HOST, &[]), None);
     assert_eq!(mules.made_on(HOST), 2, "the next is rawrmule3");
 }
+
+#[test]
+fn a_delivery_asked_for_is_taken_once_and_keeps_only_items_on_mules() {
+    let mut board = crate::Blackboard::default();
+    let ask = |board: &mut crate::Blackboard, items: Vec<Wanted>| {
+        let mut asked: Vec<Request> = board
+            .get(DELIVER_KEY)
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        asked.push(Request {
+            to: "rawrtherton".into(),
+            items,
+        });
+        board.set_local(DELIVER_KEY, serde_json::to_value(asked).unwrap());
+    };
+    let w = |account: &str, guid: u32| Wanted {
+        account: account.into(),
+        guid,
+    };
+    ask(&mut board, vec![w("a", 1), w("stranger", 2)]);
+    ask(&mut board, vec![w("a", 1), w("b", 3)]);
+    let mut mules = Mules {
+        roster: vec![mule("a", Some(40)), mule("b", Some(90))],
+        ..Default::default()
+    };
+    let mut settings = crate::Settings::new();
+    let mut icons = crate::IconCache::default();
+    let mut cx = crate::Ctx {
+        clients: Vec::new(),
+        index: 0,
+        board: &mut board,
+        settings: &mut settings,
+        icons: &mut icons,
+        dt: 0.05,
+        now: std::time::Instant::now(),
+        chat: Vec::new(),
+        activate: None,
+        quit: false,
+        pick_data_dir: false,
+        start_sessions: Vec::new(),
+        stop_sessions: Vec::new(),
+    };
+    mules.take_requests(&mut cx);
+    assert_eq!(mules.deliveries.len(), 1, "one receiver, one delivery");
+    assert_eq!(
+        mules.deliveries[0].items,
+        vec![("a".to_string(), 1), ("b".to_string(), 3)],
+        "the stranger's is no mule's, and the repeat is asked once"
+    );
+    assert_eq!(mules.wanted(), vec!["a".to_string(), "b".to_string()]);
+    mules.take_requests(&mut cx);
+    assert_eq!(
+        mules.deliveries[0].items.len(),
+        2,
+        "a request is taken once"
+    );
+}
