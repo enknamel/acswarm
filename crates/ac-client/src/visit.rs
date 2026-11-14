@@ -102,6 +102,9 @@ pub struct Visit {
     walking: Option<Vec3>,
     /// Whose journey it sets off: the STEPS row that asked for the visit, else `Owner::Visit`.
     owner: Owner,
+    /// Its last walk had no way on foot and is flown (`fly_visit`): the flight, not a walk,
+    /// takes it there while under way.
+    flown: bool,
 }
 
 impl Visit {
@@ -153,6 +156,7 @@ impl Visit {
             journeyed: false,
             walking: None,
             owner: Owner::Visit,
+            flown: false,
         }
     }
 }
@@ -378,7 +382,7 @@ impl Client {
         let held = self.is_in_region(ac_world::Place {
             at: v.goal,
             cell: v.cell,
-        });
+        }) && !(v.flown && traveling);
         // Put down as its row stood aside: set off again once that row acts and ticks the visit.
         let journeyed = v.journeyed && !self.journey_broken_off();
         match next(me, v.goal, held, traveling, journeyed) {
@@ -425,6 +429,9 @@ impl Client {
                 };
                 v.walking = Some(v.goal);
                 match self.go(Owner::Visit, goal, now) {
+                    Did::Blocked(why) if self.fly_visit(&mut v, goal, now) => {
+                        tracing::info!("visit: no way on foot to {}: {}; flown", v.label, why.what);
+                    }
                     Did::Blocked(why) => {
                         tracing::warn!("visit: no way to {}: {}", v.label, why.what);
                         self.let_go_of(&v);
@@ -459,6 +466,23 @@ impl Client {
             }
         }
         self.visits.current = Some(v);
+    }
+
+    /// The visit's last walk, refused on foot, flown as a journey for its owner: nothing is out of
+    /// a flight's reach (Shoichi's room in Lin, refused for 20 s while 50 m off). False when the
+    /// body may not fly, or the flight has no way either.
+    fn fly_visit(&mut self, v: &mut Visit, goal: Goal, now: Instant) -> bool {
+        if !self.movement_rules.limits().noclip {
+            return false;
+        }
+        self.stop_going(Some(Owner::Visit), "the visit is flown");
+        v.walking = None;
+        if matches!(self.fly_journey(v.owner, goal, now), Did::Blocked(_)) {
+            return false;
+        }
+        v.journeyed = true;
+        v.flown = true;
+        true
     }
 
     /// Whether `owner` may set the visit's journey off now: a row only while it runs.
@@ -593,6 +617,45 @@ mod tests {
             cell: 0xA9B4_011B,
             at: ac_world::landblock_origin(0xA9B4_011B) + Vec3::new(152.3, 132.5, 69.0),
         }
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_visit_whose_last_walk_has_no_way_on_foot_is_flown_by_a_body_that_may_fly() {
+        // Blargerton's walk to Shoichi in Lin had no route for 20 s and the visit gave up, so the
+        // finished Tusker Guard task waited 30 min a try: the visit's last stretch is flown.
+        let mut c = Client::offline(crate::testkit::game_data());
+        c.movement_rules = crate::player::MovementRules::Unrestricted;
+        let origin = ac_world::landblock_origin(0x1135_0000);
+        crate::testkit::stand(
+            &mut c,
+            0x1135_0020,
+            Vec3::new(3345.0, 10366.5, 2.7) - origin,
+        );
+        c.steering.reset();
+        let mug = Landmark {
+            kind: Kind::Lifestone,
+            name: "the Empty Mug".into(),
+            cell: 0x1134_002C,
+            at: Vec3::new(3399.17, 10064.21, 51.75),
+        };
+        assert!(c.visit_landmark(&mug), "set off");
+        let mut now = Instant::now();
+        for _ in 0..2400 {
+            if c.visiting().is_none() {
+                break;
+            }
+            c.frame_at = now;
+            c.tick_player(crate::player::Input::default(), 0.05, now);
+            c.pathfinder.settle(Duration::from_secs(5));
+            now += Duration::from_millis(50);
+        }
+        let me = c.my_position().unwrap();
+        assert!(c.visits.finished, "the visit gave up at {me}");
+        assert!(
+            me.distance(mug.at) <= REACH,
+            "stopped at {me}, short of the mug"
+        );
     }
 
     #[test]
