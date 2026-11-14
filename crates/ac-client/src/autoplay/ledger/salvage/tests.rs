@@ -371,15 +371,18 @@ fn a_ten_the_server_skips_holds_up_none_of_the_bands_below_it() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn neither_an_inscribed_item_nor_one_not_yet_looked_at_is_salvaged() {
-    // "Never salvage any item that the player is wearing or is inscribed": only an appraisal says.
+fn no_inscribed_or_tinkered_item_nor_one_not_yet_looked_at_is_salvaged() {
+    // "Never salvage any item that the player is wearing or is inscribed", nor one tinkered: only
+    // an appraisal says.
     let mut c = a_salvager(game_data(), "salvage inscribed");
     let me = c.world.player_guid;
-    let (plain, inscribed, unknown) = (0x8000_0131, 0x8000_0132, 0x8000_0133);
-    for g in [plain, inscribed, unknown] {
+    let (plain, inscribed, unknown, tinkered) =
+        (0x8000_0131, 0x8000_0132, 0x8000_0133, 0x8000_0134);
+    for g in [plain, inscribed, unknown, tinkered] {
         a_mace_to_salvage(&mut c, g, 6.0, me);
     }
     c.appraisals.get_mut(&inscribed).unwrap().strings = vec![(7, "For my dear Bryn".into())];
+    c.appraisals.get_mut(&tinkered).unwrap().ints = vec![(171, 1)];
     c.appraisals.remove(&unknown);
     assert!(c.autoplay_salvage(Instant::now()));
     assert_eq!(salvage_on_its_way(&c), Some(vec![plain]));
@@ -387,6 +390,7 @@ fn neither_an_inscribed_item_nor_one_not_yet_looked_at_is_salvaged() {
         c.appraise_queue.contains(&unknown),
         "asked about before it goes"
     );
+    assert!(!c.salvage(&[tinkered]), "nor by hand");
 }
 
 #[test]

@@ -176,8 +176,8 @@ impl Client {
     }
 
     /// Carried items tagged for salvage that can go: not worn, not refused too often, and
-    /// appraised and found not inscribed (never salvaged, the player's word; only an appraisal
-    /// says). `bags` says whether salvage bags tagged for it count, for the hand-off. Each comes
+    /// appraised and found neither tinkered nor inscribed (never salvaged, the player's word;
+    /// only an appraisal says). `bags` says whether salvage bags tagged for it count, for the hand-off. Each comes
     /// with its name, for the log; second, what is not yet appraised, to ask about.
     fn salvage_tagged(&self, bags: bool) -> (Vec<(u32, String)>, Vec<u32>) {
         let me = self.world.player_guid;
@@ -206,7 +206,9 @@ impl Client {
                 continue;
             }
             match self.stats_of(o.guid) {
-                Some(st) if st.appraised && !st.inscribed => items.push((o.guid, o.name.clone())),
+                Some(st) if st.appraised && !st.inscribed && st.tinks == 0 => {
+                    items.push((o.guid, o.name.clone()))
+                }
                 Some(st) if st.appraised => {}
                 _ => unknown.push(o.guid),
             }
@@ -400,7 +402,7 @@ impl Client {
                 return false;
             }
             let (items, unknown) = self.salvage_tagged(false);
-            // Asked about before anything goes: only an appraisal tells an inscribed item.
+            // Asked about before anything goes: only an appraisal tells a tinkered or inscribed item.
             if !unknown.is_empty() {
                 self.appraise_many(unknown);
             }
