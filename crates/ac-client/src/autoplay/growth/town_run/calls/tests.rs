@@ -515,6 +515,40 @@ fn a_pursued_jaw_carried_starts_a_call_on_its_giver_at_once() {
 }
 
 #[test]
+fn a_call_goes_on_while_its_quest_is_off_on_the_board_and_ends_once_the_server_says_it_waits() {
+    // Blargerton, quests off, pursuing Diamond Scarabs: the heart's hand-in was Off on the board,
+    // read as not due, and the call was made and dropped several times a second for minutes.
+    let (mut c, row) = beside_clemenza_with_the_jaw();
+    let now = Instant::now();
+    let line = |state| crate::quest_log::QuestLine {
+        id: row.id.into(),
+        title: row.title.into(),
+        kind: row.kind,
+        state,
+        xp: 0,
+        xp_most: 0,
+        givers: 1,
+        giver: row.giver.into(),
+        on: false,
+        every_way: false,
+    };
+    let cfg = c.autoplay.config.growth.clone();
+    c.quest_board = vec![line(QuestState::Off)];
+    assert!(c.start_quest_call(row, row.places[0], now));
+    let run = c.autoplay.growth.run.take().expect("a call");
+    c.giver_step(run, now, &cfg);
+    assert!(
+        c.autoplay.growth.run.is_some(),
+        "kept: {}",
+        c.autoplay.status
+    );
+    c.quest_board = vec![line(QuestState::Waiting { until: u64::MAX })];
+    let run = c.autoplay.growth.run.take().expect("still a call");
+    c.giver_step(run, now, &cfg);
+    assert!(c.autoplay.growth.run.is_none(), "let be once it waits");
+}
+
+#[test]
 fn a_quest_call_is_kept_with_town_runs_off_and_is_not_futile() {
     let (mut c, row) = beside_clemenza_with_the_jaw();
     let now = Instant::now();

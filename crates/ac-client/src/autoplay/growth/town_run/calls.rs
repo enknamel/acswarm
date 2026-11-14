@@ -559,10 +559,11 @@ impl Client {
     pub(super) fn giver_step(&mut self, mut run: Run, now: Instant, cfg: &Growth) -> Turn {
         match run.phase.clone() {
             Phase::ToGiver { row, at, tries } => {
-                // No longer due on the board (the server's log says it waits): let it be.
+                // No longer due on the board (the server's log says it waits): let it be. Its line
+                // Off is no word of the server's: an item goal's hand-in, with quests off, is.
                 let undue = self.quest_board.iter().any(|l| {
                     l.id == row.id
-                        && !matches!(l.state, QuestState::Ready | QuestState::NotTaken { .. })
+                        && matches!(l.state, QuestState::Waiting { .. } | QuestState::Done)
                 });
                 if undue {
                     let why = format!("{} for {} is not due", row.giver, row.title);
