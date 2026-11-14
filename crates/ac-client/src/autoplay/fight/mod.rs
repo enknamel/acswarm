@@ -128,9 +128,12 @@ impl Client {
             sought.contains(&wcid) || road
         };
         let it = self.is_pursued_hunt() && worth;
-        // Stood waiting for its creature or an unload, what is about is fought, its creature
-        // first (`pick_target`), not let hit him (a_quest_hunt_stood_fights_what_is_about).
-        let waits = !self.on_its_way() && st.sought_kill.is_none();
+        // Stood waiting at its ground for its creature or an unload, what is about is fought, its
+        // creature first (`pick_target`), not let hit him (a_quest_hunt_stood_fights_what_is_about);
+        // stood anywhere else, it has yet to set off (a_quest_hunt_not_yet_set_off_walks_past_all).
+        let waits = !self.on_its_way()
+            && st.sought_kill.is_none()
+            && self.pursued_ground_stood_on().is_some();
         let not_it = self.is_pursuing()
             && (!self.is_pursued_hunt() || (!sought.is_empty() && !worth && !waits));
         // The pursued creature itself is never walked past, on the road to its ground or there

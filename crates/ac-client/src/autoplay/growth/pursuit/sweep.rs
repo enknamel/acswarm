@@ -94,7 +94,7 @@ impl Client {
     }
 
     /// The pursued ground stood on ([`Self::ground_stood_on`]), over a landblock's edge too.
-    fn pursued_ground_stood_on(&self) -> Option<u32> {
+    pub(crate) fn pursued_ground_stood_on(&self) -> Option<u32> {
         let here = self.player.as_ref()?.cell >> 16;
         self.ground_stood_on(&self.autoplay.growth.pursuit_grounds, here)
     }

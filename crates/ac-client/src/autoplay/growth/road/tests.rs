@@ -585,6 +585,44 @@ fn a_quest_hunt_stood_fights_what_is_about() {
         id: "give:8904".into(),
         title: "Focusing Stone".into(),
         step: crate::autoplay::PursuitStep::Hunt {
+            landblock: 0xA9B4,
+            creature: "Lich Overseer".into(),
+            place: "Mines of Despair".into(),
+            more: 1,
+        },
+        working: true,
+        via: None,
+    }];
+    c.autoplay.growth.pursuit_sought = vec![4124];
+    let ground = ac_world::Place {
+        at: c.my_position().unwrap(),
+        cell: 0xA9B4_0019,
+    };
+    c.autoplay.growth.pursuit_grounds = vec![(0xA9B4, ground)];
+    assert!(!c.on_its_way());
+    assert!(
+        !c.passing_by(&skeleton, &fight),
+        "a skeleton beside him stood waiting is walked past"
+    );
+    assert!(!c.passing_by(&boss, &fight), "the Overseer is the errand");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_quest_hunt_not_yet_set_off_walks_past_all_but_its_creature() {
+    // Blargerton logged in by Zaikhal, his Diamond Golem ground a dungeon away, took on an
+    // Imperial Mu-miyah 38 m off and 15 m below for 23 s before his journey had set off.
+    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 51;
+    let fight = c.autoplay.config.fight.clone();
+    let mut boss = standing_by(&mut c, 0x8000_0001, "Lich Overseer", 5.0);
+    boss.weenie_class_id = 4124;
+    c.world.objects.insert(boss.guid, boss.clone());
+    let skeleton = standing_by(&mut c, 0x8000_0002, "Skeleton Warrior", 4.0);
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: "give:8904".into(),
+        title: "Focusing Stone".into(),
+        step: crate::autoplay::PursuitStep::Hunt {
             landblock: 0x0188,
             creature: "Lich Overseer".into(),
             place: "Mines of Despair".into(),
@@ -594,10 +632,15 @@ fn a_quest_hunt_stood_fights_what_is_about() {
         via: None,
     }];
     c.autoplay.growth.pursuit_sought = vec![4124];
+    let ground = ac_world::Place {
+        at: glam::Vec3::new(1000.0, 1000.0, 0.0),
+        cell: 0x0188_0100,
+    };
+    c.autoplay.growth.pursuit_grounds = vec![(0x0188, ground)];
     assert!(!c.on_its_way());
     assert!(
-        !c.passing_by(&skeleton, &fight),
-        "a skeleton beside him stood waiting is walked past"
+        c.passing_by(&skeleton, &fight),
+        "away from the ground, not yet set off, a skeleton is walked past"
     );
     assert!(!c.passing_by(&boss, &fight), "the Overseer is the errand");
 }
