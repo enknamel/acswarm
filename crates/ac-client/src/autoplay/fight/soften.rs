@@ -8,6 +8,10 @@ use crate::{Client, Stance};
 /// The Magic Defense skill id, which Magic Yield lowers.
 const MAGIC_DEFENSE: u32 = 15;
 
+/// How long before a debuff ends it is cast again: a cast or two landing first, so a Magic Yield
+/// is renewed while it still lowers the defence its own landing is resisted by.
+pub(crate) const RENEW_BEFORE: std::time::Duration = std::time::Duration::from_secs(10);
+
 impl Client {
     /// Whether anyone on the team, this character included, has
     /// softened `guid`.
@@ -228,6 +232,7 @@ impl Client {
             }
             self.autoplay
                 .mark_yielded(guid, by + self.autoplay.yielded_by(guid));
+            self.note_debuff_due(guid, spell, now);
             *self.autoplay.kill_kept.borrow_mut() = None;
             let said = format!("lowering {name}'s magic defense by {by:.0} (level {level})");
             self.autoplay.say(Doing::Debuffing, said);
@@ -241,6 +246,7 @@ impl Client {
             self.autoplay.debuff_sent = Some(guid);
         }
         self.autoplay.mark_vulned(guid, Some((element, m)));
+        self.note_debuff_due(guid, vuln, now);
         self.autoplay.last_vuln = Some(now);
         *self.autoplay.kill_kept.borrow_mut() = None;
         let said = format!(
@@ -291,6 +297,57 @@ impl Client {
                 .any(|(g, on)| *g == guid && on.is_some_and(|(e, _)| e == element)),
             Debuff::Other => st.imperiled.contains(&guid),
         }
+    }
+
+    /// When the debuff `spell`, sent at `guid` now, is cast again: [`RENEW_BEFORE`] ahead of its
+    /// end, so it never lapses and a Magic Yield is renewed while it still eases its own landing.
+    pub(crate) fn note_debuff_due(&mut self, guid: u32, spell: u32, now: Instant) {
+        let Some(lasts) = self.spell(spell).and_then(|sp| sp.duration()) else {
+            return;
+        };
+        let lasts = std::time::Duration::from_secs_f64(lasts.max(0.0));
+        let due = now + lasts.saturating_sub(RENEW_BEFORE);
+        let st = &mut self.autoplay;
+        if st.debuff_due.len() > 128 {
+            st.debuff_due.drain(..64);
+        }
+        st.debuff_due
+            .retain(|(g, s, _)| !(*g == guid && *s == spell));
+        st.debuff_due.push((guid, spell, due));
+    }
+
+    /// Every debuff due again (`note_debuff_due`) taken off the fight's record, and its target
+    /// off the team's softened list, so the fight and the team debuffer cast it again.
+    pub(crate) fn lapse_debuffs(&mut self, now: Instant) {
+        if self
+            .autoplay
+            .debuff_due
+            .iter()
+            .all(|(_, _, due)| *due > now)
+        {
+            return;
+        }
+        let due: Vec<(u32, u32)> = self
+            .autoplay
+            .debuff_due
+            .iter()
+            .filter(|(_, _, at)| *at <= now)
+            .map(|(g, s, _)| (*g, *s))
+            .collect();
+        let st = &mut self.autoplay;
+        st.debuff_due.retain(|(_, _, at)| *at > now);
+        for (guid, spell) in due {
+            match debuff_kind(spell) {
+                Debuff::Yield(_) => st.yielded.retain(|(g, _)| *g != guid),
+                Debuff::Vuln(element, _) => st
+                    .vulned
+                    .retain(|(g, on)| !(*g == guid && on.is_none_or(|(e, _)| e == element))),
+                Debuff::Other => st.imperiled.retain(|g| *g != guid),
+            }
+            st.debuffed.retain(|g| *g != guid);
+            tracing::info!("autoplay: spell {spell} on {guid:#010x} is due again");
+        }
+        *st.kill_kept.borrow_mut() = None;
     }
 
     /// Record the debuff `spell` just sent at `guid` where the fight reads it; a resist or a

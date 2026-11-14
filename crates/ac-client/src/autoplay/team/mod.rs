@@ -138,6 +138,7 @@ impl Client {
                             continue;
                         }
                         self.note_debuff_sent(guid, spell);
+                        self.note_debuff_due(guid, spell, now);
                         self.autoplay.last_debuff = Some(now);
                         self.autoplay
                             .say(Doing::Debuffing, format!("casting {spell_name} on {name}"));

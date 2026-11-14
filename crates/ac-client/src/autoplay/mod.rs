@@ -224,6 +224,8 @@ pub struct Autoplay {
     yield_sent: Option<u32>,
     /// Targets a team debuff of neither kind above went on (an imperil), by guid.
     imperiled: Vec<u32>,
+    /// When each debuff above is due again: (target, its spell, when), [`fight::soften::RENEW_BEFORE`] ahead of its end.
+    debuff_due: Vec<(u32, u32, Instant)>,
     /// The fight's fastest kill of its target and when it was worked out (`Client::best_kill`).
     kill_kept:
         std::cell::RefCell<Option<(u32, Instant, Option<crate::autoplay::fight::kill::Kill>)>>,
@@ -599,6 +601,7 @@ impl Client {
         self.autoplay.tick += 1;
         self.frame_at = now;
         self.fold_ammo_keep();
+        self.lapse_debuffs(now);
         self.run_steps(now);
         // Aloft, no goal asked (`run_steps`): their walks and journey wait for the landing.
         if !self.is_aloft() {

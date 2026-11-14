@@ -82,6 +82,55 @@ fn magic_yield_goes_on_before_the_vulnerability_and_a_resist_has_it_cast_again()
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_magic_yield_and_a_vulnerability_are_cast_again_before_they_run_out() {
+    // In a long fight the debuffs ran out and were never cast again; a Magic Yield let lapse
+    // is resisted at the creature's whole magic defence.
+    let now = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_knowing(
+        now,
+        &[
+            "Force Bolt VI",
+            "Piercing Vulnerability Other VI",
+            "Futility",
+        ],
+    );
+    for skill in [31, 33, 34] {
+        crate::testkit::trained_in(&mut c, skill, 350);
+    }
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    let it = 0x8000_0103;
+    crate::testkit::standing_by(&mut c, it, "Titanium Armoredillo", 6.0);
+    if let Some(o) = c.world.objects.get_mut(&it) {
+        o.weenie_class_id = 7083;
+    }
+    let cfg = c.autoplay.config.fight.clone();
+    c.autoplay_fight_with_spells(now, &cfg);
+    c.autoplay.cast_sent = None;
+    c.autoplay_fight_with_spells(now, &cfg);
+    assert!(
+        c.autoplay.yielded_by(it) > 0.0 && c.autoplay.is_vulned(it),
+        "both on"
+    );
+    let futility = c.spell_by_name("Futility").unwrap();
+    let lasts = c.spell(futility).and_then(|sp| sp.duration()).unwrap();
+    let lasts = std::time::Duration::from_secs_f64(lasts);
+    // Still on short of the renewal.
+    let early = now + lasts - super::RENEW_BEFORE - std::time::Duration::from_secs(1);
+    c.lapse_debuffs(early);
+    assert!(c.autoplay.yielded_by(it) > 0.0, "kept while it lasts");
+    // Due again before it ends: cast again.
+    let due = now + lasts - super::RENEW_BEFORE;
+    assert!(due < now + lasts);
+    c.lapse_debuffs(due);
+    assert_eq!(c.autoplay.yielded_by(it), 0.0, "Futility due again");
+    // The fight's choice puts it on again (a stood fight minutes on reads as stalled offline).
+    let kill = c.best_kill(it, &cfg, due).expect("a kill");
+    assert!(kill.magic_yield.is_some(), "Futility first again: {kill:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_vulnerability_is_cast_from_within_its_reach() {
     // Blargerton, 60 m from a Tusker Slave a storey down, sent Fire Vulnerability Other VI seven
     // times a second: each came back out of range (0x550), was cast again, and he never moved.
