@@ -23,6 +23,7 @@ pub mod icons;
 pub mod keys;
 pub mod lobby;
 pub mod logging;
+pub mod mules;
 pub mod panels;
 pub mod servers;
 pub mod sessions;
