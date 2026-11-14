@@ -22,7 +22,12 @@ impl Client {
     pub(crate) fn autoplay_give(&mut self, _now: Instant) -> bool {
         if let Some(g) = self.giving.as_ref() {
             // Waits on its own gives to a player; a player's give-all walks, autoplay's never.
-            return !g.by_hand && self.world.objects.get(&g.to).is_some_and(|o| o.is_player);
+            return !g.by_hand
+                && self
+                    .world
+                    .objects
+                    .get(&g.to)
+                    .is_some_and(|o| o.is_character());
         }
         if self.attack_target.is_some() || self.under_attack() || self.autoplay.corpse.is_some() {
             return false;
@@ -60,7 +65,7 @@ impl Client {
         self.world
             .objects
             .values()
-            .filter(|o| o.is_player && Some(o.guid) != self.world.player_guid)
+            .filter(|o| o.is_character() && Some(o.guid) != self.world.player_guid)
             .filter(|o| bare(&o.name) == want)
             .find(|o| o.world_pos().is_some_and(|p| p.distance(me) <= GIVE_REACH))
             .map(|o| o.guid)

@@ -346,6 +346,11 @@ impl WorldObject {
     pub fn is_missile(&self) -> bool {
         self.physics_state & object::PHYSICS_STATE_MISSILE != 0
     }
+
+    /// A player's character, this session's or another's: `is_player` is this session's only.
+    pub fn is_character(&self) -> bool {
+        self.is_player || self.object_desc_flags & object_desc_flags::PLAYER != 0
+    }
 }
 
 impl WorldObject {

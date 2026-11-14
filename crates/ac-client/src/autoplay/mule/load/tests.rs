@@ -41,7 +41,7 @@ fn mule_at(c: &mut Client, metres: f32) -> ac_world::Place {
         ac_world::WorldObject {
             guid: MULE,
             name: "Mule".into(),
-            is_player: true,
+            object_desc_flags: ac_world::object_desc_flags::PLAYER,
             position: Some(ac_world::object::Position::new_flat(
                 HOLTBURG,
                 at - ac_world::landblock_origin(HOLTBURG),

@@ -168,7 +168,7 @@ impl Client {
         self.world
             .objects
             .values()
-            .filter(|o| Some(o.guid) != mine && o.container.is_none() && !o.is_player)
+            .filter(|o| Some(o.guid) != mine && o.container.is_none() && !o.is_character())
             .filter(|o| match gift.wcid {
                 Some(w) => o.weenie_class_id == w,
                 None => o.name.eq_ignore_ascii_case(&gift.name),

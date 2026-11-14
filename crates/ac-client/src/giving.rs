@@ -180,7 +180,7 @@ impl Client {
     /// Who `to` is to a give of `item`, from what the client knows of both.
     fn receiver(&self, to: u32, item: u32) -> Receiver {
         let target = self.world.objects.get(&to);
-        if target.is_some_and(|o| o.is_player) {
+        if target.is_some_and(|o| o.is_character()) {
             return Receiver::Player;
         }
         let giver = target.map_or(0, |o| o.weenie_class_id);
