@@ -1,17 +1,14 @@
 # ac-client code map
 
-One `Client` per game session: connection, `World`, body, the manual actions a UI or script calls,
-and autoplay; file names are under `src/`, grep an entry fn for its system. `tests/code_map.rs`
-checks the paths, entry fns, steps and modules named here, each system's entry fns in its row's files.
+One `Client` per game session: connection, `World`, body, the manual actions a UI or script calls, and autoplay; file names are under `src/`, grep an entry fn for its system.
+`tests/code_map.rs` checks the paths, entry fns, steps and modules named here, each system's entry fns in its row's files.
 
 ## Tick path
 
 `Client::tick` (`session/apply.rs`), once a frame per session:
-1. drain the socket and `World::apply` each message; server chat goes to `chat_message()`
-   (`session/chat.rs`), which hands refusals in words to `hear_refusal()` (`refused.rs`)
+1. drain the socket and `World::apply` each message; server chat goes to `chat_message()` (`session/chat.rs`), which hands refusals in words to `hear_refusal()` (`refused.rs`)
 2. manual-play timers: `tick_combat()`, `tick_loot()`, `tick_store()`, `tick_giving()`, `tick_appraise()`
-3. `tick_autoplay()` (`autoplay/mod.rs`), then `tick_retag()` (`autoplay/ledger/retag.rs`) and
-   `save_ledger()` (`autoplay/ledger/store.rs`)
+3. `tick_autoplay()` (`autoplay/mod.rs`), then `tick_retag()` (`autoplay/ledger/retag.rs`) and `save_ledger()` (`autoplay/ledger/store.rs`)
 4. `tick_player()` (`body/player_tick.rs`) runs `tick_visit()` (`visit.rs`), walks the journey's
    stretch (`walk_journey()`), steers the slot's walk along its planned route (`body/standing.rs`,
    `ac_nav::Steering`) and moves the body (`player.rs`)
@@ -52,14 +49,15 @@ the earlier row; reflexes run in table order, `base` unread. The fixed curves si
 | 12 | give | goal | 98 | `autoplay_give` |
 | 13 | read scrolls | goal | 97 | `autoplay_read_scrolls` |
 | 14 | town run | goal | `worth_town_run` | `autoplay_town_run` |
-| 15 | summon | goal | `worth_fighting` | `autoplay_summon` |
-| 16 | fight | goal | `worth_fighting` | `autoplay_fight` |
-| 17 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
-| 18 | buffs | goal | 60 | `autoplay_buff` |
-| 19 | follow | goal | 50 | `autoplay_follow` |
-| 20 | resume the journey | goal | 40 | `autoplay_resume_journey` |
-| 21 | explore | goal | 20 | `autoplay_explore` |
-| 22 | grow | goal | 10 | `autoplay_grow` |
+| 15 | mule | goal | `worth_muling` | `autoplay_mule` |
+| 16 | summon | goal | `worth_fighting` | `autoplay_summon` |
+| 17 | fight | goal | `worth_fighting` | `autoplay_fight` |
+| 18 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
+| 19 | buffs | goal | 60 | `autoplay_buff` |
+| 20 | follow | goal | 50 | `autoplay_follow` |
+| 21 | resume the journey | goal | 40 | `autoplay_resume_journey` |
+| 22 | explore | goal | 20 | `autoplay_explore` |
+| 23 | grow | goal | 10 | `autoplay_grow` |
 
 Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_mana_stones`, `autoplay_refill_essences`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
 
@@ -94,6 +92,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | played by hand | `autoplay_by_hand`, `autoplay_assist` | `autoplay/team/by_hand.rs` | `Team.follow`, `Team.focus_fire` | by_hand | autoplay::team::by_hand | assist |
 | quartermaster | `autoplay_quartermaster`, `autoplay_stock`, `decide`, `quartermaster`, `hand_out` | `autoplay/team/quartermaster.rs`, `logistics.rs`, `autoplay/growth/policy.rs` | `growth::State.mode`, `Team.restock` | quartermaster | autoplay::team::quartermaster | quartermaster |
 | town run | `autoplay_town_run`, `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `choose_stop`, `pick_vendor`, `plan_calls`, `giver_step` | `autoplay/growth/town_run/mod.rs`, `autoplay/growth/town_run/counter.rs`, `autoplay/growth/town_run/vendor.rs`, `autoplay/growth/town_run/panel.rs`, `autoplay/growth/town_run/calls.rs`, `crates/ac-world/src/tour.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth::town_run | town_run, counter |
+| mules | `autoplay_mule`, `mule_load`, `is_mule_wanted`, `autoplay_mule_hold`, `is_mule_holding` | `autoplay/mule/load.rs`, `autoplay/mule/hold.rs` | `Autoplay.muling`, `Config.mule` | mule | autoplay::mule | mule |
 | giving | `give_all`, `tick_giving`, `hear_gift_refusal`, `may_give`, `gifts_tagged`, `autoplay_give`, `add_gift_calls`, `gift_step` | `giving.rs`, `autoplay/mule.rs`, `autoplay/growth/town_run/gift_calls.rs`, `crates/ac-world/src/takers.rs` | `Client.giving`, `Client.gave`, `Rule.give_to` (a `LootAction::Give` rule's receiver) | giv | giving | give |
 | supplies and sale | `grow_needs_with`, `supplies`, `sell_policy`, `offers_for_sale`, `burns` | `autoplay/growth/needs.rs`, `autoplay/growth/policy.rs`, `autoplay/growth/sale.rs`, `autoplay/growth/supplies.rs`, `crates/ac-loot/src/sale.rs` | `growth::State.needs`, `Profile.buy` (an `Ammunition` line: the launcher's rounds) | counter | autoplay::growth | need, sale |
 | XP spending | `autoplay_spend_xp`, `grow_spend_xp`, `raise_offers`, `batch_raise` | `autoplay/growth/xp.rs`, `autoplay/growth/raise.rs`, `advance.rs` | `growth::State.pending`, `growth::State.sulking` | experience | autoplay::growth::xp | raise |
@@ -136,6 +135,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | plan, order | the leader's plan for the party, and one character's part in it | - |
 | assist | hit what the leader is hitting, picking nothing | help, support |
 | give, receiver, taker | hand a carried item over (GiveObjectRequest), a give at a time; whom to (`GiveTo`); an NPC that takes anything (`ac_world::takers`) | hand, donate, dump |
+| mule, load | a character on another account that only holds what it is given; handing it what is kept and not used | bank, storage |
 | quest, giver, hand_in, pursuit | a quest in `ac_world::quests`, its rows sharing an id; the NPC who rewards it; giving it the items, or talking, for the reward; a quest the player asked autoplay to work before hunting for XP (`Quests.pursue`) | task, npc, turn-in, goal, order |
 
 ## Domain rules

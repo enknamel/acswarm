@@ -22,6 +22,8 @@ pub struct Growth {
     pub idle_before_move: f32,
     /// Walk to a vendor when the pack is full or supplies are short.
     pub town_runs: bool,
+    /// Load what is kept onto mules when the pack runs low (`crate::autoplay::mule`).
+    pub mule_runs: bool,
     /// A saved config's own ammunition count, read once and moved to the loot profile's
     /// Ammunition buy line (`fold_ammo_keep`); never written back.
     #[serde(alias = "ammo_keep", skip_serializing)]
@@ -49,6 +51,7 @@ impl Default for Growth {
             tactic: ac_world::hunting::Tactic::default(),
             idle_before_move: 60.0,
             town_runs: true,
+            mule_runs: false,
             ammo_keep_moved: None,
             gates_open: Vec::new(),
         }

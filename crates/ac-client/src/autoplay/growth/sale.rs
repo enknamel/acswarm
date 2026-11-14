@@ -193,6 +193,10 @@ impl Client {
     /// fallback for a character with no profile, so the forecast said
     /// the trip was worth making and then nothing was offered.
     pub(crate) fn offers_for_sale(&self, p: &SellPolicy, s: &ItemStats, ammo: bool) -> bool {
+        // A mule sells nothing: all it holds was given it to keep.
+        if self.autoplay.config.mule {
+            return false;
+        }
         offer_to_vendor(
             s,
             ammo,

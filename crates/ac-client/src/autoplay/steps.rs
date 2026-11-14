@@ -200,6 +200,21 @@ fn worth_town_run(client: &Client, now: Instant) -> f32 {
     town_run_worth(worth_looting(client, now))
 }
 
+/// Loading a mule: set off once its host says where it stands; under way, carried on as a run is.
+fn worth_muling(client: &Client, _now: Instant) -> f32 {
+    let m = &client.autoplay.muling;
+    if !m.loading || m.meet.is_none() {
+        return 0.0;
+    }
+    if client.journey_row() == Some("mule") {
+        return RUN_UNDER_WAY;
+    }
+    if client.fight_in_hand() {
+        return 0.0;
+    }
+    TOWN_RUN - 1.0
+}
+
 /// The same with the world left out: `loot` is what looting is worth this tick.
 fn town_run_worth(loot: f32) -> f32 {
     if loot > 0.0 {
@@ -453,6 +468,14 @@ pub const STEPS: &[Step] = &[
         why: "short of supplies or loaded with loot, a recall to town comes before starting the next fight; a fight in hand and the bodies of ours on the floor come first, and a run under way is carried on below the other goals",
         worth: worth_town_run,
         run: claimed!(Client::autoplay_town_run),
+    },
+    Step {
+        name: "mule",
+        layer: Layer::Goal,
+        base: TOWN_RUN - 1.0,
+        why: "a pack low on room with kept things goes to the mule its host logged in, as a town run goes and after one; under way it is carried on as a run is",
+        worth: worth_muling,
+        run: claimed!(Client::autoplay_mule),
     },
     Step {
         name: "summon",

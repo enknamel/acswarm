@@ -582,6 +582,8 @@ pub struct Config {
     pub quests: Quests,
     /// Worn things kept charged with mana stones (see `crate::autoplay::mana_stones`).
     pub mana: crate::autoplay::mana_stones::Mana,
+    /// A mule: out of the Academy it only holds what it is given (`crate::autoplay::mule`).
+    pub mule: bool,
 }
 
 #[cfg(test)]

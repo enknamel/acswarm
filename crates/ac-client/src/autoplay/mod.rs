@@ -90,6 +90,7 @@ use loot::owed::{corpse_within_reach, killed_by_us, whose_to_ask, Whose, KILL_SP
 pub(crate) use loot::room::Room;
 pub(crate) use loot::take::refused_item;
 pub(crate) use loot::walk::CorpseWalk;
+pub use mule::Meet;
 pub(crate) use team::fellowship::FELLOWSHIP_FULL;
 #[cfg(doc)]
 use team::fellowship::{FOUNDING_WAIT, HELD_OFF_FIRST, RECRUIT_AGAIN, RECRUIT_FLOOR, YIELD_AFTER};
@@ -549,6 +550,8 @@ pub struct Autoplay {
     pub growth: crate::growth::State,
     /// The academy rule's own state (see `crate::academy`).
     pub academy: crate::academy::State,
+    /// Loading a mule (see `mule::load`).
+    pub(crate) muling: mule::Muling,
     /// The corpse the academy rule is emptying, and since when.
     pub(crate) academy_corpse: Option<(u32, Instant)>,
     /// When the academy rule last asked for a weapon to be wielded.
@@ -682,6 +685,23 @@ impl Client {
         // while it was busy stayed for ever newly fallen (see
         // [`Client::autoplay_watch_the_ground`]).
         self.autoplay_watch_the_ground(now);
+        // A mule holds what it is given: beside staying alive nothing runs, so nothing on it is
+        // ever sold, salvaged, given away, drained or dropped.
+        if self.is_mule_holding() {
+            let rows = crate::steps::reflexes().filter(|s| mule::MULE_REFLEXES.contains(&s.name));
+            for step in rows {
+                self.autoplay.running = Some(step.name);
+                let did = step.run(self, now);
+                self.autoplay.running = None;
+                if did.acting() {
+                    self.autoplay.step = Some(step.name);
+                    return;
+                }
+            }
+            self.autoplay.step = None;
+            self.autoplay_mule_hold(now);
+            return;
+        }
         // Everything from here is a table rather than a chain, so the
         // order can be read, logged and tested rather than only obeyed
         // (see `crate::steps` and `docs/agent.md`).

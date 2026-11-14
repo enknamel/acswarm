@@ -689,6 +689,11 @@ pub(crate) fn draw(
                 }
                 ui.checkbox(&mut cfg.growth.town_runs, "run to town for supplies")
                     .on_hover_text("Sell the loot, buy what is short, when the pack fills up");
+                ui.checkbox(&mut cfg.growth.mule_runs, "load kept things onto mules")
+                    .on_hover_text(
+                        "When the pack runs low, log in a mule on an account of its own (made \
+                         when none has room) and give it what is kept and not used",
+                    );
                 ui.horizontal(|ui| {
                     ui.label("keep free for money");
                     ui.add(
@@ -897,6 +902,7 @@ impl Autoplay {
                 profile: "Starter".into(),
             },
             growth: Default::default(),
+            mule: false,
             academy: Default::default(),
             mana: Default::default(),
             quests: ac_client::autoplay::Quests {
@@ -1066,7 +1072,11 @@ impl Autoplay {
                 // Unticking "pick fights" is the rules' own stop: the
                 // config alone leaves the fight held (`Client::let_go`).
                 let stopped = was.fight.enabled && !edited.fight.enabled;
-                self.saved = edited.clone();
+                // Being a mule is the mule host's, never the rules every session is given.
+                self.saved = Config {
+                    mule: false,
+                    ..edited.clone()
+                };
                 if let Some(c) = cx.try_client() {
                     c.autoplay.config = edited;
                     if stopped {

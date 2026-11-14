@@ -1,6 +1,6 @@
-//! The give row: items tagged Give under a rule naming a player (a mule) go to that player while
-//! it stands in view and in a give's reach, between fights. Nothing walks off to find a mule;
-//! a refusal holds the items back for the ledger's wait (`Ledger::failed`).
+//! Mules. The give row: items tagged Give under a rule naming a player go to that player while it
+//! stands in view and in a give's reach, between fights; a refusal holds the items back for the
+//! ledger's wait (`Ledger::failed`). Loading a mule a host logged in (`load`), and a mule's own hold.
 
 use std::time::Instant;
 
@@ -8,6 +8,13 @@ use super::Doing;
 use crate::giving::GIVE_REACH;
 use crate::profile::GiveTo;
 use crate::Client;
+
+mod hold;
+mod load;
+
+pub(crate) use hold::MULE_REFLEXES;
+pub use load::Meet;
+pub(crate) use load::Muling;
 
 impl Client {
     /// Hand Give-tagged items to the player their rule names, when in view and in reach; true
@@ -47,7 +54,7 @@ impl Client {
     }
 
     /// The player called `name` (a leading `+` either side ignored), in view within a give's reach.
-    fn mule_in_reach(&self, name: &str, me: glam::Vec3) -> Option<u32> {
+    pub(crate) fn mule_in_reach(&self, name: &str, me: glam::Vec3) -> Option<u32> {
         let bare = |n: &str| n.trim().trim_start_matches('+').to_lowercase();
         let want = bare(name);
         self.world
