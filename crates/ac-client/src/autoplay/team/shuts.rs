@@ -602,7 +602,7 @@ impl Client {
             .iter()
             .map(|g| {
                 self.stats_of(*g).map(|stats| Left {
-                    held: self.already_carried(stats.wcid),
+                    held: self.held_like(&stats),
                     id: self.appraisals.get(g),
                     stats,
                 })

@@ -749,6 +749,23 @@ impl Profile {
         }
     }
 
+    /// What a cap counts `item` among: the first rule on that stops at a number and whose
+    /// name-and-kind half claims it, by index, so everything that rule claims counts towards it;
+    /// `None`, its weenie alone. One "keep up to 4" of Phyntos Wasp Essences, twenty weenies by
+    /// element and level, kept four of each (regression: the cap counted by weenie).
+    pub fn capping_rule(&self, item: &ItemStats, me: &Wielder, name: &str) -> Option<usize> {
+        self.rules
+            .iter()
+            .position(|r| r.on && r.keep_up_to.is_some() && r.cheap_half_holds(item, me, name, 0))
+    }
+
+    /// Whether rule `at`'s name-and-kind half claims `item` (see [`Self::capping_rule`]).
+    pub fn rule_claims(&self, at: usize, item: &ItemStats, me: &Wielder, name: &str) -> bool {
+        self.rules
+            .get(at)
+            .is_some_and(|r| r.cheap_half_holds(item, me, name, 0))
+    }
+
     /// The first rule that claims `item`, its index in `rules`, and whether it awaits an appraisal.
     fn reading(
         &self,

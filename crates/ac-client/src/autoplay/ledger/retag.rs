@@ -259,6 +259,12 @@ impl Client {
             .chain(self.world.wielded())
             .map(|o| (o.guid, o.weenie_class_id, o.stack_size.max(1)))
             .collect();
+        // Counted as a cap counts them: every weenie one capping rule claims is one kind.
+        for (guid, kind, _) in carried.iter_mut() {
+            if let Some(stats) = self.stats_of(*guid) {
+                *kind = self.cap_key(&stats);
+            }
+        }
         let mut waiting = Vec::new();
         for (guid, held) in in_arrival_order(&mut carried) {
             let Some(stats) = self.stats_of(guid) else {
@@ -325,7 +331,7 @@ impl Client {
             self.loot_profile().as_deref(),
             &self.wielder(),
             &self.world.stats.name.clone(),
-            self.already_carried(stats.wcid),
+            self.held_like(&stats),
             self.autoplay.ledger.is_looted(&stats),
         )?;
         self.autoplay.tag_why(&stats, action, Some(&rule));

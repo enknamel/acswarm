@@ -334,7 +334,8 @@ impl Client {
                 if !mine && self.refused_lately(stats.wcid, now) {
                     return None;
                 }
-                let held = self.already_carried(stats.wcid) + claimed.of(stats.wcid);
+                let key = self.cap_key(&stats);
+                let held = self.held_like(&stats) + claimed.of(key);
                 // Judged once, here, whoever the body belongs to.
                 let judged = judge_loot(
                     &stats,
@@ -422,7 +423,7 @@ impl Client {
                     }
                 };
                 if matches!(verdict, ac_loot::Verdict::Take(_)) {
-                    claimed.take(stats.wcid, stats.stack.max(1));
+                    claimed.take(key, stats.stack.max(1));
                 }
                 Some(ac_loot::Lying {
                     guid: *g,

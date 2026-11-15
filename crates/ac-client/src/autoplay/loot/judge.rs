@@ -302,6 +302,9 @@ pub fn quest_item_blocked(
     }
 }
 
+/// Where cap keys start ([`Client::cap_key`]): above every weenie class id, which are 16-bit.
+pub(crate) const CAP_KEYS: u32 = 0x8000_0000;
+
 /// What the cross-check names when no rule claims a quest's item.
 pub const NO_RULE_KEEPS: &str = "no rule keeps it";
 
@@ -327,7 +330,33 @@ impl Client {
             .objects
             .get(&stats.guid)
             .map_or(0, |o| o.stack_size.max(1));
-        self.already_carried(stats.wcid).saturating_sub(own)
+        self.held_like(stats).saturating_sub(own)
+    }
+
+    /// What a cap counts `stats` among (`Profile::capping_rule`): its rule's index past
+    /// [`CAP_KEYS`], else its weenie. One key for every weenie that rule claims.
+    pub(crate) fn cap_key(&self, stats: &crate::items::ItemStats) -> u32 {
+        self.loot_profile()
+            .and_then(|p| p.capping_rule(stats, &self.wielder(), &self.world.stats.name))
+            .map_or(stats.wcid, |at| CAP_KEYS + at as u32)
+    }
+
+    /// How many like `stats` are carried, for the rules that stop at a number: all its capping
+    /// rule claims, else its weenie ([`Self::already_carried`]).
+    pub(crate) fn held_like(&self, stats: &crate::items::ItemStats) -> u32 {
+        let Some(p) = self.loot_profile() else {
+            return self.already_carried(stats.wcid);
+        };
+        let (me, name) = (self.wielder(), self.world.stats.name.as_str());
+        let Some(at) = p.capping_rule(stats, &me, name) else {
+            return self.already_carried(stats.wcid);
+        };
+        self.world
+            .inventory()
+            .filter_map(|o| self.stats_of(o.guid))
+            .filter(|s| p.rule_claims(at, s, &me, name))
+            .map(|s| s.stack.max(1))
+            .sum()
     }
 
     /// What the rules say to do with an item, now.
@@ -357,7 +386,7 @@ impl Client {
             self.loot_profile().as_deref(),
             &self.wielder(),
             &self.world.stats.name,
-            self.already_carried(stats.wcid),
+            self.held_like(stats),
         ) {
             crate::profile::Verdict::Decided(a, _) => Some(a),
             crate::profile::Verdict::NeedsId(_) | crate::profile::Verdict::None => None,

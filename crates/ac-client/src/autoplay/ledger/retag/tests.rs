@@ -95,6 +95,66 @@ fn what_arrives_is_judged_against_what_was_held_before_it() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_cap_counts_every_kind_its_rule_names_not_one_weenie() {
+    // "Keep up to 4" Phyntos Wasp Essences kept four of each element and level: twenty weenies,
+    // each counted alone. The cap is on all the rule claims.
+    let mut c = character_of_level(game_data(), 20);
+    let dir = std::env::temp_dir().join("acswarm-test-cap-by-rule");
+    std::fs::create_dir_all(&dir).ok();
+    let shelf = std::sync::Arc::new(crate::profile::Library::default());
+    shelf.open(&dir);
+    let mut wasps = crate::profile::Rule {
+        name: "phyntos".into(),
+        action: LootAction::Keep,
+        all: vec![crate::profile::Ask::Item(crate::items::Term::Word(
+            "Phyntos Wasp Essence".into(),
+        ))],
+        ..Default::default()
+    };
+    wasps.keep_up_to = Some(2);
+    shelf
+        .put(crate::profile::Profile {
+            name: "two-wasps".into(),
+            rules: vec![wasps, asks("the rest", "value>=0", LootAction::Sell)],
+            ..Default::default()
+        })
+        .unwrap();
+    c.profiles = shelf;
+    c.autoplay.config.loot.profile = "two-wasps".into();
+    let me = c.world.player_guid.unwrap();
+    let essence = |guid: u32, wcid: u32, name: &str| ac_world::WorldObject {
+        guid,
+        name: name.into(),
+        weenie_class_id: wcid,
+        item_type: ac_world::item_type::MISC,
+        value: 100,
+        stack_size: 1,
+        container: Some(me),
+        ..Default::default()
+    };
+    let t0 = Instant::now();
+    c.autoplay_tag_arrivals(t0);
+    for (guid, wcid, name) in [
+        (0x8000_0001, 49_001, "Fire Phyntos Wasp Essence (80)"),
+        (0x8000_0002, 49_002, "Frost Phyntos Wasp Essence (100)"),
+        (0x8000_0003, 49_003, "Acid Phyntos Wasp Essence (125)"),
+    ] {
+        c.world.objects.insert(guid, essence(guid, wcid, name));
+        c.autoplay_tag_arrivals(t0);
+    }
+    assert_eq!(
+        c.autoplay.ledger.by_guid(0x8000_0002),
+        Some(LootAction::Keep)
+    );
+    assert_eq!(
+        c.autoplay.ledger.by_guid(0x8000_0003),
+        Some(LootAction::Sell),
+        "a third essence of another weenie kept past a cap of two"
+    );
+}
+
+#[test]
 fn what_arrives_in_the_pack_is_judged_like_what_lies_on_a_corpse() {
     // A bundle of arrowheads is a bundle of arrowheads whether it
     // came off a drudge or over a counter.
