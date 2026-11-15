@@ -18,6 +18,9 @@ use crate::{Blackboard, Ctx, Plugin, Role, SessionSpec};
 pub const BUILD_KEY: &str = "fealty.build";
 /// Blackboard key (this process): each target's progress line, by character name.
 pub const STATUS_KEY: &str = "fealty.status";
+/// Blackboard key (this process): every member's `{"account"}`, so no other plugin gives its
+/// sessions a player's saved rules (`panels::autoplay`).
+pub const ACCOUNTS_KEY: &str = "fealty.accounts";
 
 /// The roster's file in the config directory.
 const ROSTER_FILE: &str = "fealty.json";
@@ -272,6 +275,14 @@ impl Fealty {
     /// Every tree looked after: its members made up to its rank, the sessions it wants logged in
     /// and the rest logged off, and each oath under way tended.
     fn look(&mut self, cx: &mut Ctx) {
+        let accounts: Vec<_> = self
+            .trees
+            .iter()
+            .flat_map(|t| &t.members)
+            .map(|m| serde_json::json!({ "account": m.account }))
+            .collect();
+        cx.board
+            .set_local(ACCOUNTS_KEY, serde_json::Value::Array(accounts));
         for account in std::mem::take(&mut self.refused) {
             self.rename_refused(cx, &account);
         }
@@ -562,6 +573,10 @@ fn member_rules(c: &mut Client) {
     cfg.team.enabled = false;
     cfg.academy.enabled = true;
     cfg.growth.mule_runs = false;
+    // A member considers no quest: each one working the player's wrote its own Quests entries.
+    if cfg.quests != Default::default() {
+        cfg.quests = Default::default();
+    }
     cfg.enabled = c.world.player_guid.is_some() && !out;
 }
 

@@ -174,3 +174,14 @@ fn a_request_is_taken_once_off_the_board() {
         ]
     );
 }
+
+#[test]
+fn a_member_works_no_quest_of_the_players() {
+    // Given the player's saved rules, every vassal worked Blargerton's quests and wrote its own
+    // copy of their Keep rules into the shared profile's Quests section.
+    let mut c = Client::offline(std::rc::Rc::new(ac_scene::Assets::empty()));
+    c.autoplay.config.quests.on = true;
+    c.autoplay.config.quests.chosen.push("ishaqsmace".into());
+    member_rules(&mut c);
+    assert_eq!(c.autoplay.config.quests, Default::default());
+}

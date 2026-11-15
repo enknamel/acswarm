@@ -1235,18 +1235,17 @@ impl Plugin for Autoplay {
         // yet there threw the rules away and never tried again: a
         // headless run would silently play by the defaults, and whether
         // it did came down to timing.
-        // A mule host's session plays by the mule's rules alone: given these first, a new mule set
-        // off with the hunter's buy list and quest calls before its own rules came.
-        let mules: Vec<String> = cx
-            .board
-            .get(crate::mules::ACCOUNTS_KEY)
-            .and_then(|v| v.as_array().cloned())
-            .unwrap_or_default()
+        // A mule's or an allegiance member's session plays by its host's rules alone: given these
+        // first, a new mule set off with the hunter's buy list and quest calls, and every vassal
+        // pursued the player's quests into the shared profile.
+        let hosted: Vec<String> = [crate::mules::ACCOUNTS_KEY, crate::fealty::ACCOUNTS_KEY]
             .iter()
+            .filter_map(|k| cx.board.get(k).and_then(|v| v.as_array().cloned()))
+            .flatten()
             .filter_map(|m| m.get("account")?.as_str().map(str::to_string))
             .collect();
         if let Some(c) = cx.try_client() {
-            if !mules.contains(&c.config.account) {
+            if !hosted.contains(&c.config.account) {
                 c.autoplay.config = saved;
             }
             self.applied.insert(i);
