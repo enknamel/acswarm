@@ -176,6 +176,9 @@ pub trait Api {
     fn allegiance(&mut self) -> Dynamic;
     /// Ask the server for the profile again.
     fn allegiance_refresh(&mut self);
+    /// Raise your allegiance to `rank` (1..10) with characters made for it on new accounts
+    /// (`ac_plugin::fealty`); a higher rank later builds on what was made.
+    fn raise_rank(&mut self, rank: i64);
     /// Carried items an Ust would salvage (loot with `material` and `workmanship`).
     fn salvageable(&mut self) -> Array;
     /// Salvage these guids with the carried Ust; the yields show in chat.
@@ -616,6 +619,7 @@ pub fn register(engine: &mut Engine) {
     engine.register_fn("allegiance_refresh", || {
         with_api(|a| a.allegiance_refresh())
     });
+    engine.register_fn("raise_rank", |r: i64| with_api(|a| a.raise_rank(r)));
     engine.register_fn("salvageable", || with_api(|a| a.salvageable()));
     engine.register_fn("salvage", |items: Array| with_api(|a| a.salvage(items)));
     engine.register_fn("item_stats", || with_api(|a| a.item_stats()));

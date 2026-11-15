@@ -461,13 +461,7 @@ fn names_for(hunter_account: &str, hunter_name: &str, n: u32) -> (String, String
         .filter(char::is_ascii_alphanumeric)
         .collect::<String>()
         .to_lowercase();
-    let mut letters = String::new();
-    let mut k = n;
-    while k > 0 {
-        k -= 1;
-        letters.insert(0, char::from(b'A' + (k % 26) as u8));
-        k /= 26;
-    }
+    let letters = letters(n);
     let letters_only: String = hunter_name
         .chars()
         .filter(|c| c.is_ascii_alphabetic() || *c == ' ')
@@ -480,8 +474,20 @@ fn names_for(hunter_account: &str, hunter_name: &str, n: u32) -> (String, String
     (format!("{base}mule{n}"), format!("{first} Mule {letters}"))
 }
 
+/// The `n`th name in letters, counting from 1: A, B, .. Z, AA.
+pub(crate) fn letters(n: u32) -> String {
+    let mut out = String::new();
+    let mut k = n;
+    while k > 0 {
+        k -= 1;
+        out.insert(0, char::from(b'A' + (k % 26) as u8));
+        k /= 26;
+    }
+    out
+}
+
 /// A new account's password: 20 letters and digits off the process's random hasher keys.
-fn password() -> String {
+pub(crate) fn password() -> String {
     const CHARS: &[u8] = b"abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     (0..20)
         .map(|i| {

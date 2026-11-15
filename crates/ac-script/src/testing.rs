@@ -289,6 +289,7 @@ impl Api for Recorder {
         Dynamic::UNIT
     }
     fn allegiance_refresh(&mut self) {}
+    fn raise_rank(&mut self, _rank: i64) {}
     fn salvageable(&mut self) -> rhai::Array {
         rhai::Array::new()
     }

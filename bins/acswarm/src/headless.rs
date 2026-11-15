@@ -290,6 +290,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
     host.register(Box::new(ac_plugin::team::Team::default()));
     host.register(Box::new(ac_plugin::telemetry::Telemetry::default()));
     host.register(Box::new(ac_plugin::mules::Mules::default()));
+    host.register(Box::new(ac_plugin::fealty::Fealty::default()));
     host.register(Box::new(ac_script::ScriptPlugin::new(
         ac_script::default_dir(),
     )));

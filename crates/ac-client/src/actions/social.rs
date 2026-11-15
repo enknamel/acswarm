@@ -402,6 +402,24 @@ impl Client {
         true
     }
 
+    /// Say yes to an offer of allegiance from one of `names`: a kind 1 confirmation, whose text
+    /// ACE fills with the would-be vassal's name (Player_Allegiance.cs:90). Others wait for a hand.
+    pub fn accept_oath_from(&mut self, names: &[String]) -> bool {
+        let bare = |n: &str| n.trim().trim_start_matches('+').to_lowercase();
+        let offer = self
+            .world
+            .confirmations
+            .iter()
+            .find(|c| c.kind == 1 && names.iter().any(|n| bare(n) == bare(&c.text)))
+            .map(|c| (c.kind, c.context, c.text.clone()));
+        let Some((kind, context, name)) = offer else {
+            return false;
+        };
+        tracing::info!("accept allegiance from {name}");
+        self.confirm(kind, context, true);
+        true
+    }
+
     /// Break with our patron or one of our vassals (BreakAllegiance
     /// 0x001E); they need not be online or in view.
     pub fn break_allegiance(&mut self, member: u32) -> bool {

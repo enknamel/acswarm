@@ -55,6 +55,15 @@ pub(crate) struct Actions {
     pub refresh: bool,
     pub set_name: Option<String>,
     pub set_motd: Option<String>,
+    /// Raise this character's allegiance to a rank with characters made for it (`fealty`).
+    pub raise: Option<u32>,
+}
+
+/// The raise-to-rank row: the rank picked and the fealty host's progress line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Raise {
+    pub rank: u32,
+    pub status: Option<String>,
 }
 
 pub(crate) const OFFICER_TITLES: [&str; 4] = ["", "Speaker", "Seneschal", "Castellan"];
@@ -173,6 +182,7 @@ pub(crate) fn draw(
     v: &AllegianceView,
     new_name: &mut String,
     new_motd: &mut String,
+    raise: &mut Raise,
 ) -> Actions {
     let mut actions = Actions::default();
     let w = egui.viewport_rect().width();
@@ -297,6 +307,20 @@ pub(crate) fn draw(
                 actions.refresh = true;
             }
         });
+        ui.horizontal(|ui| {
+            ui.label("Raise to rank");
+            ui.add(egui::DragValue::new(&mut raise.rank).range(1..=crate::fealty::MAX_RANK));
+            if ui
+                .button("Build")
+                .on_hover_text("Make 2^rank - 1 characters on new accounts and swear them into a tree under this one")
+                .clicked()
+            {
+                actions.raise = Some(raise.rank);
+            }
+        });
+        if let Some(s) = &raise.status {
+            ui.label(egui::RichText::new(s).color(egui::Color32::from_gray(180)).small());
+        }
         if v.i_am_monarch {
             ui.horizontal(|ui| {
                 ui.label("Name");
@@ -324,6 +348,7 @@ pub(crate) struct Allegiance {
     pub show: bool,
     new_name: String,
     new_motd: String,
+    raise: Raise,
 }
 
 impl Default for Allegiance {
@@ -333,6 +358,10 @@ impl Default for Allegiance {
             show: false,
             new_name: String::new(),
             new_motd: String::new(),
+            raise: Raise {
+                rank: 6,
+                status: None,
+            },
         }
     }
 }
@@ -375,6 +404,10 @@ impl Allegiance {
             show: true,
             new_name: String::new(),
             new_motd: String::new(),
+            raise: Raise {
+                rank: 6,
+                status: None,
+            },
         }
     }
 }
@@ -406,7 +439,28 @@ impl Plugin for Allegiance {
             Source::Live => cx.try_client().map(|c| view(c)),
         };
         let Some(v) = v else { return };
-        let a = draw(egui, &v, &mut self.new_name, &mut self.new_motd);
+        let me = cx
+            .try_client()
+            .map(|c| c.world.stats.name.trim().to_string())
+            .unwrap_or_default();
+        self.raise.status = cx
+            .board
+            .get(crate::fealty::STATUS_KEY)
+            .and_then(|all| all.get(&me))
+            .and_then(|s| s.as_str())
+            .map(str::to_string);
+        let a = draw(
+            egui,
+            &v,
+            &mut self.new_name,
+            &mut self.new_motd,
+            &mut self.raise,
+        );
+        if let (Source::Live, Some(rank)) = (&self.source, a.raise) {
+            if !me.is_empty() {
+                crate::fealty::ask(cx.board, &me, rank);
+            }
+        }
         if super::closed("allegiance") {
             self.show = false;
         }

@@ -18,6 +18,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
+pub mod fealty;
 mod host;
 pub mod icons;
 pub mod keys;

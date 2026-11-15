@@ -1089,6 +1089,13 @@ impl Api for CtxApi<'_, '_> {
         self.client().allegiance_update_request(true);
     }
 
+    fn raise_rank(&mut self, rank: i64) {
+        let me = self.client().world.stats.name.trim().to_string();
+        if !me.is_empty() {
+            ac_plugin::fealty::ask(self.cx.board, &me, rank.clamp(1, 10) as u32);
+        }
+    }
+
     fn allegiance_name(&mut self, name: &str) {
         self.client().set_allegiance_name(name);
     }
