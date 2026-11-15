@@ -241,12 +241,13 @@ impl Client {
         if self.is_led() && !leader_inside {
             return false;
         }
-        // Nor on a run to town, which leaves the area on purpose. At the
+        // Nor on a run to town or to a mule, which leave the area on purpose. At the
         // counter, or between journeys once a corpse or a fight on the way
         // has ended one, a walk back to the area would take the character
         // off its run, and the run's own step, ranked below this one, would
         // never see it again. Nor on another row's visit.
         if self.autoplay.growth.town_run_under_way()
+            || self.is_muling()
             || (self.visiting().is_some() && !self.is_own_visit())
         {
             return false;

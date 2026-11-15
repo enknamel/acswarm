@@ -108,9 +108,28 @@ fn a_full_bag_of_salvage_goes_to_a_mule_and_a_part_bag_stays_to_be_topped_up() {
             kind::TINKERING_MATERIAL,
             LootAction::Salvage,
         );
-        c.world.objects.get_mut(&g).unwrap().structure = units;
+        let o = c.world.objects.get_mut(&g).unwrap();
+        o.structure = units;
+        // Salvage is used on an item, as a kit is (weenie 20993's Usable).
+        o.usable = 0x0008_0008;
     }
     assert_eq!(c.mule_load(), vec![full]);
+}
+
+#[test]
+fn a_summoning_essence_kept_stays_with_the_summoner() {
+    let mut c = hunter();
+    let (essence, ring) = (0x8000_0021, 0x8000_0022);
+    carried(
+        &mut c,
+        essence,
+        "Fire Phyntos Wasp Essence (50)",
+        kind::MISC,
+        LootAction::Keep,
+    );
+    c.world.objects.get_mut(&essence).unwrap().max_structure = 50;
+    carried(&mut c, ring, "Ring", kind::JEWELRY, LootAction::Keep);
+    assert_eq!(c.mule_load(), vec![ring]);
 }
 
 #[test]
@@ -195,4 +214,35 @@ fn what_a_mule_delivered_is_never_loaded_back() {
     );
     c.set_mule_kept(vec![0x8000_0031]);
     assert_eq!(c.mule_load(), vec![0x8000_0032]);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_trip_to_the_mule_is_not_taken_back_to_the_area() {
+    // Keeping to the area (70) took the journey to the mule, worth 15 once under way, every
+    // other tick: the two rows passed it back and forth.
+    let now = Instant::now();
+    let mut c = crate::testkit::standing_at(HOLTBURG, glam::Vec3::new(84.0, 7.1, 94.0));
+    let me = c.player.as_ref().unwrap().world_position();
+    let (x, y) = (me.x + 40.0, me.y);
+    let fight = &mut c.autoplay.config.fight;
+    fight.enabled = true;
+    fight.area = Some(crate::hunt::HuntArea {
+        name: "the field".into(),
+        shape: crate::hunt::Shape::Outline {
+            points: vec![[x, y], [x + 30.0, y], [x + 30.0, y + 30.0], [x, y + 30.0]],
+        },
+    });
+    let place = mule_at(&mut c, -60.0);
+    c.autoplay.muling.loading = true;
+    c.autoplay.muling.meet = Some(Meet {
+        name: "Mule".into(),
+        place,
+    });
+    assert!(
+        !c.autoplay_keep_to_area(now),
+        "walked back to the area on the way to the mule"
+    );
+    c.autoplay.muling.loading = false;
+    assert!(c.autoplay_keep_to_area(now));
 }

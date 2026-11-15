@@ -121,15 +121,21 @@ impl Client {
         self.autoplay.muling.refused.contains(&guid)
     }
 
+    /// A mule being met: loaded, or fetched from.
+    pub(crate) fn is_muling(&self) -> bool {
+        let m = &self.autoplay.muling;
+        (m.loading && m.meet.is_some()) || m.fetch.is_some()
+    }
+
     /// The last mule filled before everything was given to it.
     pub fn is_mule_full(&self) -> bool {
         self.autoplay.muling.mule_full
     }
 
     /// What goes to a mule: what the loot profile kept, of the kinds a mule holds, and every full
-    /// salvage bag; never what is worn, the best weapon of each stance, the Quests section's
-    /// items, the buy list's, what a mule delivered (`set_mule_kept`), nor anything an
-    /// appraisal showed tinkered, inscribed or attuned (not yet appraised: not yet).
+    /// salvage bag; never what is worn, the best weapon of each stance, a tool or an essence, the
+    /// Quests section's items, the buy list's, what a mule delivered (`set_mule_kept`), nor
+    /// anything an appraisal showed tinkered, inscribed or attuned (not yet appraised: not yet).
     pub fn mule_load(&self) -> Vec<u32> {
         let stats = self.item_stats();
         let Some(profile) = self.loot_profile() else {
@@ -165,8 +171,11 @@ impl Client {
             .filter(|s| !s.wielded && s.item_type & LOADED_KINDS != 0)
             .filter(|s| !ac_world::pack_slot::used_by(s.wcid, s.item_type & kind::CONTAINER != 0))
             .filter(|s| s.appraised && s.tinks == 0 && !s.inscribed && !s.attuned)
-            // A kit, a lockpick, a stone: what is used on something is a tool kept.
-            .filter(|s| !self.is_tool(s.guid))
+            // A kit, a lockpick, a stone: what is used on something is a tool kept. Salvage is
+            // used on an item too (Usable 0x80008) but is the load.
+            .filter(|s| s.item_type & kind::TINKERING_MATERIAL != 0 || !self.is_tool(s.guid))
+            // An essence is a supply the summon row burns.
+            .filter(|s| !crate::autoplay::summoning::is_essence(&s.name, s.max_structure))
             .filter(|s| !quest_items.contains(&s.wcid) && !in_use.contains(&s.guid))
             .filter(|s| !self.autoplay.muling.kept.contains(&s.guid))
             .filter(|s| !bought.contains(&s.name.trim().to_lowercase()))

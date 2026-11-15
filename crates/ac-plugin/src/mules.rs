@@ -205,7 +205,8 @@ impl Mules {
                 character: Some(m.character.clone()),
                 // Made where the account lacks it: a new mule's first login.
                 create: (!m.ready).then(|| CreateSpec::named(m.character.clone())),
-                role: Role::default(),
+                // Off the team: a follower would join the party's supplies and be shopped for.
+                role: Role::Manual,
             });
             self.started.push((account.clone(), cx.now));
         }
@@ -377,11 +378,13 @@ impl Mules {
     }
 }
 
-/// A mule's rules: autoplay on, the Academy done first, and a mule after it, buying only packs.
+/// A mule's rules: autoplay on, off the team, the Academy done first, and a mule after it, buying
+/// only packs.
 fn mule_rules(c: &mut Client) {
     let cfg = &mut c.autoplay.config;
     cfg.enabled = true;
     cfg.mule = true;
+    cfg.team.enabled = false;
     cfg.academy.enabled = true;
     cfg.growth.mule_runs = false;
     cfg.growth.town_runs = true;
