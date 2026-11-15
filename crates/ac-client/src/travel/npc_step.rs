@@ -74,6 +74,7 @@ impl Client {
             }
             tracing::info!("travel: to {} for its way on", step.name);
             self.travel.state.portals_before = self.portals_in_reach();
+            self.travel.state.portals_at = self.my_position().map(|p| p.truncate());
             self.travel.state.gem_used = Some(now);
             self.travel.state.gem_uses = 1;
             self.travel.state.gem_stack = step.item.map_or(0, |i| self.carried_count(i));

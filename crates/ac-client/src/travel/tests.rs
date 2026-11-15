@@ -1694,6 +1694,19 @@ fn a_gem_at_a_dungeon_door_finds_the_floor_in_front_and_is_used() {
         c.summoned_portal(&c.travel.state.portals_before),
         Some(GATEWAY)
     );
+    // Blargerton walked 17 m to a
+    // corpse as the portal came, and the gem was struck off for a 20-minute trip.
+    let corpse = me + Vec3::new(17.0, 0.0, 0.0);
+    crate::testkit::stand(
+        &mut c,
+        0x0018_01C7,
+        corpse - ac_world::landblock_origin(0x0018_01C7),
+    );
+    assert_eq!(
+        c.summoned_portal(&c.travel.state.portals_before),
+        Some(GATEWAY),
+        "the portal lost on the walk back"
+    );
 }
 
 #[test]

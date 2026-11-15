@@ -105,9 +105,11 @@ pub(crate) fn gem_next(
 }
 
 impl crate::Client {
-    /// The portals within [`SUMMONED_REACH`], nearest first.
+    /// The portals within [`SUMMONED_REACH`] of where the step's gem was used (else of the body),
+    /// nearest first (a_gem_at_a_dungeon_door_finds_the_floor_in_front_and_is_used).
     pub(crate) fn portals_in_reach(&self) -> Vec<u32> {
-        let Some(me) = self.my_position().map(|p| p.truncate()) else {
+        let at = self.gem_used_at();
+        let Some(me) = at.or_else(|| self.my_position().map(|p| p.truncate())) else {
             return Vec::new();
         };
         let mut near: Vec<(u32, f32)> = self

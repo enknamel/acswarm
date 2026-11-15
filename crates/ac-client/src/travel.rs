@@ -108,6 +108,8 @@ struct StepState {
     faced: bool,
     /// The portals in reach as the gem was used: none of them is the one it summons.
     portals_before: Vec<u32>,
+    /// Where the gem was used: its portal stands by it though a loot walk took the body off.
+    portals_at: Option<Vec2>,
     /// When the portal the gem summoned was last used, and how many times.
     summoned_used: Option<Instant>,
     summoned_uses: u32,
@@ -921,6 +923,7 @@ impl Client {
         }
         tracing::info!("travel: using {name}");
         self.travel.state.portals_before = self.portals_in_reach();
+        self.travel.state.portals_at = self.my_position().map(|p| p.truncate());
         self.travel.state.gem_spot = None;
         self.travel.state.gem_used = Some(now);
         self.travel.state.gem_uses = 1;
@@ -928,6 +931,11 @@ impl Client {
         self.interact(guid);
         self.gem_sent(summons, now);
         None
+    }
+
+    /// Where the step under way used its gem or asked its NPC for a portal.
+    pub(crate) fn gem_used_at(&self) -> Option<Vec2> {
+        self.travel.state.portals_at
     }
 
     /// A gem use went out: it takes the slot until answered, and one that carries the body off
