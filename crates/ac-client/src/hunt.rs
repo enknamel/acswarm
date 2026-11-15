@@ -260,6 +260,11 @@ impl Client {
         {
             return false;
         }
+        // Nor while its own bodies wait: one fresh body (57) is under this row (70), so a body just
+        // outside the area walked him in and out by turns (a_body_outside_the_area_is_looted_first).
+        if crate::autoplay::steps::worth_looting(self, now) > 0.0 {
+            return false;
+        }
         let Some((me, cell)) = self.player.as_ref().map(|p| (p.world_position(), p.cell)) else {
             return false;
         };

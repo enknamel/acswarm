@@ -513,6 +513,48 @@ fn a_body_emptied_or_set_aside_does_not_make_looting_worth_more() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_body_outside_the_area_is_looted_first() {
+    // Blargerton fought just west of his small area: one fresh body out there (57) sat under
+    // keep to the area (70), so he walked in, then out to the body, by turns every few seconds.
+    let holtburg = 0xA9B4_0019;
+    let mut c = crate::testkit::standing_at(holtburg, glam::Vec3::new(84.0, 84.0, 94.0));
+    c.world.player_guid = Some(0x5000_0009);
+    let me = c.player.as_ref().unwrap().world_position();
+    let now = Instant::now();
+    c.autoplay.config.fight.enabled = true;
+    c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {
+        name: "east".into(),
+        shape: crate::hunt::Shape::Outline {
+            points: vec![
+                [me.x + 5.0, me.y - 10.0],
+                [me.x + 20.0, me.y - 10.0],
+                [me.x + 20.0, me.y + 10.0],
+                [me.x + 5.0, me.y + 10.0],
+            ],
+        },
+    });
+    let body = 0x8000_0001;
+    c.world.objects.insert(
+        body,
+        ac_world::WorldObject {
+            position: crate::testkit::placed(holtburg, me - glam::Vec3::new(3.0, 0.0, 0.0)),
+            ..crate::testkit::corpse(body, "Corpse of Hellion")
+        },
+    );
+    assert!(worth_looting(&c, now) > 0.0, "the body is not his");
+    c.autoplay.running = Some("keep to the area");
+    assert!(
+        !c.autoplay_keep_to_area(now),
+        "walked back to the area from a body of his"
+    );
+    // Once it is emptied, back he goes.
+    c.autoplay.looted.push(body, now);
+    assert_eq!(worth_looting(&c, now), 0.0);
+    assert!(c.autoplay_keep_to_area(now), "stayed outside the area");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn looting_is_worth_only_the_bodies_this_character_would_go_to() {
     // The two predicates disagreed: what looting was worth counted
     // every body waiting, ownership and all, while the looting step

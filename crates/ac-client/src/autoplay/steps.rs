@@ -229,7 +229,7 @@ fn town_run_worth(loot: f32) -> f32 {
     }
 }
 
-fn worth_looting(client: &Client, now: Instant) -> f32 {
+pub(crate) fn worth_looting(client: &Client, now: Instant) -> f32 {
     use crate::autoplay::CORPSE_LIFE;
     let room = client.room_for_loot();
     let Some(me) = client.my_position() else {
