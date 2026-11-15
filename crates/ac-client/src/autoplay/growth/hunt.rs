@@ -230,7 +230,9 @@ impl Client {
             // `steps::worth_fighting`), and a body is no reason to wait.
             let away = at.distance(me);
             // Another row's journey elsewhere is no walk to the ground: this one is walked on.
-            let broken_off = self.journey_broken_off() || self.traveling();
+            // A recall still going up carries the body off whatever became of the journey.
+            let hopping = self.autoplay.is_hopping(now);
+            let broken_off = self.journey_broken_off() || self.traveling() || hopping;
             // A pursued creature's room in a dungeon is reached at the room, not the way in; a
             // journey there that ended in its dungeon is there, wherever explore has walked since.
             let spawn_room = self.pursued_place(lb).filter(|p| p.is_indoors());
@@ -255,7 +257,7 @@ impl Client {
                 .growth
                 .bound_walked_on
                 .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
-            match on_the_way(there, broken_off, busy, lately) {
+            match on_the_way(there, broken_off, busy || hopping, lately) {
                 OnTheWay::Wait => return true,
                 OnTheWay::WalkOn => {
                     if self.grow_travel(place, self.ground_reach(lb)) {

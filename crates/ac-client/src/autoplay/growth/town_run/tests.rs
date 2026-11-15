@@ -580,3 +580,21 @@ fn a_run_buys_first_where_the_whole_list_is() {
         shop.sell_rate
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_run_whose_recall_is_still_going_up_waits_for_it_not_crossing_the_counter_off() {
+    // Lifestone Sending sent, the journey cancelled before it landed: each tick the run took the
+    // counter for one it fell short of and went on to the next, twenty counters in 0.3 s.
+    let renald = Vec2::new(32_587.2, 34_578.3);
+    let now = Instant::now();
+    let mut c = standing_at(0x0908_0008, glam::Vec3::new(0.4, 187.1, 14.4));
+    c.autoplay.growth.run = Some(run_to(renald, now));
+    c.hop_sent(now, Duration::from_secs(20));
+    assert!(!c.traveling());
+    let cfg = c.autoplay.config.growth.clone();
+    c.grow_run_step(now + Duration::from_secs(2), &cfg);
+    let run = c.autoplay.growth.run.as_ref().expect("the run goes on");
+    assert_eq!(run.vendor, "Shopkeeper Renald the Elder");
+    assert_eq!(run.phase, Phase::Going);
+}

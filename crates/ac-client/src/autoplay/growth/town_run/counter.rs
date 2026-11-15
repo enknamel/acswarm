@@ -144,7 +144,11 @@ impl Client {
                 // without it having got anywhere, and the run picks it up
                 // again rather than taking it for a walk that could not.
                 let away = run.at.distance(me);
-                let busy = self.attack_target.is_some() || self.autoplay.casting_at().is_some();
+                // A recall still going up carries the body off whatever became of the journey: a
+                // run that judged it short crossed off every counter in turn till it landed.
+                let hopping = self.autoplay.is_hopping(now);
+                let busy =
+                    self.attack_target.is_some() || self.autoplay.casting_at().is_some() || hopping;
                 let lately = run
                     .walked_on
                     .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
@@ -152,7 +156,7 @@ impl Client {
                 // Another row's journey elsewhere is no walk to the counter: this one is walked on.
                 match on_the_way(
                     away <= VENDOR_REACH || run.walking_up,
-                    self.journey_broken_off() || self.traveling(),
+                    self.journey_broken_off() || self.traveling() || hopping,
                     busy,
                     lately,
                 ) {
