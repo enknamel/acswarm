@@ -361,12 +361,18 @@ impl Run {
         offer.sort_by_key(|i| std::cmp::Reverse(i.value));
 
         // A stack too dear for this counter is cut on its own turn: the piece is a new object, and
-        // an armful cannot name a guid that does not exist yet.
+        // an armful cannot name a guid that does not exist yet. Cut only with nothing else to sell
+        // and a slot for the piece and one for its coin: cut on each turn before the piece sold,
+        // the pieces filled the pack (a_too_dear_stack_is_cut_a_piece_at_a_time_each_sold_first).
         if let Some(it) = offer.first().copied() {
             if counter.max_value > 0 && it.value > counter.max_value {
                 let each = it.each().max(1);
                 let take = (counter.max_value / each).max(1).min(it.stack);
-                if take < it.stack {
+                if take < it.stack && offer.len() == 1 {
+                    if snap.slots_free < 2 {
+                        self.no_room = true;
+                        return None;
+                    }
                     return Some(Next::acting(
                         Act::Split {
                             guid: it.guid,
@@ -375,12 +381,15 @@ impl Run {
                         format!("cutting {take} off the {}", it.name),
                     ));
                 }
-                // Set aside, and the rest still sold: an answer with no act closes the visit.
-                self.refused.note(
-                    it.guid,
-                    &Did::refused("worth more than this counter will look at"),
-                    now,
-                );
+                // One piece: set aside, and the rest still sold (an answer with no act closes the
+                // visit). A stack: left for this armful, cut once the rest has gone.
+                if take >= it.stack {
+                    self.refused.note(
+                        it.guid,
+                        &Did::refused("worth more than this counter will look at"),
+                        now,
+                    );
+                }
                 offer.remove(0);
             }
         }
@@ -1126,6 +1135,38 @@ mod tests {
                 guid: 4,
                 amount: 20
             })
+        );
+    }
+
+    #[test]
+    fn a_too_dear_stack_is_cut_a_piece_at_a_time_each_sold_first() {
+        // Blargerton's Pyreal Peas: the stack left after a cut was still the dearest thing, so it
+        // was cut again every turn until the pieces filled the pack and nothing could be sold.
+        let now = Instant::now();
+        let mut run = Run::new();
+        let mut s = snap(vec![
+            item(4, "Pyreal Pea", 2_000_000, 100, 100),
+            item(5, "Pyreal Pea", 100_000, 5, 100),
+            item(6, "Dagger", 500, 1, 1),
+        ]);
+        s.counter.as_mut().unwrap().max_value = 100_000;
+        assert_eq!(
+            run.step(&s, now).act,
+            Some(Act::Sell { items: vec![5, 6] }),
+            "cut again before the piece sold"
+        );
+        // Nothing else left: cut, but only with a slot for the piece and one for its coin.
+        let mut run = Run::new();
+        let mut s = snap(vec![item(4, "Pyreal Pea", 5_000_000, 100, 100)]);
+        s.counter.as_mut().unwrap().max_value = 1_000_000;
+        s.slots_free = 1;
+        assert_ne!(
+            run.step(&s, now).act,
+            Some(Act::Split {
+                guid: 4,
+                amount: 20
+            }),
+            "cut with no room for the coin"
         );
     }
 
