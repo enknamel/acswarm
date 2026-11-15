@@ -891,6 +891,16 @@ pub mod motion_cmd {
     pub const READY: u32 = 0x4100_0003;
     pub const WALK_FORWARD: u32 = 0x4500_0005;
     pub const RUN_FORWARD: u32 = 0x4400_0007;
+    /// A beast's cast windup, held as its forward motion until the spell leaves (ACE
+    /// Monster_Magic.cs:215, launched at :169 before the post-cast motion).
+    pub const CAST_SPELL: u32 = 0x4000_00D3;
+
+    /// Whether forward motion `forward` (low 16 bits, as carried) is a spell windup: CastSpell,
+    /// or a humanoid's cast gesture MagicBlast..=MagicPray (Monster_Magic.cs:256).
+    pub fn is_casting(forward: u32) -> bool {
+        let c = forward & 0xFFFF;
+        c == CAST_SPELL & 0xFFFF || (0x2B..=0x39).contains(&c)
+    }
 }
 
 /// A movement target from a MoveTo* movement.

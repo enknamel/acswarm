@@ -43,12 +43,12 @@
 //! creature put bolts across each other all afternoon, and a fifth of
 //! one run's dodges were for a teammate's spell.
 //!
-//! Those are never dodged, nor a summoned creature's of ours or a fellow's. A fellow's bolt
+//! Those are never dodged. A summoned creature fires nothing: none of ACE's 259 CombatPet
+//! weenies has a spellbook, so a bolt beside our pet is the monster's it bites. A fellow's bolt
 //! cannot hurt us -- ACE refuses the damage in `Player.CheckPKStatusVsTarget`, where a non-PK
 //! on either side ends it -- though standing in its line destroys it (`SpellProjectile.
 //! OnCollideObject` calls `ProjectileImpact` before it asks about PK). A step for it took the
-//! legs from a cast or a swing; Blargerton stepped from his own golem's Flame Bolt. So
-//! [`can_hurt_us`] is read at intake and only what can hurt us is dodged.
+//! legs from a cast or a swing. So [`can_hurt_us`] is read at intake and only what can hurt us is dodged.
 //!
 //! A projectile is dodged whether or not it could reach us: the wire
 //! names its weenie, not its spell, and the DAT spell table carries no
@@ -1331,18 +1331,13 @@ impl Client {
         best
     }
 
-    /// The creature that seems to have fired a projectile that appeared
-    /// at `origin`: the nearest one within [`CASTER_WITHIN`], this
-    /// character excepted.
+    /// The creature that seems to have fired a projectile that appeared at `origin`, within
+    /// [`CASTER_WITHIN`]: the nearest one mid-windup, else the nearest; never this character
+    /// or a summoned creature (no CombatPet weenie has a spellbook).
     ///
-    /// A guess, and named as one. Nothing on the wire says who cast a
-    /// spell; what is known is that a projectile is made at its
-    /// caster's feet, so the creature standing closest to where it
-    /// appeared nearly always fired it. In a huddle of nine characters
-    /// a metre apart it can name the fellow beside the one who did.
-    /// Good enough to decide what a projectile is worth of the
-    /// character's time; not good enough to decide whether to dodge it
-    /// at all.
+    /// The wire names no caster, but a monster holds its windup as its forward motion until
+    /// the spell leaves (`motion_cmd::is_casting`), and a projectile is made at its caster's
+    /// feet. An arrow's archer swings rather than winds up, so it falls to the nearest.
     fn fired_by(&self, origin: Vec3) -> Option<u32> {
         let me = self.world.player_guid;
         self.world
@@ -1352,17 +1347,20 @@ impl Client {
                 Some(o.guid) != me
                     && o.item_type & ac_world::item_type::CREATURE != 0
                     && o.parent.is_none()
+                    && o.pet_owner == 0
             })
-            .filter_map(|o| o.world_pos().map(|p| (p.distance(origin), o.guid)))
-            .filter(|(d, _)| *d <= CASTER_WITHIN)
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, g)| g)
+            .filter_map(|o| {
+                let idle = !ac_world::object::motion_cmd::is_casting(o.motion.forward);
+                o.world_pos().map(|p| (idle, p.distance(origin), o.guid))
+            })
+            .filter(|(_, d, _)| *d <= CASTER_WITHIN)
+            .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)))
+            .map(|(_, _, g)| g)
     }
 
     /// Whether a projectile fired by `caster` could hurt this character
     /// (see [`can_hurt_us`]). One whose caster is not known is taken for
-    /// a threat: the guess is the doubtful part, not the rule. A creature
-    /// summoned by us or a fellow, or a fellow, is no threat.
+    /// a threat: the guess is the doubtful part, not the rule. A fellow is no threat.
     fn can_be_hurt_by(&self, caster: Option<u32>) -> bool {
         let Some(caster) = caster.and_then(|g| self.world.objects.get(&g)) else {
             return true;
@@ -1372,7 +1370,7 @@ impl Client {
                 && (self.world.player_guid == Some(g)
                     || self.autoplay.team.mates.iter().any(|m| m.guid == g))
         };
-        if ours(caster.guid) || ours(caster.pet_owner) {
+        if ours(caster.guid) {
             return false;
         }
         let mine = self.world.player().map_or(0, |o| o.object_desc_flags);
@@ -1898,20 +1896,58 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
-    fn our_summoned_creatures_bolt_is_never_dodged() {
-        // Blargerton stepped out of his own Sandstone Golem's Flame Bolt, mid-fight.
+    fn a_bolt_beside_our_pet_is_the_monsters_it_bites() {
+        // A wasp biting a shaman stood nearer the shaman's bolt than the shaman did: the bolt was
+        // blamed on the wasp and left to hit. No summoned creature has a spell to cast.
         let mut c = in_the_field();
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
-        let (golem, shot) = (0x6000_0009, 0x8000_0009);
+        let (wasp, shaman, shot) = (0x6000_0009, 0x6000_0001, 0x8000_0009);
         let stands = me + Vec3::new(0.0, -12.0, 0.0);
-        let mut pet = creature(golem, "Blargerton's Golem", 0, stands);
+        let mut pet = creature(wasp, "Fire Phyntos Wasp", 0, stands);
         pet.pet_owner = ME_GUID;
-        c.world.objects.insert(golem, pet);
+        c.world.objects.insert(wasp, pet);
+        c.world.objects.insert(
+            shaman,
+            creature(
+                shaman,
+                "Drudge Shaman",
+                0,
+                stands + Vec3::new(0.0, -1.5, 0.0),
+            ),
+        );
         c.world.objects.insert(shot, bolt(shot, stands, me, 15.0));
-        assert!(!c.autoplay_dodge(now), "stepped for our golem's bolt");
-        assert!(!c.dodge.tracks[&shot].can_hurt);
-        assert_eq!(c.dodge_to, None);
+        assert!(c.autoplay_dodge(now), "left the bolt to hit");
+        let track = c.dodge.tracks[&shot];
+        assert_eq!(track.from, Some(shaman), "the caster guess");
+        assert!(track.can_hurt);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_bolt_is_blamed_on_the_creature_winding_up_not_the_nearest() {
+        // The caster holds its windup as its forward motion until the bolt leaves; a fellow
+        // standing nearer the bolt did not throw it.
+        let mut c = in_the_field();
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let (fellow, shaman, shot) = (0x5000_0002, 0x6000_0001, 0x8000_0009);
+        let stands = me + Vec3::new(0.0, -12.0, 0.0);
+        let flags = ac_world::object_desc_flags::PLAYER;
+        c.world
+            .objects
+            .insert(fellow, creature(fellow, "+Brynnu", flags, stands));
+        let mut caster = creature(
+            shaman,
+            "Drudge Shaman",
+            0,
+            stands + Vec3::new(0.0, -1.5, 0.0),
+        );
+        caster.motion.forward = ac_world::object::motion_cmd::CAST_SPELL & 0xFFFF;
+        c.world.objects.insert(shaman, caster);
+        c.world.objects.insert(shot, bolt(shot, stands, me, 15.0));
+        assert!(c.autoplay_dodge(now), "left the shaman's bolt to hit");
+        assert_eq!(c.dodge.tracks[&shot].from, Some(shaman), "the caster guess");
     }
 
     #[test]
