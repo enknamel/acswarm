@@ -77,7 +77,10 @@ const MAX_QUEST_RETRIES: u32 = 2;
 /// How long a step of each kind may take before it is let go.
 fn limit(kind: Kind) -> Duration {
     Duration::from_secs(match kind {
-        Kind::Talk | Kind::Give | Kind::Unlock => 45,
+        // A talk waits its turn while the agent serves others one by one: eight new characters
+        // at Jonathan at once is about 8 x ANSWER_WAIT.
+        Kind::Talk => 60,
+        Kind::Give | Kind::Unlock => 45,
         Kind::Pickup => 30,
         Kind::Wear => 8,
         Kind::Hunt => 15 * 60,
@@ -502,7 +505,11 @@ impl State {
                 Action::Wait(format!("listening to {}", s.target))
             }
             None if v.now.duration_since(asked) > ANSWER_WAIT => {
-                self.retry(&format!("talking to {}", s.target))
+                // Silence is an agent busy with another's emotes, which drops the use
+                // (EmoteManager.cs:1584): asked again until the step's limit, not a try.
+                self.acted = None;
+                self.first_line = None;
+                Action::Wait(format!("asking {} again", s.target))
             }
             None => Action::Wait(format!("waiting for {} to answer", s.target)),
         }
@@ -1666,6 +1673,33 @@ mod tests {
         let mut v = view(t0 + Duration::from_secs(30), here, &objs, &[]);
         v.in_academy = false;
         assert_eq!(st.step(&v, true), Action::Left);
+    }
+
+    #[test]
+    fn a_jonathan_busy_with_others_is_asked_until_he_answers_not_given_up_on() {
+        let t0 = Instant::now();
+        let mut st = State::default();
+        let jonathan = npc("Jonathan", Vec3::new(22.1, -19.1, 0.0));
+        let objs = vec![jonathan.clone()];
+        let here = Vec3::new(21.0, -20.0, 0.0);
+        // Seven silent asks, as the seventh of eight new characters at him at once.
+        let mut t = t0;
+        for _ in 0..7 {
+            let v = view(t, here, &objs, &[]);
+            assert_eq!(st.step(&v, true), Action::Use(jonathan.guid));
+            t += ANSWER_WAIT + Duration::from_millis(100);
+            st.step(&view(t, here, &objs, &[]), true);
+        }
+        assert!(st.skipping, "still taking his way out");
+        assert!(
+            step_named(&st, "Jonathan", Kind::Talk),
+            "{:?}",
+            st.current()
+        );
+        assert_eq!(
+            st.step(&view(t, here, &objs, &[]), true),
+            Action::Use(jonathan.guid)
+        );
     }
 
     #[test]
