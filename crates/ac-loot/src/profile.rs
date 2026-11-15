@@ -648,7 +648,7 @@ pub struct Looting {
 impl Default for Looting {
     fn default() -> Self {
         Looting {
-            always: vec!["Pyreal".into()],
+            always: Vec::new(),
             never: Vec::new(),
             appraise: true,
             after_every_fight: true,

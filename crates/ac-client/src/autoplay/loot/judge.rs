@@ -234,6 +234,10 @@ pub fn judge_loot(
     if name_matches(&stats.name, &p.looting.never) {
         return Verdict::Decided(LootAction::Skip, "never take these".into());
     }
+    // Coins by their kind: a name on the always list matches inside others ("Pyreal Pea").
+    if stats.item_type & ac_world::item_type::MONEY != 0 {
+        return Verdict::Decided(LootAction::Keep, "money".into());
+    }
     if name_matches(&stats.name, &p.looting.always) {
         return Verdict::Decided(LootAction::Keep, "always take these".into());
     }

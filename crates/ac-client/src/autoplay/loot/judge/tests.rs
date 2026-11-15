@@ -44,6 +44,27 @@ fn the_players_own_word_comes_before_the_profile() {
     let _ = std::fs::remove_dir_all(library.dir());
 }
 
+#[test]
+fn coins_are_taken_by_kind_and_a_pyreal_pea_is_left_to_the_rules() {
+    use crate::profile::Verdict;
+    let library = shelf("coins", vec![asks("trash", "value>0", LootAction::Sell)]);
+    name_lists(&library, &[], &[]);
+    let mut coins = item("Pyreal", 0, 0);
+    coins.item_type = ac_world::item_type::MONEY;
+    let mut pea = item("Pyreal Pea", 3_125, 0);
+    pea.item_type = ac_world::item_type::SPELL_COMPONENTS;
+    assert_eq!(
+        judged(&coins, &library, "test"),
+        Verdict::Decided(LootAction::Keep, "money".into())
+    );
+    assert_eq!(
+        judged(&pea, &library, "test"),
+        Verdict::Decided(LootAction::Sell, "trash".into())
+    );
+    assert!(crate::profile::Looting::default().always.is_empty());
+    let _ = std::fs::remove_dir_all(library.dir());
+}
+
 /// Set the buy list on the test profile.
 fn buy_list(library: &crate::profile::Library, lines: &[(&str, u32)]) {
     let mut p = (*library.get("test").expect("the test profile")).clone();
