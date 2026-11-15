@@ -255,6 +255,11 @@ impl Client {
         self.travel.about_the_ground = true;
     }
 
+    /// Say the journey under way is a road after all: a walk back to the area from outside it.
+    pub(crate) fn mark_road_walk(&mut self) {
+        self.travel.about_the_ground = false;
+    }
+
     /// Whether the journey under way, or the last one, was about the
     /// character's own ground (see [`Self::travel_about`]). Read by the
     /// walk past the road, and when a journey is put down for a fight,

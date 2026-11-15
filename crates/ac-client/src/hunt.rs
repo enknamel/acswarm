@@ -267,10 +267,13 @@ impl Client {
         if area.contains(me, cell, underground) {
             return false;
         }
-        // Already on the way: travel and visits see it through, a row's journey taken over.
+        // Already on the way: travel and visits see it through, a row's journey taken over. Taken
+        // from outside the area it is a road: a patrol point set off for from town fought and
+        // looted the Singularity Caul (a_walk_back_to_the_area_is_a_road_not_the_ground).
         if self.traveling() || self.visiting().is_some() {
             if self.journey_row().is_some() {
                 self.keep_journey();
+                self.mark_road_walk();
             }
             return true;
         }

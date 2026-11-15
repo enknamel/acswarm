@@ -395,6 +395,44 @@ fn a_road_is_a_road_whoever_planned_it() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_walk_back_to_the_area_is_a_road_not_the_ground() {
+    // Done in town, Blargerton set off for a patrol point of his area a kilometre off, a walk
+    // marked about the ground; keep to the area took it over and he fought and looted the
+    // Singularity Caul on the way, his road looting off.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 20;
+    c.world.player_guid = Some(0x5000_0001);
+    let me = c.player.as_ref().unwrap().world_position();
+    let far = Vec2::new(me.x + 400.0, me.y);
+    c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {
+        name: "far".into(),
+        shape: crate::hunt::Shape::Outline {
+            points: vec![
+                [far.x - 40.0, far.y - 40.0],
+                [far.x + 40.0, far.y - 40.0],
+                [far.x + 40.0, far.y + 40.0],
+                [far.x - 40.0, far.y + 40.0],
+            ],
+        },
+    });
+    c.autoplay.running = Some("grow");
+    assert!(c.travel_about(crate::Goal::At {
+        place: ac_world::Place::on_map(far),
+        within: crate::travel::ARRIVE,
+    }));
+    assert!(!c.on_its_way(), "a patrol is the ground");
+    c.autoplay.running = Some("keep to the area");
+    assert!(c.autoplay_keep_to_area(Instant::now()));
+    c.autoplay.running = None;
+    assert!(
+        c.on_its_way(),
+        "the walk back to the area fought and looted on the way"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn walking_the_hunting_ground_is_not_being_on_the_way_to_it() {
     // The trap this rule had to be kept out of. A patrol of the
     // hunting area, and the roam around a ground, both walk (a journey
