@@ -278,3 +278,39 @@ fn a_pack_heavy_with_kept_things_wants_a_mule_with_slots_to_spare() {
         "heavy with kept things and no mule called"
     );
 }
+
+#[test]
+fn a_pack_with_loot_to_sell_goes_to_town_before_the_mule() {
+    // Heavy with twelve things for a counter, he called the mule, gave it one bag, came back under
+    // the line and never sold: the counter frees the room first, the mule what it cannot.
+    let mut c = character_of_level(no_data(), 75);
+    crate::testkit::with_a_pack(&mut c, 100);
+    stand(&mut c, HOLTBURG, glam::Vec3::new(84.0, 7.1, 94.0));
+    a_loot_profile(&mut c, "mule-sell-first-test");
+    c.autoplay.config.growth.mule_runs = true;
+    carried(
+        &mut c,
+        0x8000_0031,
+        "Breastplate",
+        kind::ARMOR,
+        LootAction::Keep,
+    );
+    carried(
+        &mut c,
+        0x8000_0032,
+        "Dagger",
+        kind::MELEE_WEAPON,
+        LootAction::Sell,
+    );
+    c.world.objects.get_mut(&0x8000_0032).unwrap().value = 500;
+    c.world.stats.attributes[0].base = 60;
+    let (_, capacity) = c.burden();
+    c.world.stats.ints.retain(|(k, _)| *k != 5);
+    c.world.stats.ints.push((5, (capacity * 3) as i32));
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(!c.salables(&cfg).is_empty(), "nothing for a counter");
+    assert!(!c.is_mule_wanted(), "the mule called with loot to sell");
+    // Sold, and still heavy with what he keeps: the mule.
+    c.world.objects.remove(&0x8000_0032);
+    assert!(c.is_mule_wanted(), "sold down and still heavy, no mule");
+}

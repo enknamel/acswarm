@@ -236,7 +236,7 @@ impl Client {
     /// of the character; a forecast narrows it to a shop the character
     /// has not walked to yet, which is how a trip is judged before it is
     /// started.
-    pub(super) fn salables(&self, cfg: &Growth) -> Vec<Salable> {
+    pub(crate) fn salables(&self, cfg: &Growth) -> Vec<Salable> {
         self.for_sale(cfg)
             .into_iter()
             .map(|o| Salable {

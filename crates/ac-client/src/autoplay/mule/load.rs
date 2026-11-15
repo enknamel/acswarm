@@ -76,9 +76,13 @@ impl Client {
             return false;
         }
         // Short of slots, or of weight as a town run counts it: salvage bags weigh 100 each, and a
-        // pack of them sent him to town with 42 slots free and never called the mule.
+        // pack of them sent him to town with 42 slots free and never called the mule. Only once a
+        // counter can free no more, or a run ended still full: a trip for one bag left twelve
+        // things unsold (a_pack_with_loot_to_sell_goes_to_town_before_the_mule).
         let cfg = self.autoplay.config.growth.clone();
-        let full = self.pack_low_on_room() || self.laden(&cfg);
+        let sold_down =
+            !cfg.town_runs || self.autoplay.growth.left_full || self.salables(&cfg).is_empty();
+        let full = (self.pack_low_on_room() || self.laden(&cfg)) && sold_down;
         if !self.autoplay.muling.loading && full {
             // Only an appraisal tells a tinkered or inscribed thing: asked before the load is read.
             let unknown = self.unappraised_load();
@@ -254,6 +258,7 @@ impl Client {
                 // Given all it would take: what the server held back stayed for want of room.
                 self.autoplay.muling.mule_full = held_back > 0;
                 self.autoplay.muling.loading = false;
+                self.autoplay.growth.left_full = false;
                 tracing::info!(held_back, "muling: done with {}", meet.name);
                 return false;
             }

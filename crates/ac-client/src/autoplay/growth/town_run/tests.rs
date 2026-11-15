@@ -237,6 +237,45 @@ fn an_urgent_need_comes_before_the_loot_and_the_loot_is_sold_on_the_way() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_counter_with_no_room_to_pay_ends_the_run() {
+    // Full of kept things and coin, no counter could pay Blargerton for one Pyreal Pea, and the
+    // run went on to the next that buys peas, through the Mountain Sewer: it ends, still full.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 20;
+    let keep = c.autoplay.config.team.restock.money_slots;
+    with_a_pack(&mut c, 2 + keep);
+    pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
+    pea_in_the_pack(&mut c, 0x8000_0011, "Iron Pea", 8328, 2_500);
+    let cfg = c.autoplay.config.growth.clone();
+    let now = Instant::now();
+    assert!(
+        c.grow_town_run(now, &cfg),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+    let run = c.autoplay.growth.run.take().expect("no run");
+    c.cancel_travel();
+    // Paid, the peas go on to the next counter that buys them.
+    c.grow_run_next(run.clone(), now, &cfg, None);
+    assert!(
+        c.autoplay.growth.run.is_some(),
+        "a counter that pays not gone on to"
+    );
+    c.autoplay.growth.run = None;
+    c.cancel_travel();
+    // Unpaid for want of room: the run ends, and says it ended full.
+    c.autoplay.growth.unpaid = true;
+    c.grow_run_next(run, now, &cfg, None);
+    assert!(
+        c.autoplay.growth.run.is_none(),
+        "went on to another counter that cannot pay"
+    );
+    assert!(c.autoplay.growth.left_full, "ended full, the mule not told");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_run_ends_packing_its_coin_into_notes() {
     // Blargerton sold at the Pawn Shopkeep, which stocks no MMDs, and walked off with 383,151 in
     // coin: sixteen slots of a pack the run was made to empty.

@@ -605,6 +605,8 @@ impl Client {
         // and the rules count one at a time.
         run.sold += self.autoplay.growth.shop.sold;
         run.short_with = self.autoplay.growth.shop.short_with.or(run.short_with);
+        let shop = &self.autoplay.growth.shop;
+        self.autoplay.growth.unpaid = shop.no_room && shop.sold == 0;
         self.close_vendor();
         self.autoplay.growth.shop = ac_vendor::Run::new();
         self.grow_run_next(run, now, cfg, left)
@@ -638,6 +640,9 @@ impl Client {
         }
         let needs = self.grow_needs(cfg);
         let still_full = self.pack_low_on_room();
+        // Unpaid for want of a slot, no counter on can pay either: a tour of them followed one
+        // Pyreal Pea through the Mountain Sewer (a_counter_with_no_room_to_pay_ends_the_run).
+        let unpaid = std::mem::take(&mut self.autoplay.growth.unpaid);
         // A run in town goes on while there is loot for a counter left
         // and a counter in reach that takes it, whatever the run set
         // off for. This is how a counter that bought none of it is
@@ -663,7 +668,7 @@ impl Client {
         let notes_due =
             run.errand != Errand::Notes && self.purse() >= ac_vendor::errand::note_cost(MMD_FACE);
         // With no slot at all the next counter could not pay out either.
-        let shopping = buying || still_full || more_to_sell;
+        let shopping = buying || (!unpaid && (still_full || more_to_sell));
         let wanting = self.room_anywhere() > 0 && (shopping || notes_due);
         // No cap on stops: each is a counter not yet visited this run that the forecast says helps.
         if wanting {
@@ -777,7 +782,9 @@ impl Client {
         // Ended short of coin, the next run waits the same: it would find the same prices.
         let short = !run.for_quest && run.short_with.is_some_and(|was| self.spendable() <= was);
         let purse = self.spendable();
+        let left_full = still_full || self.laden(cfg);
         let st = &mut self.autoplay.growth;
+        st.left_full = left_full;
         st.run_was_futile = futile || short;
         st.futile_purse = purse;
         st.bought_anything = false;

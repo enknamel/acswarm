@@ -126,6 +126,10 @@ pub struct State {
     pub run_was_futile: bool,
     /// The spendable coin when `run_was_futile` was set: more than this ends the wait.
     pub futile_purse: u32,
+    /// The last counter sold nothing for want of a slot for its coin: no other counter can pay.
+    pub unpaid: bool,
+    /// The last run ended low on room or laden: what is left is the mule's (`is_mule_wanted`).
+    pub left_full: bool,
     /// The character has given up, in town. Out of money, with nothing
     /// left to sell and too short of supplies to go on hunting, it
     /// stops where the shops are -- which is where the money and the

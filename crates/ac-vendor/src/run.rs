@@ -93,7 +93,7 @@ pub struct Run {
     /// Items sold this trip.
     pub sold: u32,
     /// Goods to sell, no slot for their coin: selling stands aside and the visit says why.
-    no_room: bool,
+    pub no_room: bool,
     /// The ware last asked for, until the counter answers: what a refusal in words is about.
     buying: Option<u32>,
     /// A purchase sent, `(ware, how many carried before, when)`, until the pack shows more: the
