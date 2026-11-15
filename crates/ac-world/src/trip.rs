@@ -162,6 +162,8 @@ pub enum Step {
         portal: Option<u32>,
         /// Seconds of the NPC's emotes before the way opens.
         secs: f32,
+        /// Objects used first, each starting an event the NPC asks running (`NpcWay::first`).
+        first: Vec<(u32, Place)>,
         mouth: Place,
         exit: Place,
     },
@@ -575,6 +577,10 @@ pub fn plan_with_ways(
     for p in portals::all() {
         has_portal.insert(p.from_cell & 0xFFFF_0000);
     }
+    // An NPC's way is one on too: Qin Xikit's temple has no portal, only its Guardian's sending.
+    for n in &ways.npcs {
+        has_portal.insert(n.cell & 0xFFFF_0000);
+    }
     let flags_held = |p: &&Portal| level == 0 || p.usable_by(level, quests_done);
     let flag_asked = |p: &&Portal| {
         prefs.flag_seconds.is_some() && p.usable_by(level, std::slice::from_ref(&p.quest))
@@ -740,6 +746,7 @@ pub fn plan_with_ways(
                         item: n.item,
                         portal: n.portal,
                         secs: n.secs,
+                        first: n.first.clone(),
                         mouth: mouth_of(p),
                         exit: exit_of(p),
                     },
@@ -1298,6 +1305,47 @@ mod tests {
                 ))),
             "{without:?}"
         );
+    }
+
+    #[test]
+    fn the_blood_puzzle_room_is_reached_through_browerks_device_and_the_guardian() {
+        // No portal leads into Qin Xikit's temple: Browerk's Portal Device sends whoever uses it,
+        // its four Eyes used first, and the temple's Guardian sends on to the Empty Water Skins.
+        let skins = Place {
+            at: crate::landblock_origin(0x0160_0120) + Vec3::new(20.0, -110.0, -12.0),
+            cell: 0x0160_0120,
+        };
+        let ways = Ways {
+            npcs: portals::npc_ways()
+                .iter()
+                .filter(|w| w.item.is_none() && w.usable_by(111, &[]))
+                .cloned()
+                .collect(),
+            ..Ways::default()
+        };
+        let device = ways
+            .npcs
+            .iter()
+            .find(|w| w.npc == 29728)
+            .expect("the device's way");
+        let eyes: Vec<u32> = device.first.iter().map(|(w, _)| *w).collect();
+        assert_eq!(eyes, [29715, 29716, 29717, 29718]);
+        let by = Place {
+            at: device.at + Vec3::new(0.0, 0.0, 2.0),
+            cell: device.cell,
+        };
+        let prefs = Prefs::default();
+        let trip = plan_with_ways(by, skins, 111, &[], &[], &[], &[], &[], prefs, &ways)
+            .expect("a way to the skins");
+        let npcs: Vec<u32> = trip
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Npc { npc, .. } => Some(*npc),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(npcs, [29728, 29721], "{:?}", trip.steps);
     }
 
     #[test]

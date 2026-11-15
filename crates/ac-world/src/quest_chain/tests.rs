@@ -433,3 +433,11 @@ fn chorizite_is_found_by_name_and_made_from_its_chain() {
     assert_eq!(deposit.keys.first().map(|k| k.0), Some(7549));
     assert!(!kinds(7549).is_empty(), "the pick axe comes from nowhere");
 }
+
+#[test]
+fn a_reward_no_quest_wants_is_named() {
+    // The Falatacot temple's shirt is given and never asked for: the quest book read "item 26501".
+    assert_eq!(reward_name(26501), Some("Ancient Armored Vestment"));
+    // Named for the book only: an item goal is still picked from what has a way to it.
+    assert!(items_named("Ancient Armored Vestment").is_empty());
+}

@@ -408,6 +408,9 @@ pub struct NpcWay {
     pub to: Vec3,
     /// Seconds of the NPC's emote delays before the portal is summoned or the teleport made.
     pub secs: f32,
+    /// Placed objects used first, each starting a server event the NPC asks running: weenie
+    /// class and where it stands (Browerk's Portal Device and the four Eyes of the Watcher).
+    pub first: Vec<(u32, crate::Place)>,
 }
 
 impl NpcWay {
@@ -438,6 +441,20 @@ impl NpcWay {
 
 const NPC_WAYS: &str = include_str!("../data/npc_ways.csv");
 
+/// One object an NPC way uses first, `wcid:CELL:x:y:z` (x/y/z local to the cell's landblock).
+fn first_use(entry: &str) -> Option<(u32, crate::Place)> {
+    let f: Vec<&str> = entry.split(':').collect();
+    let num = |i: usize| f.get(i)?.parse::<f32>().ok();
+    let cell = u32::from_str_radix(f.get(1)?, 16).ok()?;
+    let local = Vec3::new(num(2)?, num(3)?, num(4)?);
+    let cell = match cell & 0xFFFF {
+        0 => crate::outdoor_cell(cell, local),
+        _ => cell,
+    };
+    let at = crate::landblock_origin(cell) + local;
+    Some((f.first()?.parse().ok()?, crate::Place { at, cell }))
+}
+
 /// Every way a placed NPC opens, parsed on first use.
 pub fn npc_ways() -> &'static [NpcWay] {
     static PARSED: OnceLock<Vec<NpcWay>> = OnceLock::new();
@@ -454,6 +471,13 @@ pub fn npc_ways() -> &'static [NpcWay] {
                 _ => cell,
             };
             let to_cell = u32::from_str_radix(f.get(11)?, 16).ok()?;
+            let first = f
+                .get(16)
+                .copied()
+                .unwrap_or("")
+                .split(';')
+                .filter(|e| !e.is_empty());
+            let first = first.map(first_use).collect::<Option<Vec<_>>>()?;
             Some(NpcWay {
                 npc: int(0)?,
                 name: crate::data_name(f.get(1)?),
@@ -472,6 +496,7 @@ pub fn npc_ways() -> &'static [NpcWay] {
                 to_cell,
                 to: crate::landblock_origin(to_cell) + Vec3::new(num(12)?, num(13)?, num(14)?),
                 secs: num(15).unwrap_or(0.0),
+                first,
             })
         };
         let lines = NPC_WAYS

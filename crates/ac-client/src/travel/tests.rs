@@ -2168,6 +2168,65 @@ fn a_journey_to_a_spot_out_at_sea_is_refused_before_setting_off() {
     assert!(!c.is_at_sea(me));
 }
 
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_device_fuelled_by_eyes_has_each_eye_used_before_it() {
+    // Browerk's Portal Device sends nobody until its four Eyes of the Watcher have each been used
+    // ("The eyes fuel the portal beacon. All must be activated."): each is walked to and used first.
+    let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    let me = c.my_position().unwrap();
+    let thing = |guid: u32, wcid: u32, name: &str, at: Vec3| ac_world::WorldObject {
+        weenie_class_id: wcid,
+        position: crate::testkit::placed(0xA9B4_0019, at),
+        ..crate::testkit::creature(guid, name)
+    };
+    let (near, far) = (
+        me + Vec3::new(1.0, 0.0, 0.0),
+        me + Vec3::new(30.0, 0.0, 0.0),
+    );
+    c.world.objects.insert(
+        0x7000_0001,
+        thing(0x7000_0001, 29715, "Eye of the Watcher", near),
+    );
+    c.world
+        .objects
+        .insert(0x7000_0003, thing(0x7000_0003, 29728, "Portal Device", me));
+    let step = Step::Npc {
+        npc: 29728,
+        name: "Portal Device".into(),
+        item: None,
+        portal: None,
+        secs: 0.0,
+        first: vec![(29715, c.place_at(near)), (29716, c.place_at(far))],
+        mouth: c.place_at(me),
+        exit: c.place_at(me),
+    };
+    let t0 = Instant::now();
+    assert!(c.travel_npc_wait(&step, t0).is_none());
+    assert_eq!(
+        c.travel.state.firsts_used,
+        [29715],
+        "the eye beside him was not used"
+    );
+    assert!(
+        c.travel.state.gem_used.is_none(),
+        "the device used before its eyes"
+    );
+    c.autoplay.cast_answered();
+    let goal = c.travel_npc_wait(&step, t0 + Duration::from_secs(1));
+    assert!(
+        matches!(goal, Some(Goal::At { place, .. }) if place.at.distance(far) < 1.0),
+        "not off to the far eye: {goal:?}"
+    );
+    c.travel.state.firsts_used.push(29716);
+    let _ = c.travel_npc_wait(&step, t0 + Duration::from_secs(2));
+    assert_eq!(
+        c.travel.state.gem_uses, 1,
+        "the device was not used once its eyes were"
+    );
+}
+
 /// Faladha the Emissary two paces off in Holtburg's field, a 10,000 note carried: her NPC step.
 fn by_faladha() -> (Client, Step) {
     let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
@@ -2191,6 +2250,7 @@ fn by_faladha() -> (Client, Step) {
         item: Some(2625),
         portal: Some(7413),
         secs: 7.0,
+        first: Vec::new(),
         mouth,
         exit,
     };

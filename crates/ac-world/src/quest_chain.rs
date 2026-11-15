@@ -591,8 +591,19 @@ fn item_names() -> &'static BTreeMap<u32, String> {
 /// The spell components no shop sells that the data has a way to (`data/goal_items.csv`):
 /// item goals besides the quests' items.
 fn goal_items() -> impl Iterator<Item = (u32, String)> {
-    include_str!("../data/goal_items.csv")
-        .lines()
+    names_csv(include_str!("../data/goal_items.csv"))
+}
+
+/// Every item a quest gives, by name (`data/reward_items.csv`): named for the quest book, never
+/// a goal (`items_named`), most having no way to them.
+fn reward_items() -> &'static BTreeMap<u32, String> {
+    static NAMES: OnceLock<BTreeMap<u32, String>> = OnceLock::new();
+    NAMES.get_or_init(|| names_csv(include_str!("../data/reward_items.csv")).collect())
+}
+
+/// A `wcid,name` table's rows, the data's ';' read back as ','.
+fn names_csv(text: &'static str) -> impl Iterator<Item = (u32, String)> {
+    text.lines()
         .filter(|l| !l.starts_with('#') && !l.is_empty())
         .filter_map(|l| {
             let (wcid, name) = l.split_once(',')?;
@@ -602,7 +613,10 @@ fn goal_items() -> impl Iterator<Item = (u32, String)> {
 
 /// An item's name from the quest and shop data, by weenie class.
 pub fn reward_name(wcid: u32) -> Option<&'static str> {
-    item_names().get(&wcid).map(String::as_str)
+    item_names()
+        .get(&wcid)
+        .or_else(|| reward_items().get(&wcid))
+        .map(String::as_str)
 }
 
 /// The items the quest and shop data name whose name holds `words` (any case), shortest name

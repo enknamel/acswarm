@@ -1,6 +1,6 @@
 #!/bin/sh
 # Regenerate crates/ac-world/data/quests.csv, quest_givers.csv,
-# quest_sources.csv, goal_items.csv, summoned_portals.csv, spawned_portals.csv and npc_ways.csv (the portals and
+# quest_sources.csv, goal_items.csv, reward_items.csv, summoned_portals.csv, spawned_portals.csv and npc_ways.csv (the portals and
 # teleports an NPC opens for an item handed or a use) and arenas.csv (the
 # Colosseum's rooms, ways in and tickets): every quest a placed
 # NPC holds, XP or not (each path
@@ -91,10 +91,10 @@ order by a.emote_Id, a.order;'
 q genevent 'select s.object_Id, s.value, coalesce(e.state, 0) from weenie_properties_string s
 left join event e on e.name = s.value where s.type = 34 and s.value <> "";'
 
-# A creature's portal summon (SpellType.PortalSummon: link 1 its LinkedPortalOne, DataId 31,
-# else LinkedPortalTwo, 48; WorldObject_Magic.cs:1203-1214) and where each portal leads
-# (Destination, PositionType 2).
-q summonspell 'select id, link from spell where name like "Summon % Portal%" and link in (1, 2);'
+# A portal summon, by its link whatever its name (SpellType.PortalSummon: link 1 the caster's
+# LinkedPortalOne, DataId 31, else LinkedPortalTwo, 48; WorldObject_Magic.cs:1203-1214: the
+# Enchanted Dais's "Qin Xikit's Island") and where each portal leads (Destination, PositionType 2).
+q summonspell 'select id, link from spell where link in (1, 2);'
 
 q linkportal 'select d.object_Id, d.type, d.value, hex(p.obj_Cell_Id), round(p.origin_X, 2),
   round(p.origin_Y, 2), round(p.origin_Z, 2), coalesce(lo.value, 0), coalesce(hi.value, 0),

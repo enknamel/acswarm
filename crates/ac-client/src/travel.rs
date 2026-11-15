@@ -113,6 +113,8 @@ struct StepState {
     /// When the portal the gem summoned was last used, and how many times.
     summoned_used: Option<Instant>,
     summoned_uses: u32,
+    /// The NPC step's objects used first (`Step::Npc::first`), by weenie class.
+    firsts_used: Vec<u32>,
     /// The step's walk end on its floor, once the region holds it.
     end: Option<Place>,
     /// The overland corridor, while the region does not hold the walk end.

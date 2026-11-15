@@ -1,0 +1,3132 @@
+# Every item a quest in quests.csv gives, by name: the quest book's rewards
+# (ac_world::quest_chain::reward_name). wcid,name. Regenerate with reference/scripts/data/quests.sh.
+136,Pack
+151,Empty Flask
+244,Wood
+258,Apple
+273,Pyreal
+293,Torch
+377,Potion of Healing
+379,Mana Potion
+629,Adept Healing Kit
+630,Gifted Healing Kit
+631,Excellent Healing Kit
+632,Peerless Healing Kit
+686,Copper Scarab
+687,Gold Scarab
+688,Silver Scarab
+689,Iron Scarab
+690,Pyreal Scarab
+691,Lead Scarab
+1077,Welcome Letter
+1435,Ice Tachi
+1439,Acid Axe
+2200,Copy of Witshire's Key
+2458,Health Elixir
+2461,Mana Elixir
+2470,Stamina Elixir
+2621,Trade Note (100)
+2622,Trade Note (500)
+2623,Trade Note (1;000)
+2624,Trade Note (5;000)
+2625,Trade Note (10;000)
+2626,Trade Note (50;000)
+2627,Trade Note (100;000)
+3608,A Note from Tibri
+3669,Drudge Charm
+3670,Copper Heart
+3673,Wood Heart
+3678,Olthoi Carapace
+3679,Olthoi Claw
+3680,Olthoi Head
+3693,Banderling Scalp
+3694,Swamp Stone
+3696,Blue Jewel
+3697,Red Jewel
+3698,White Jewel
+3699,Blue Phyntos Wasp Wing
+3700,Gold Phyntos Wasp Wing
+3702,Mire Phyntos Wasp Wing
+3704,Swamp Tooth Arrow
+3705,Spine Axe
+3706,Olthoi Cuirass
+3708,Ash Tooth Dagger
+3709,Ivory Tooth Dart
+3713,Swamp Gem
+3715,Olthoi Helm
+3717,Obsidian Jewel
+3718,Golem Jo
+3719,Golem Mace
+3720,Obsidian Sphere
+3722,Potion of Black Fire
+3724,Olthoi Sword
+3746,Auroch Horn Spear
+3747,Jade Tooth Quarrel
+3933,Dull Gem
+4222,Armoredillo Hide Bracers
+4223,Armoredillo Hide Breastplate
+4224,Armoredillo Hide Coat
+4227,Gromnie Hide Shirt
+4228,Reedshark Hide Greaves
+4229,Reedshark Hide Leggings
+4230,Mattekar Hide Sleeves
+4231,Mattekar Hide Coat
+4612,Tiny Mana Charge
+4614,Moderate Mana Charge
+4615,High Mana Charge
+4616,Great Mana Charge
+4757,Carving Knife
+4792,Celcynd's Ring
+4798,Letter to Celcynd
+4894,Key from Aleval
+5021,Key
+5029,Directions to the Cave of Alabree 
+5049,Beltslora's recommendation letter
+5050,Ercel's recommendation letter
+5058,Te Ven's Key
+5062,Writings
+5125,Letter to Shin Ro
+5134,Iron Key
+5135,Library Key
+5157,Jilsaya's Key
+5159,Hasty Note
+5160,Lazily Scrawled Note
+5168,Congratulations
+5169,Congratulations
+5170,Congratulations
+5171,Congratulations
+5172,Thank You Note
+5173,Thank You Note
+5174,Mara's Healing Pie
+5176,Warm Apple Pie
+5364,Translation
+5614,Golden Key
+5642,A Crabbed Note
+5665,A Letter
+5666,Letter
+5678,Mount Lethe Directions
+5681,The Reign of Alfrega
+5757,Key
+5825,Virindi's Note
+5826,Translated History Book
+5827,Shadow's Note
+5828,Slimy Note
+5829,Dark Note
+5830,Dusty Volume
+5831,Nelvaine's Olde Ispar Stout
+5840,Jourgensson's Letter
+5841,Gwillim's Alchemy Notes
+5842,MacDugal's Key
+5845,Bandit Rune Transcription
+5849,Complete Rune Transcription
+5879,Our Great Work
+5880,An Old Book
+5881,The Book of Minesh
+5882,An Ancient Book
+5883,Gelidite Standing Stone Translation
+5893,Hoary Mattekar Robe
+5894,Fez
+5895,Karwin's Key
+5896,An Old Volume
+5897,Translated History Book
+5903,Gelidite Treasure Key
+5912,Faran Item Master Robe
+5936,Broken Staff
+5939,Slag
+5940,Smelting Pot
+6027,Introduction to Devana
+6028,Devana's Note
+6036,Foundry Key
+6037,Key to Hamud's Chambers
+6055,Cracked Shard
+6056,Small Shard
+6057,Tiny Shard
+6235,Superior Atlan Mace
+6329,Pyreal Bar
+6330,Pyreal Ingot
+6331,Quality Pyreal Ingot
+6353,Pyreal Mote
+6354,Pyreal Nugget
+6355,Pyreal Sliver
+6404,Archival Copy
+6405,Carefully Printed Note
+6406,Atlan's Treatise
+6407,Textbook
+6408,Field Report
+6409,Hastily Scrawled Note
+6410,Imperial Missive
+6411,Elaborate Scroll
+6412,A Journal
+6413,Textbook
+6414,Decree
+6415,Soiled Parchment
+6623,Crystal Fragment
+6624,Shadow Fragment
+6769,The Silifi of the Crimson Stars
+6777,Broken Haft
+6778,Repaired Haft
+6808,Nexus orders
+6876,Sturdy Iron Key
+6878,Hamud's Last Testament
+6886,Gormling's Note
+6887,Oswald's Throwing Dagger
+6893,Miyako's Moonstone
+7039,Fire Auroch Horn
+7044,Great Mattekar Horn
+7076,Shaped Fire Auroch Horn
+7077,Shaped Great Mattekar Horn
+7078,Crossbow Stock
+7239,Yaun Hanzu's Composite Bow Manual
+7299,Diamond Scarab
+7300,Dansha-Ki's Ring
+7316,Dansha-Ki's Gem of Portal Recall
+7374,Trade Note (15;000)
+7376,Trade Note (25;000)
+7377,Trade Note (75;000)
+7378,Smith's Note
+7379,Singed Note
+7380,Sheets of Paper
+7381,Aerfalle's Letter
+7382,Charred Book
+7425,Aerlinthe Record
+7469,Black Fire Atlan Stone
+7509,Scroll of Searing Disc
+7510,Scroll of Horizon's Blades
+7511,Scroll of Cassius' Ring of Fire
+7512,Scroll of Nuhmudira's Spines
+7513,Scroll of Halo of Frost
+7514,Scroll of Eye of the Storm
+7515,Scroll of Tectonic Rifts
+7516,Scroll of Blistering Creeper
+7517,Scroll of Bed of Blades
+7518,Scroll of Slithering Flames
+7519,Scroll of Spike Strafe
+7520,Scroll of Foon-Ki's Glacial Floe
+7521,Scroll of Os' Wall
+7522,Scroll of Hammering Crawler
+7528,Chunk of Low-Grade Chorizite
+7529,Chunk of Medium-Grade Chorizite
+7530,Chunk of High-Grade Chorizite
+7563,Hollow Axe
+7564,Ravenous Axe
+7565,Hollow Dagger
+7566,Ravenous Dagger
+7567,Hollow Katar
+7568,Ravenous Katar
+7569,Hollow Mace
+7570,Ravenous Mace
+7571,Hollow Staff
+7572,Ravenous Staff
+7573,Hollow Spear
+7574,Ravenous Spear
+7575,Hollow Sword
+7576,Ravenous Sword
+7595,Refined Low-Grade Chorizite
+7596,Refined Medium-Grade Chorizite
+7597,Refined High-Grade Chorizite
+7603,White Phyntos Wasp Wing
+7604,Yellow Jewel
+7898,Tattered Note
+7899,Mu-Miyah Note Translation
+7900,Decayed Note
+7901,Dark Revenant Note Translation
+7902,Fleshy Lump
+7905,Shadow Note Translation
+7906,Amorphous Lump
+7909,Shadow Note Translation
+7910,Sandy Note
+7911,Great Skeleton Note Translation
+7914,Pulsing Lump
+7915,Umbris Note Translation
+7916,Complete Dispatch
+7921,Translated Dispatch
+7996,Bundle of Crystal Arrowheads
+8001,Caulnalain Soul Crystal Bow
+8002,Fenmalain Soul Crystal Bow
+8003,Shendolain Soul Crystal Bow
+8025,Caulnalain Soul Crystal Orb
+8026,Fenmalain Soul Crystal Orb
+8027,Shendolain Soul Crystal Orb
+8031,Caulnalain Soul Crystal Shield
+8032,Fenmalain Soul Crystal Shield
+8033,Shendolain Soul Crystal Shield
+8037,Verdalim Plant
+8039,Hennacin Plant
+8041,Berimphur Plant
+8082,Shadow Missive
+8083,Throbbing Lump
+8084,Shadow Dispatch
+8085,Oozing Lump
+8086,Urgent Dispatch
+8087,Urgently Written Note
+8088,Daily Report
+8089,Petulantly Written Note
+8144,Banderling Head
+8148,Banderling Mask
+8149,Drudge Mask
+8150,Mosswart Mask
+8151,Skull Mask
+8152,Tusker Mask
+8153,Virindi Mask
+8154,Broken Virindi Mask
+8204,King's Helm
+8205,Shadow's Garb
+8206,Ogre Mask
+8207,Standing Orders
+8208,Forgotten Text
+8213,Gem of Impulse
+8232,Pumpkin
+8260,Translated Sotiris Note
+8261,Sotiris Obsidian Shard
+8262,Translated Tumideon Note
+8263,Tumideon Obsidian Shard
+8326,Copper Pea
+8327,Gold Pea
+8328,Iron Pea
+8329,Lead Pea
+8330,Pyreal Pea
+8331,Silver Pea
+8360,A Battered Leather Journal
+8361,A Dry Withered Leather Bound Journal
+8363,Mace of the Explorer
+8364,Banderling Mace Head
+8365,Banderling Mace Shaft
+8369,Crystal Nodule
+8378,Beer Stein
+8394,Olthoi Helm
+8398,Poem by Diyas al-Yat
+8399,Kireth Gown with Band
+8425,Idol Gem
+8426,Jungle Phyntos Wasp Wing
+8472,Fine Armoredillo Hide Shirt
+8473,Fine Spine Axe
+8504,Brief Letter
+8505,Damp Scroll
+8506,Campaign Journal
+8507,Heavy Book of Notes
+8508,Translated Letter
+8509,Tear-Stained Parchment
+8581,Sir Martine's Journal
+8613,Rumuba's Jade Spearhead
+8644,Lapyan Plant
+8646,Minalim Plant
+8648,Argenory Plant
+8655,Shreth Hide Gauntlets
+8659,Shreth Hide Pants
+8660,Shreth Hide Shoes
+8661,Ursuin Hide Coat
+8662,Ursuin Hide Girth
+8663,Ursuin Hide Helmet
+8669,Essence Flare
+8671,Essence Flicker
+8676,A Book of Quests for Young Explorers
+8679,A Society Leather Basinet
+8680,An Explorer Leather Basinet
+8681,A Pair Of Society Leather Boots
+8682,A Pair Of Explorer Leather Boots
+8683,A Society Bracelet Of Coordination
+8689,A Society Buckler
+8690,An Explorer Buckler
+8691,A Society Crossbow
+8692,An Explorer Crossbow
+8693,A Society Dagger
+8694,An Explorer Dagger
+8699,A Pair Of Society Leather Leggings
+8700,A Pair Of Explorer Leather Leggings
+8703,A Society Jitte
+8704,An Explorer Jitte
+8705,A Society Necklace Of Focus
+8710,A Pair Of Society Leather Sleeves
+8711,A Pair Of Explorer Leather Sleeves
+8743,A Society Sword
+8744,An Explorer Sword
+8745,Society Wand Of Acid
+8746,Explorer Wand Of Acid
+8747,Society Wand Of Fire
+8748,Explorer Wand Of Fire
+8749,Society Wand Of Frost
+8750,Explorer Wand Of Frost
+8753,A Society Yumi
+8754,An Explorer Yumi
+8777,Skull of Avoren Palacost
+8778,Heart of Shadow
+8779,Fragment of the Singularity
+8780,Dark Singularity
+8782,Sepulcher of the Hopeslayer Portal Gem
+8799,Great Work Staff of the Lightbringer
+8800,Nexus Staff of the Lightbringer
+8801,Fenmalain Staff of the Lightbringer
+8802,Shendolain Staff of the Lightbringer
+8803,Herald's Staff of the Lightbringer
+8804,Great Work Helm of the Lightbringer
+8805,Nexus Helm of the Lightbringer
+8806,Fenmalain Helm of the Lightbringer
+8807,Caulnalain Helm of the Lightbringer
+8808,Shendolain Helm of the Lightbringer
+8809,Herald's Helm of the Lightbringer
+8814,Asheron's Second Missive
+8890,Caulnalain Staff of the Lightbringer
+8896,Furry Mattekar Hide Coat
+8897,Platinum Scarab
+8901,Bandit Cousins' Letter
+8905,Le-Ai Rea's Key
+8973,Al-Arqas Portal Gem
+8976,Holtburg Portal Gem
+8977,Lytelthorpe Portal Gem
+8978,Nanto Portal Gem
+8979,Rithwic Portal Gem
+8980,Samsur Portal Gem
+8981,Shoushi Portal Gem
+8983,Yanshi Portal Gem
+8984,Yaraq Portal Gem
+9007,Bound Book
+9021,Boots of the Vault
+9031,Sasalia's Dress
+9043,Large Pale Crystal
+9044,Small Pale Crystal
+9045,Pale Crystal
+9047,Globe of Auberean
+9062,Permission Slip
+9063,Slip of Paper
+9064,Hieromancer's Orb
+9065,Blue Orb
+9079,A Text Book
+9080,Unreadable Text
+9081,Decoded Untranslated Text
+9092,Lightweight Tome
+9094,Unkindled Thaumaturgic Plate Coat
+9095,Unkindled Thaumaturgic Plate Girth
+9096,Unkindled Thaumaturgic Plate Leggings
+9098,Vial of Organic Acid
+9116,Glowing Virindi Cloak
+9117,Tattered Virindi Cloak
+9118,Puppet Show
+9119,Facilitation
+9120,A Meeting
+9121,Storytelling
+9122,Interlude
+9123,Denouement
+9124,The Beginning
+9125,Virindi Essence
+9128,Torn Mosswart Shroud
+9169,Plush Tusker
+9170,Velveteen Olthoi
+9171,Pack Mosswart
+9172,Pack Drudge
+9174,Pack Lugian
+9176,Pack Grievver
+9177,Pack Scarecrow
+9178,Pack Virindi
+9179,Pack Golem
+9180,Pack Idol
+9191,Gem of Cleansing
+9192,Gem of Purity
+9193,Gem of Stillness
+9194,Scrawled Note
+9195,Scrawled Note
+9196,Edicts of the Singularity
+9229,Treated Healing Kit
+9233,Bloodletter Arrowhead
+9234,Fleshripper Arrowhead
+9235,Soulrender Arrowhead
+9240,Snake Skin Boots
+9241,Ursuin Boots
+9245,Snake Skin Coat
+9246,Ursuin Hide Coat
+9247,Sclavus Skin Helmet
+9289,Directive Key
+9292,Virindi Singularity Key
+9293,Master Key
+9294,Singularity Key
+9324,Obsidian Heart
+9384,Translated Virindi Envoy's Note
+9385,Virindi Envoy's Obsidian Shard
+9393,Mattekar Arm Guard
+9420,Mattekar Claw
+9471,Spear of the Heart
+9472,Sleeves of the Arm
+9473,Staff of the Mind
+9477,Monty's Golden Key
+9478,Arshid's Golden Key
+9479,Gan-Zo's Golden Key
+9511,Golden Gromnie
+9596,Axe of the Quiddity
+9597,Bow of the Quiddity
+9598,Fist of the Quiddity
+9599,Balister of the Quiddity
+9600,Mace of the Quiddity
+9601,Eye of the Quiddity
+9602,Lance of the Quiddity
+9603,Stave of the Quiddity
+9604,Blade of the Quiddity
+9622,Chef's Hat
+9623,Alchemist's Hat
+9624,Fletcher's Cap
+10701,Niffis Shell Helm
+10702,Niffis Shell
+10727,Translated Inculcation Cells Note
+10730,Translated Staging Complex Note
+10758,Clean; Dry Towel
+10791,Dagger of the Quiddity
+10803,Obsidian Shard
+10804,Obsidian Shard
+10805,Obsidian Shard
+10826,Insights into the Unknown
+10827,Edicts of the Quiddity
+10828,Dirrich's Journal
+10841,A Bracelet of Piercing Protection
+10843,Eviscerator Pincer
+10844,Gardener Pincer
+10845,Harvester Pincer
+10846,Legionary Pincer
+10847,Soldier Pincer
+10858,A Ring of Acid Protection
+10864,Olthoi Ichor
+10870,Canescent Mattekar Robe
+10871,Canescent Mattekar Robe
+10876,A Journal by Martine
+10916,Panaq
+10917,Mysterious Tumerok Artifact
+10918,Mysterious Tumerok Artifact
+10919,Mysterious Tumerok Artifact
+10921,Tekapuapuh's Note
+10960,Clay Figurine
+10962,Hea Totem
+10969,Awakener
+10986,Dryreach House Portal
+10987,Holtburg House Portal
+10988,Qalaba'r House Portal
+10989,Stonehold House Portal
+10990,Fort Tethana House Portal
+10994,Crop
+10996,Ebon Spine Harpoon
+11001,Exquisite Elari Wood Bow
+11007,Virindi Scalpel
+11008,The Stave of Palenqual
+11009,The Hoeroa of Palenqual
+11010,The Kalinden of Palenqual
+11019,Pyreal Bell
+11135,Vesayen Style Fried Olthoi Egg
+11136,Fried Olthoi Egg
+11137,Hard Boiled Olthoi Egg
+11139,Pickled Olthoi Egg
+11140,Olthoi Egg
+11144,Clay Totem
+11145,Clay Totem
+11146,Clay Totem
+11147,Clay Totem
+11148,Clay Totem
+11149,Head of the Olthoi Queen
+11150,The Queen's Head
+11232,Timaru Totem
+11233,Carenzi Totem
+11234,Siraluun Totem
+11235,Storm Totem
+11236,Tonk Totem
+11238,Stave of Palenqual
+11239,Hoeroa of Palenqual
+11240,Kalindan of Palenqual
+11327,Wooden Tumerok Figurine
+11328,Tumerok Spear
+11336,Raeta's Necklace
+11339,Carenzi Burrower Pelt
+11340,Carenzi Pouchling Pelt
+11341,Rabid Carenzi Pelt
+11342,Carenzi Sentry Pelt
+11350,Elaniwood Golem Heart
+11351,Mud Golem Heart
+11352,Sand Golem Heart
+11353,Vapor Golem Heart
+11354,Water Golem Heart
+11355,Aun Pendant
+11356,Embroidered Bag
+11357,Embroidered Bag
+11358,Embroidered Bag
+11359,Embroidered Bag
+11360,Embroidered Bag
+11361,Embroidered Bag
+11363,Small Bundle of Kithless Siraluun Feathers
+11366,Littoral Siraluun Claw
+11367,Marsh Siraluun Claw
+11368,Strand Siraluun Claw
+11369,Tidal Siraluun Claw
+11370,Timber Siraluun Claw
+11373,Note from Aun Bernawa to Hea Toneawa
+11374,Note from Hea Toneawa to Aun Mariona
+11454,Totem of Audetaunga
+11455,Totem of Tanae
+11456,Totem of Volkama
+11553,Thananim Plant
+11554,Colban Plant
+11555,Relanim Plant
+11626,Quiddity Ingot
+11683,A Portal-Jumper's Guide to Dereth
+11710,Writ of Refuge
+11823,Aluvian Gem of Worth
+11824,Gharu'ndim Gem of Worth
+11831,Sho Gem of Worth
+11930,Arcane Pedestal
+11931,Dereth Map
+11935,A Horn of Vigilance
+11936,Thorsten's Armor
+11937,Ursuin Rug
+11974,Aun Shimauri's Instructions
+11975,Bachus Flufen's Journal
+11982,Obsidian Axe
+11998,Virindi Inquisitor's Mask
+11999,Broken Virindi Inquisitor Mask
+12019,Robe of the Tundra
+12022,Scroll of Dark Rain
+12136,Bunny Slipper
+12137,White Bunny Slipper
+12140,Translated Asteliary Crafter's Note
+12142,Translated Northern Infiltrator Note
+12144,Translated Southern Infiltrator Note
+12200,Tusker Backpack
+12201,Large Tusker Backpack
+12202,Small Tusker Backpack
+12207,Inviso Mask
+12208,Scarecrow Mask
+12209,Sclavus Mask
+12210,Ursuin Mask
+12211,Zombie Mask
+12212,Pwyll's Crown
+12213,Veil of Darkness
+12214,Koji's Beast
+12217,Flaming Pumpkinhead
+12218,Flaming Skull
+12220,Banderling Wand
+12221,Drudge Wand
+12222,Mosswart Wand
+12223,Skull Wand
+12224,Tusker Wand
+12235,Carenzi Stalker Pelt
+12252,Obsidian Director's Mask
+12256,Sliver of Singular Chorizite
+12257,Sliver of Singular Obsidian
+12258,Sliver of Singular Pyreal
+12261,Ecorto's Chisel
+12270,Singularity Calyx
+12271,Fragment of the New Singularity
+12277,Translated Singular Chorizite Note
+12279,Translated Singular Obsidian Note
+12281,Translated Singular Pyreal Note
+12688,Nuhmudira's Token
+12707,Quartermaster's Workshop Key
+12708,Greeter's Key
+12710,Bellows
+12711,Oil of Rendering
+12739,Training Dirk
+12740,Training Battle Axe
+12741,Training Shortbow
+12742,Training Cestus
+12743,Training Stick
+12744,Training Mace
+12745,Training Trident
+12746,Training Atlatl
+12747,Training Ken
+12748,Training Wand
+12749,Light Training Crossbow
+12750,Academy Dirk
+12751,Academy Battle Axe
+12752,Academy Atlatl
+12753,Academy Cestus
+12754,Academy Shortbow
+12755,Academy Mace
+12756,Academy Trident
+12757,Academy Stick
+12758,Academy Ken
+12759,Academy Wand
+12760,Academy Light Crossbow
+12761,Combat and Spellcasting Guide
+12762,Guide to Healing
+13089,Carpenter Wasp Wing
+13210,Academy Coat
+13211,Academy Coat
+13212,Academy Coat
+13213,Academy Coat
+13214,Academy Coat
+13215,Academy Coat
+13216,Academy Coat
+13217,Academy Coat
+13218,Academy Coat
+13219,Academy Coat
+13225,A Crumpled Note
+14422,Human Husk
+14424,Glass Spherule
+14425,Folded Guard's Uniform
+14439,Sir Rylanan's Letter to Sir Tenshin
+14440,Sir Rylanan's Letter to Sir Tenshin
+14441,Sir Tenshin's Letter to Dame Tsaya
+14442,Sir Tenshin's Letter to Dame Tsaya
+14443,Dame Tsaya's Letter to Sir Rylanan
+14444,Dame Tsaya's Letter to Sir Rylanan
+14445,A Cryptic Note
+14446,A Folded Note
+14447,An Unsigned Message
+14452,Elysa's Favor
+14485,Elysa's Favor
+14486,Elysa's Favor
+14487,Elysa's Favor
+14530,Craftable Prism Fragment of Acid
+14531,Craftable Prism Fragment of Fire
+14532,Craftable Prism Fragment of Ice
+14533,Craftable Prism Fragment of Lightning
+14551,Tanning Oil
+14567,Burning Akiekie Ember
+14568,Buadren
+14774,Peppermint Pumpkin Pie
+14789,Ginger
+14795,Nutmeg
+14899,Symbol of Commitment
+14900,Symbol of Friendship
+14901,Symbol of Honor
+14902,Symbol of Love
+14918,Emblem of Marriage
+14919,Promise Gem
+14920,Wedding Ring
+14932,Crimped Hat
+15437,Deadly Frost Arrow
+15715,Sunflower
+15740,Elixir of Spring
+15741,Elixir of Preservation
+15742,Elixir of Misty Form
+15743,Elixir of Nimbleness
+15744,Elixir of Vigor
+15745,Elixir of Summer
+15746,Elixir of the Single Mind
+15747,Elixir of Winter
+15748,Elixir of Autumn
+15749,Elixir of Plasmic Being
+15751,Elixir of Speed
+15752,Elixir of Crystal Skin
+15753,Elixir of Might
+15754,Elixir of Resolve
+15796,Tome of the Elements
+15798,Mana and the Elements
+15800,Elysa Strathelar's Letter to Lania Cartoth
+15801,A Letter of Correspondence
+15802,A Letter of Correspondence
+15803,A faithful copy of Elysa Strathelar's Letter to Lania Cartoth.
+15806,A Certificate of Permission
+15813,A Bronze Key
+15817,Wax
+15822,Cragstone's Axe
+15855,Gelidite Dais
+15861,Nuhmudira's Charm
+15866,Bronze Cragstone's Shield
+15867,Bronze Large Kite Shield
+15868,Bronze Round Shield
+15869,Bronze Tower Shield
+15882,Bronze Atlatl
+15883,Bronze Battle Axe
+15884,Cragstone's Axe
+15885,Bronze Quintessence Sickle
+15886,Bronze Longbow
+15887,Bronze Cestus
+15888,Bronze Heavy Crossbow
+15889,Bronze Dagger
+15890,Bronze Morning Star
+15891,Bronze Quarter Staff
+15892,Zharalim Simi
+15893,Bronze Spear
+15894,Bronze Long Sword
+15895,Bronze Short Sword
+15896,Ben Ten's Tachi
+16904,A List of Raiding Creatures
+16920,Flag
+16922,Spool of Silk
+19211,Bronze Coil from a Statue
+19218,Bronze Gear from a Statue
+19220,Oxidized Statue
+19222,Oxidized Statue
+19224,Oxidized Statue
+19226,Oxidized Statue 
+19228,Oxidized Statue
+19230,Oxidized Statue
+19232,Oxidized Statue
+19234,Oxidized Statue 
+19236,Oxidized Statue 
+19238,Oxidized Statue 
+19240,Oxidized Statue 
+19242,Oxidized Statue 
+19244,Oxidized Statue 
+19246,Oxidized Statue 
+19248,Oxidized Statue
+19254,Bronze Spring from a Statue
+19353,Etheric Seal
+19478,Sharp Tusker Slave Tusk
+19479,The Boon
+19480,Crafting the Horn of Vigilance
+19483,Decanter of Essence
+19728,Unique Bronze Coil from a Native Cast
+19729,Unique Bronze Coil from a Native Cast
+19730,Unique Bronze Coil from a Native Cast
+19731,Unique Bronze Coil from a Native Cast
+19732,Unique Bronze Coil from a Native Cast
+19733,Unique Bronze Coil from a Native Cast
+19734,Unique Bronze Gear from a Native Cast
+19735,Unique Bronze Gear from a Native Cast
+19736,Unique Bronze Gear from a Native Cast
+19737,Unique Bronze Gear from a Native Cast
+19738,Commemorative Bronze Statue
+19739,Commemorative Bronze Statue
+19740,Commemorative Bronze Statue
+19741,Commemorative Bronze Statue
+19742,Commemorative Bronze Statue
+19743,Commemorative Bronze Statue
+19744,Commemorative Bronze Statue
+19745,Commemorative Bronze Statue
+19746,Commemorative Bronze Statue 
+19747,Commemorative Bronze Statue 
+19748,Commemorative Bronze Statue
+19749,Commemorative Bronze Statue 
+19750,Commemorative Bronze Statue
+19751,Commemorative Bronze Statue 
+19752,Commemorative Bronze Statue
+19753,Commemorative Bronze Statue
+19754,Commemorative Bronze Statue 
+19755,Unique Bronze Nuts and Bolts from a Native Cast
+19756,Unique Bronze Nuts and Bolts from a Native Cast
+19757,Unique Bronze Nuts and Bolts from a Native Cast
+19758,Unique Bronze Spring from a Native Cast
+19759,Unique Bronze Spring from a Native Cast
+19760,Unique Bronze Spring from a Native Cast
+19761,Unique Bronze Spring from a Native Cast
+20014,Isparian Arms
+20015,Treatise on Essence
+20016,Silk
+20019,Portal Gem to the Callous Heart
+20020,Kai's Reward Gem
+20133,Superb Isparian Crossbow
+20185,Imaging Crystal
+20197,Unframed map of Dereth
+20228,Slithe Tradittor's Notes
+20627,Parts List for Arcane Pedestal
+20628,Trade Note (150;000)
+20629,Trade Note (200;000)
+20630,Trade Note (250;000)
+20910,Gaerlan's Key
+20955,Gaerlan's Diary
+20957,Gaerlan's Field Reports
+20961,Josef's Wish List
+21344,Chorizite Fletching Tool
+21374,Elemental Master Robe
+21375,Elemental Master Robe
+21377,Dauloirae
+21378,Seal Fragment
+21395,Taulandoi
+21396,Saulandoi
+21434,Iasparailaun
+21436,Disciples of Corrosion
+21437,Ebuillant Tome
+21438,Disciples of Strife
+21439,Fiery Tome
+21440,Disciples of Stasis
+21441,Icy Tome
+21442,Disciples of Tempest
+21443,Charged Tome
+21444,Gaerlan's Research Notes
+21445,Leather Bound Tome
+21446,Decrepit Tome
+21447,Decrepit Tome
+21531,Imbued Pyreal Nugget
+21910,Taulandoi
+21911,Taulandoi
+21912,Taulandoi
+21913,Raudaloi
+21920,Ornate Seal
+21960,Hollow Atlatl
+21961,Hollow Bow
+21962,Hollow Crossbow
+21963,Phantom Atlatl
+21964,Phantom Bow
+21965,Phantom Crossbow
+22014,Virindi Profatrix Mask
+22015,Pwyll's Guard
+22016,Shroud of Night
+22017,Koji's Fiend
+22018,Mu-miyah Guise
+22019,Sclavus Guise
+22020,Skeletal Guise
+22021,Undead Guise
+22022,Banderling Mask
+22023,Mosswart Mask
+22024,Full Mu-miyah Guise
+22078,Scroll of Mount Lethe Recall
+22087,Portal Chamber Key
+22091,Journal of Frest Greelving
+22092,Chronicle of Archeological Site Celadon
+22093,An Old Chronicle
+22099,Royal Coat of Arms Stamp
+22117,Evil Couch
+22256,Fishing Pole
+22315,Alchemy Gem of Forgetfulness
+22316,Arcane Lore Gem of Forgetfulness
+22317,Armor Tinkering Gem of Forgetfulness
+22318,Light Weapons Gem of Forgetfulness
+22319,Missile Weapons Gem of Forgetfulness
+22320,Cooking Gem of Forgetfulness
+22321,Assess Creature Gem of Forgetfulness
+22322,Creature Enchantment Gem of Forgetfulness
+22324,Finesse Weapons Gem of Forgetfulness
+22325,Deception Gem of Forgetfulness
+22326,Fletching Gem of Forgetfulness
+22327,Healing Gem of Forgetfulness
+22328,Item Tinkering Gem of Forgetfulness
+22329,Item Enchantment Gem of Forgetfulness
+22330,Jump Gem of Forgetfulness
+22331,Leadership Gem of Forgetfulness
+22332,Life Magic Gem of Forgetfulness
+22333,Lockpick Gem of Forgetfulness
+22334,Loyalty Gem of Forgetfulness
+22336,Magic Defense Gem of Forgetfulness
+22337,Magic Item Tinkering Gem of Forgetfulness
+22338,Mana Conversion Gem of Forgetfulness
+22339,Melee Defense Gem of Forgetfulness
+22340,Missile Defense Gem of Forgetfulness
+22341,Assess Person Gem of Forgetfulness
+22342,Run Gem of Forgetfulness
+22345,Heavy Weapons Gem of Forgetfulness
+22348,War Magic Gem of Forgetfulness
+22349,Weapon Tinkering Gem of Forgetfulness
+22350,Alchemy Gem of Enlightenment
+22351,Arcane Lore Gem of Enlightenment
+22352,Armor Tinkering Gem of Enlightenment
+22353,Light Weapons Gem of Enlightenment
+22354,Missile Weapons Gem of Enlightenment
+22355,Cooking Gem of Enlightenment
+22356,Assess Creature Gem of Enlightenment
+22357,Creature Enchantment Gem of Enlightenment
+22359,Finesse Weapons Gem of Enlightenment
+22360,Deception Gem of Enlightenment
+22361,Fletching Gem of Enlightenment
+22362,Healing Gem of Enlightenment
+22363,Item Tinkering Gem of Enlightenment
+22364,Item Enchantment Gem of Enlightenment
+22365,Jump Gem of Enlightenment
+22366,Leadership Gem of Enlightenment
+22367,Life Magic Gem of Enlightenment
+22368,Lockpick Gem of Enlightenment
+22369,Loyalty Gem of Enlightenment
+22371,Magic Defense Gem of Enlightenment
+22372,Magic Item Tinkering Gem of Enlightenment
+22373,Mana Conversion Gem of Enlightenment
+22374,Melee Defense Gem of Enlightenment
+22375,Missile Defense Gem of Enlightenment
+22376,Assess Person Gem of Enlightenment
+22377,Run Gem of Enlightenment
+22380,Heavy Weapons Gem of Enlightenment
+22383,War Magic Gem of Enlightenment
+22384,Weapon Tinkering Gem of Enlightenment
+22445,Soft Bandages
+22447,Treated Hyssop
+22448,Treated Mandrake
+22449,Plentiful Healing Kit
+22450,Blue Ball
+22451,Green Ball
+22452,Red Ball
+22453,Yellow Ball
+22455,Fabled Tusker Paw
+22456,Fabled Tusker Paw
+22457,Fabled Tusker Paw
+22557,Magic Defense Tattoo
+22558,Mana Conversion Tattoo
+22559,Melee Defense Tattoo
+22560,Missile Defense Tattoo
+22578,Bunch of Nanners
+22729,Aphus Lassel Portal Gem
+22763,The Temple of Enlightenment
+22764,The Temple of Forgetfulness
+22837,Snowflower
+22851,Snowman Snowglobe
+22863,Ulgrim's Recall Scroll
+22873,Holiday Lights
+22884,Neydisa Hauberk
+22889,Iolite Gem
+22937,Gem of Lowering Coordination
+22938,Gem of Lowering Endurance
+22939,Gem of Lowering Focus
+22940,Gem of Lowering Quickness
+22941,Gem of Lowering Self
+22942,Gem of Lowering Strength
+22943,Gem of Raising Coordination
+22944,Gem of Raising Endurance
+22945,Gem of Raising Focus
+22946,Gem of Raising Quickness
+22947,Gem of Raising Self
+22948,Gem of Raising Strength
+22949,A Note From Ciandra
+22951,Plate Armoredillo Spine
+23030,Notes on the Silifi
+23094,Granite Key
+23097,Swarthy Mattekar Robe
+23107,Mangled Dark Key
+23108,Twisted Dark Key
+23110,Energy Source
+23112,Failure
+23114,Destructions and Beginnings
+23116,Personal Research Notes: Tuskers
+23118,Research Notes: Mattekar
+23120,Research Notes: Mosswart
+23122,Parallax Auguries
+23124,Research Notes: "Children of Darkness"
+23194,Sturdy Iron Keyring
+23202,Platinum Golem Heart
+23203,Pyreal Golem Heart
+23206,Old Boot
+23209,Skeleton
+23210,Trunk of Bones
+23259,Aqua Guppy
+23260,Black Guppy
+23261,Blue Guppy
+23262,Brown Guppy
+23263,Gold Guppy
+23264,Green Guppy
+23265,Orange Guppy
+23266,Pink Guppy
+23267,Purple Guppy
+23268,Red Guppy
+23269,Silver Guppy
+23271,White Guppy
+23272,Aqua Minnow
+23273,Black Minnow
+23274,Blue Minnow
+23275,Brown Minnow
+23276,Yellow Minnow
+23277,Green Minnow
+23278,Orange Minnow
+23279,Pink Minnow
+23280,Purple Minnow
+23281,Red Minnow
+23282,Silver Minnow
+23283,White Minnow
+23284,Aqua Molly
+23285,Black Molly
+23286,Blue Molly
+23287,Brown Molly
+23288,Gold Molly
+23289,Green Molly
+23290,Orange Molly
+23291,Pink Molly
+23292,Purple Molly
+23293,Red Molly
+23294,Silver Molly
+23295,White Molly
+23307,Ball of Gunk
+23315,Rusted Medalion
+23319,Rusted Battle Axe
+23320,Rusted Dirk
+23321,Rusted Mace
+23322,Rusted Nekode
+23323,Rusted Shouken
+23324,Rusted Tachi
+23325,Rusted Trident
+23352,Spear of the Given Heart
+23353,Journal of Tamian Wilmot
+23361,Chorizite Formula
+23369,Notes on Chorizite Distillation
+23467,Fish Title Token
+23468,Large Fish Title Token
+23470,Guppy Title Token
+23471,Minnow Title Token
+23472,Molly Title Token
+23477,Fishing Made Easy
+23526,Oswald's Dagger
+23527,Mi Krau-Li's Improved Jitte
+23528,Hamud's Pyreal Katar
+23533,Siraluun Matihao
+23535,Obsidian Axe
+23543,Atlatl of the Quiddity
+23545,A Society Atlatl
+23546,An Explorer Atlatl
+23547,Fang Mace
+23622,Pyreal Bell
+23626,Falcon Banner
+23627,Gromnie Banner
+23628,Mask Banner
+23629,Serpent Banner
+23630,Shreth Banner
+23774,Casting Stein
+23776,Reedshark Banner
+23849,Scored Shard
+23850,Brilliant Shard
+23851,Solid Shard
+23852,Plated Shard
+23853,Seared Shard
+23854,Chilled Shard
+23856,Hardened Shard
+23890,Assault Orb
+23903,Special Gromnie Token
+23904,Special Mask Token
+23905,Special Reedshark Token
+23906,Special Shreth Token
+23907,Assault Atlatl
+23908,Assault Axe
+23909,Assault Bow
+23910,Assault Cestus
+23911,Assault Crossbow
+23912,Assault Dirk
+23913,Assault Mace
+23914,Assault Spear
+23915,Assault Staff
+23916,Assault Sword
+23991,Knorr Portal Gem
+23992,Seat of Knorr Portal Gem
+24051,Attenuated Awakener
+24056,Darker Heart
+24099,Dagger of Frozen Fury
+24100,Sword of Frozen Fury
+24101,Quiddity commands
+24102,A Note from Aerbax
+24105,A Tale of Paths
+24106,The Departure of Aurlanaa
+24108,Theories of Ezheret
+24110,Personal Entry; Arrival of Kellin's Troops
+24112,Delacim's Death
+24114,Olthoi at Knorr
+24116,Order of Perfect Light
+24118,Prophecies
+24120,Pets of Ispar
+24122,We; the Defenders of the Helm
+24124,Letter to Asheron
+24125,Well Drawn Letter
+24127,Minnow Title Token
+24141,Sweet Smelling Bark
+24145,Wooden Tablet
+24152,Oswald's Key
+24179,Heart of the Innocent
+24194,Letter to Ro Bi-Jor
+24208,Candeth Keep Stamp
+24225,Grub Bite
+24238,Olthoi Atlatl
+24239,Acid Olthoi Axe
+24240,Olthoi Acid Katar
+24241,Olthoi Spear
+24259,A Note from a Scout
+24454,Artificer's Gauntlets
+24455,Missile Specialist's Gauntlets
+24456,Missile Specialist's Gauntlets
+24457,Enchanter's Gauntlets
+24458,Light Weapons Specialist's Gauntlets
+24459,Hieromancer's Gauntlets
+24460,Finesse Weapons Specialist's Gauntlets
+24461,Life Giver's Gauntlets
+24462,Light Weapons Specialist's Gauntlets
+24463,Opal Gauntlets
+24464,Light Weapons Specialist's Gauntlets
+24465,Light Weapons Specialist's Gauntlets
+24466,Light Weapons Specialist's Gauntlets
+24467,Sunstone Gauntlets
+24468,Heavy Weapons Specialist's Gauntlets
+24469,Missile Specialist's Gauntlets
+24474,Harker's Orders
+24477,Sturdy Steel Key
+24614,Instructions
+24855,The New Alchemy
+24870,Experimentation
+24871,Natural Order
+24879,Virindi Profatrix Mask
+24887,Sturdy Steel Keyring
+25313,Walking Boots
+25335,Virindi Consul Mask
+25336,Alfric's Bull
+25337,The Poet's Mask
+25338,Koji's Visage
+25350,Living Tome
+25371,Bracelet of Dark Essence
+25373,Energy Crystal
+25405,Unknown Script
+25407,Poison
+25408,Explorer Title Token
+25428,Blue Vellum Binder
+25429,Untranslated Page #2
+25430,Untranslated Page #3
+25431,Untranslated Page #4
+25432,Untranslated Page #5
+25433,Untranslated Page #6
+25434,Untranslated Page #7
+25435,Untranslated Page #8
+25436,Untranslated Page #9
+25437,Untranslated Page #10
+25438,Untranslated Page #11
+25439,Untranslated Page #12
+25440,Untranslated Page #13
+25441,Untranslated Page #14
+25442,Untranslated Page #15
+25443,Untranslated Page #16
+25444,Untranslated Page #17
+25445,Untranslated Page #18
+25446,Untranslated Page #19
+25447,Untranslated Page #20
+25448,Missing Mechanisms
+25449,Alloy Machine
+25466,Cydna Wren's Portal Gem
+25468,Royal Olthoi Jelly
+25477,Renegade Pendant
+25478,Crystal Ring of Protection
+25479,Crystal Ring of Quickness
+25480,Whispering Venom Crystal Ring
+25481,Scintillating Crystal Ring
+25501,Renegade Mace
+25503,Cydna Wren's Journal
+25522,Skull Cap
+25523,Rendeath Coat
+25524,Armoredillo Hide Cuirass
+25526,Skeletal Helm
+25527,Gauloth Leggings
+25528,Hearty Reedshark Robe
+25529,Sturdy Reedshark Robe
+25530,Banderling Aggressor Backpack
+25531,Banderling Predator Backpack
+25532,Banderling Slayer Backpack
+25533,Banderling Antagonist Backpack
+25534,Tremendous Monouga Pack Doll
+25535,Aggressor Token
+25536,Antagonist Token
+25537,Predator Token
+25538,Slayer Token
+25539,Bloodletter Charm Necklace
+25540,Cabalist Charm Necklace
+25541,Peerless Drudge Charm Necklace
+25542,Banderling Bone Ring
+25543,Potion of Destiny's Wind
+25544,Potion of Endless Vigor
+25545,Dastardly Dirk
+25546,Bludgeoning Sword
+25553,Chicken Hat
+25554,Knath Head
+25555,Moarsman Mask
+25556,Scary Minion Mask
+25559,Hollow Minion's Face
+25576,The Mirror
+25583,Polestar
+25590,Staff of Coercion
+25592,A Poorly Translated Journal
+25607,Acidic Weeping Axe
+25608,Electric Weeping Axe
+25609,Flaming Weeping Axe
+25610,Frozen Weeping Axe
+25611,Acidic Weeping Claw
+25612,Electric Weeping Claw
+25613,Flaming Weeping Claw
+25614,Frozen Weeping Claw
+25615,Acidic Weeping Dagger
+25616,Electric Weeping Dagger
+25617,Flaming Weeping Dagger
+25618,Frozen Weeping Dagger
+25619,Acidic Weeping Mace
+25620,Electric Weeping Mace
+25621,Flaming Weeping Mace
+25622,Frozen Weeping Mace
+25623,Acidic Weeping Spear
+25624,Electric Weeping Spear
+25625,Flaming Weeping Spear
+25626,Frozen Weeping Spear
+25627,Acidic Weeping Staff
+25628,Electric Weeping Staff
+25629,Flaming Weeping Staff
+25630,Frozen Weeping Staff
+25631,Acidic Weeping Sword
+25632,Electric Weeping Sword
+25633,Flaming Weeping Sword
+25634,Frozen Weeping Sword
+25690,Missive to the World Shaper
+25692,Second Missive to the World Shaper
+25694,Third Missive to the World Shaper
+25696,Fourth Missive to the World Shaper
+25698,Fifth Missive to the World Shaper
+25701,Sleek Dress
+25703,Dapper Suit
+25705,Portal Gem
+25707,Gumshoe Token
+25708,Clean Towel
+25710,Gate Key
+25728,Confession
+25730,Banyan Talisman
+25731,An Explorer Bracelet Of Coordination
+25733,An Explorer Necklace Of Focus
+25736,Nexus Town Information Guide
+25752,Odd Scroll Case
+25781,Snow Pie
+25782,Ice Box
+25783,Snowflake
+25784,Honorary Snowman Token
+25787,Ice Badge
+25799,Carrot Dagger
+25800,Deadly Iceball
+25801,Huge Snowball
+25813,Brazier of Power
+25814,Crystals of Grace
+25815,Blue Armor Paint
+25816,Violet Armor Paint
+25817,Red Armor Paint
+25821,Rock of Splendor
+25822,Pure Water
+25839,Doomshark Hide Coat
+25840,Snarl's Jerkin
+25841,Scourge's Hide Leggings
+25842,Plaguefang's Robe
+25843,Nefane Shield
+25905,Needletooth
+25906,Mace of Dissonance
+25941,Unicorn's Grace
+25943,Firebird's Splendor
+25952,Homecoming Pennant
+25953,Cowl of the Sand
+25971,Periapt of Endless Sight
+25972,Skeleton Key
+25973,Shagraka
+26483,Directions to Nen Ai's House
+26487,Directions to the Shreth Hive
+26490,Bulletin
+26497,Invoker
+26498,Crown of Anointed Blood
+26499,Crown of Anointed Blood
+26500,Crown of Anointed Blood
+26501,Ancient Armored Vestment
+26502,Ancient Armored Vestment
+26503,Ancient Armored Vestment
+26504,Sacrificial Bones
+26505,Gem of Appeasement
+26506,Offering Plate
+26511,Satchel
+26530,Ixir's Staff of Eyes
+26531,Ixir's Staff of Eyes
+26532,Ixir's Staff of Eyes
+26588,Portal to Kivik Lir's Temple
+26590,Crimson Brace of Pain
+26591,Crimson Brace of Pain
+26592,Crimson Brace of Pain
+26593,Sickle of Writhing Fury
+26594,Sickle of Writhing Fury
+26595,Sickle of Writhing Fury
+26596,Lance of the Bloodletter
+26597,Lance of the Bloodletter
+26598,Lance of the Bloodletter
+26599,Esorcelled Falchion
+26600,Esorcelled Falchion
+26601,Esorcelled Falchion
+26645,Heart of the Temple
+26659,Ibrexi Jikti's Journal
+26661,The Last Expedition of Ixir Zi
+26663,Jexki Ki's Journal
+26665,Kixkti Xri's Journal
+27087,Bastion of Tukal
+27088,Helm of the Crag
+27089,Crest of Kings
+27094,Scepter of Might
+27105,Elysa's Bangle
+27106,Elysa's Bangle
+27107,Elysa's Wristlet
+27108,Elysa's Wristlet
+27109,Elysa's Pendant
+27110,Elysa's Pendant
+27111,Elysa's Band
+27112,Elysa's Band
+27113,Elysa's Boon
+27114,Elysa's Boon
+27115,Elysa's Wondrous Orb
+27116,Elysa's Wondrous Orb
+27119,Morgluuk's Orders
+27120,Torgluuk's Orders
+27128,Ancient Armored Bracers
+27129,Ancient Armored Bracers
+27130,Ancient Armored Bracers
+27175,Bladed Bow of Impaling
+27176,Bladed Bow of Impaling
+27177,Bladed Bow of Impaling
+27178,Bladed Bow of Impaling
+27179,Vile Scourge
+27180,Vile Scourge
+27181,Vile Scourge
+27182,Vile Scourge
+27183,Fist of Massacre
+27184,Fist of Massacre
+27185,Fist of Massacre
+27186,Fist of Massacre
+27187,Vein-Thirst Kukri
+27188,Vein-Thirst Kukri
+27189,Vein-Thirst Kukri
+27190,Vein-Thirst Kukri
+27191,Scroll of Lesser Alacrity of the Conclave
+27192,Scroll of Alacrity of the Conclave
+27193,Scroll of Greater Alacrity of the Conclave
+27194,Scroll of Superior Alacrity of the Conclave
+27195,Scroll of Lesser Vivify the Conclave
+27196,Scroll of Vivify the Conclave
+27197,Scroll of Greater Vivify the Conclave
+27198,Scroll of Superior Vivify the Conclave
+27199,Scroll of Lesser Acument of the Conclave
+27200,Scroll of Acument of the Conclave
+27201,Scroll of Greater Acument of the Conclave
+27202,Scroll of Superior Acumen of the Conclave
+27203,Scroll of Lesser Speed the Conclave
+27204,Scroll of Speed the Conclave
+27205,Scroll of Greater Speed the Conclave
+27206,Scroll of Superior Speed the Conclave
+27207,Scroll of Lesser Volition of the Conclave
+27208,Scroll of Volition of the Conclave
+27209,Scroll of Greater Volition of the Conclave
+27210,Scroll of Superior Volition of the Conclave
+27211,Scroll of Lesser Empowering the Conclave
+27212,Scroll of Empowering the Conclave
+27213,Scroll of Greater Empowering the Conclave
+27214,Scroll of Superior Empowering the Conclave
+27250,Realaidain Raiment
+27252,Lugian Scout Report
+27256,Burning Coal
+27257,Coral Fragment
+27258,Platinum Spirits
+27259,Priceless Ore
+27260,Tasty Pudding
+27261,Refreshing Water
+27269,Tracker Title Token
+27270,Artic Adventurer Title Token
+27271,Honorary Windreave Title Token
+27273,Mudslinger Title Token
+27274,Platinum Prowler Title Token
+27279,Tahuirea's Key
+27300,Yaja's Reach
+27315,Dirty scrap of paper
+27316,Staff of the Painbringer
+27318,Health Philtre
+27320,Health Tonic
+27321,Mana Philtre
+27323,Mana Tonic
+27325,Stamina Philtre
+27327,Stamina Tonic
+27329,Massive Mana Charge
+27436,Philanthropist Title Token
+27437,Dark Monolith
+27444,Serpent Ring
+27464,Candeth Keep Blueprints
+27474,Lugian-Forged Key
+27484,Orders to Contact the Burun
+27485,Fortress Construction
+27486,Aerbax's Valley
+27512,Nanner Island Portal Gem
+27525,Burun Idol
+27527,Mosswart Mourning Stone
+27529,Mosswart Thanking Stone
+27531,Diplomat Token
+27577,Glittering Bracelet of Acid Protection
+27578,Sublime Bracelet of Acid Protection
+27579,Glittering Necklace of Acid and Piercing Protection
+27580,Sublime Necklace of Acid and Piercing Protection
+27581,Ring of Piercing Protection
+27582,Sublime Ring of Piercing Protection
+27592,Ebon Spine Harpoon
+27593,Sharpened Virindi Scalpel
+27594,Sublime Elari Wood Bow
+27648,Head of the Homunculus
+27671,Renegade Herbal Kit
+27704,A Message from Morgluuk
+27749,Barbed Crop
+27750,Expired Health Draught
+27751,Expired Health Potion
+27752,Expired Health Tincture
+27753,Expired Mana Draught
+27754,Expired Mana Potion
+27755,Expired Mana Tincture
+27756,Expired Stamina Draught
+27757,Expired Stamina Potion
+27758,Expired Stamina Tincture
+27763,Onyx Cutting Tool
+27773,Adjanite Mana Stone
+27782,Origin of the Moar
+27784,History of the Moars on Dereth; Part II
+27786,Hunting Habits of the Moars
+27788,History of the Moars on Dereth; Part I
+27790,Eating Habits of the Moars
+27794,Woven Assailer Fur
+27795,Fetish of the Dark Idols
+27797,Vial of Black Blood
+27804,Warding Ring
+27811,A Soggy Note
+27815,Ultimate Singularity Atlatl
+27816,Singularity Atlatl
+27817,Bound Singularity Atlatl
+27818,Ultimate Singularity Axe
+27819,Singularity Axe
+27820,Bound Singularity Axe
+27821,Ultimate Singularity Bow
+27822,Singularity Bow
+27823,Bound Singularity Bow
+27824,Ultimate Singularity Crossbow
+27825,Singularity Crossbow
+27826,Bound Singularity Crossbow
+27827,Ultimate Singularity Dagger
+27828,Singularity Dagger
+27829,Bound Singularity Dagger
+27830,Ultimate Singularity Katar
+27831,Singularity Katar
+27832,Bound Singularity Katar
+27833,Ultimate Singularity Mace
+27834,Singularity Mace
+27835,Bound Singularity Mace
+27836,Singularity Scepter of Life Magic
+27837,Bound Singularity Scepter of Life Magic
+27838,Ultimate Singularity Scepter of Life Magic
+27839,Ultimate Singularity Scepter of War Magic
+27840,Singularity Scepter of War Magic
+27841,Bound Singularity Scepter of War Magic
+27842,Ultimate Singularity Spear
+27843,Singularity Spear
+27844,Bound Singularity Spear
+27845,Ultimate Singularity Staff
+27846,Singularity Staff
+27847,Bound Singularity Staff
+27848,Ultimate Singularity Sword
+27849,Singularity Sword
+27850,Bound Singularity Sword
+27888,Mire Witch's Loincloth
+27889,Swamp Lord's War Paint
+27894,Mosswart Thanking Stone
+27895,Leerargh's Necklace
+27898,The Eye of Drageerg
+27906,Vagurat's Hand
+27907,Kreerg's Spear
+27908,Interview with the Mosswart
+27909,Ancient Armored Long Boots
+27910,Ancient Armored Long Boots
+27911,Ancient Armored Long Boots
+27912,Ancient Armored Gauntlets
+27913,Ancient Armored Gauntlets
+27914,Ancient Armored Gauntlets
+27932,Portal to Izji Qo's Temple
+27933,A Carved Mosswart Statue
+27972,Biting Ballistae
+27973,Biting Ballistae
+27974,Biting Ballistae
+27975,Razorbound Flange
+27976,Razorbound Flange
+27977,Razorbound Flange
+28067,Superior Ashbane
+28068,Guardian's Uniform
+28069,Aphus Sun Guard
+28070,Silken Wrap
+28071,Aphus Wading Pants
+28072,Aphus Lounging Shirt
+28074,Clasp of the Heart
+28075,Clasp of the Arm
+28076,Mages Loop
+28077,Ring of Enhancement
+28078,Ring of Enchantment
+28082,Scroll of Lesser Warden of the Clutch
+28083,Scroll of Inferior Warden of the Clutch
+28084,Scroll of Warden of the Clutch
+28085,Scroll of Potent Warden of the Clutch
+28086,Scroll of Lesser Guardian of the Clutch
+28087,Scroll of Inferior Guardian of the Clutch
+28088,Scroll of Guardian of the Clutch
+28089,Scroll of Potent Guardian of the Clutch
+28090,Scroll of Lesser Sanctifier of the Clutch
+28091,Scroll of Inferior Sanctifier of the Clutch
+28092,Scroll of Sanctifier of the Clutch
+28093,Scroll of Potent Sanctifier of the Clutch
+28111,Of the Burun
+28112,Note to Torgluuk
+28115,Note to Morgluuk
+28142,Gromnie Hide Boots
+28143,Ruddy Winged Boots
+28144,Gromnie Hide Amuli Coat
+28145,Heavy Gromnie Hide Coat
+28146,Gromnie Hide Coat
+28147,Dusky Winged Coat
+28148,Gromnie Hide Gauntlets
+28149,Gromnie Hide Helmet
+28150,Turquoise Winged Helmet
+28151,Gromnie Hide Amuli Leggings
+28152,Heavy Gromnie Hide Leggings
+28153,Lustrous Winged Leggings
+28162,Gromnie Hide Leggings
+28211,Ash Gromnie Wings
+28212,Azure Gromnie Wings
+28213,Ivory Gromnie Wings
+28215,Brass Knuckles
+28216,Copper Cutlass
+28217,Azure Tooth Atlatl Dart
+28218,Sable Tooth Dirk
+28219,Ebon Tooth Katar
+28220,Ruddy Tooth Spiketail
+28256,Canescent Mattekar Robe
+28257,Canescent Mattekar Robe
+28283,Scroll of Lesser Corrosive Ward
+28284,Scroll of Corrosive Ward
+28285,Scroll of Greater Corrosive Ward
+28286,Scroll of Superior Corrosive Ward
+28287,Scroll of Lesser Scythe Ward
+28288,Scroll of Scythe Ward
+28289,Scroll of Greater Scythe Ward
+28290,Scroll of Superior Scythe Ward
+28291,Scroll of Lesser Flange Ward
+28292,Scroll of Flange Ward
+28293,Scroll of Greater Flange Ward
+28294,Scroll of Superior Flange Ward
+28295,Scroll of Lesser Frore Ward
+28296,Scroll of Frore Ward
+28297,Scroll of Greater Frore Ward
+28298,Scroll of Superior Frore Ward
+28299,Scroll of Lesser Inferno Ward
+28300,Scroll of Inferno Ward
+28301,Scroll of Greater Inferno Ward
+28302,Scroll of Superior Inferno Ward
+28303,Scroll of Lesser Voltaic Ward
+28304,Scroll of Voltaic Ward
+28305,Scroll of Greater Voltaic Ward
+28306,Scroll of Superior Voltaic Ward
+28307,Scroll of Lesser Lance Ward
+28308,Scroll of Lance Ward
+28309,Scroll of Greater Lance Ward
+28310,Scroll of Superior Lance Ward
+28321,Caulnalain Crystal Shield
+28322,Fenmalain Crystal Shield
+28323,Shendolain Crystal Shield
+28324,Caulnalain Crystal Orb
+28325,Fenmalain Crystal Orb
+28326,Shendolain Crystal Orb
+28327,Caulnalain Crystal Atlatl
+28328,Fenmalain Crystal Atlatl
+28329,Shendolain Crystal Atlatl
+28330,Caulnalain Crystal Bow
+28331,Fenmalain Crystal Bow
+28332,Shendolain Crystal Bow
+28333,Caulnalain Crystal Crossbow
+28334,Fenmalain Crystal Crossbow
+28335,Shendolain Crystal Crossbow
+28337,Ancient Armored Leggings
+28338,Ancient Armored Leggings
+28339,Ancient Armored Leggings
+28345,Brittle Bone
+28374,Empty Satchel
+28393,Manacle of Biting Pain
+28394,Manacle of Biting Pain
+28395,Manacle of Biting Pain
+28396,Tears of Jvikti Kheval
+28397,Tears of Jvikti Kheval
+28398,Tears of Jvikti Kheval
+28451,Morgluuk's Trophy Head
+28452,Stout Lugian Ale
+28453,Hearty Lugian Loaf
+28454,Thick Lugian Stew
+28455,Portal Gem
+28470,Reward Key
+28499,Toberik's Report 
+28500,Golem Heart Crate
+28506,Sclavus Cataloguing Crate
+28510,Armoredillo Hide Collection Bag
+28517,Lugian Coins
+28521,Treated Herbs
+28522,Refined Ore
+28524,Sealed Missive
+28525,Sealed Missive
+28526,Wheel Cart
+28527,Full Wheel Cart
+28528,Well-Balanced Lugian Axe
+28557,Scroll of Lesser Conjurant Chant
+28558,Scroll of Conjurant Chant
+28559,Scroll of Greater Conjurant Chant
+28560,Scroll of Superior Conjurant Chant
+28561,Scroll of Lesser Artificant Chant
+28562,Scroll of Artificant Chant
+28563,Scroll of Greater Artificant Chant
+28564,Scroll of Superior Artificant Chant
+28565,Scroll of Lesser Vitaeic Chant
+28566,Scroll of Vitaeic Chant
+28567,Scroll of Greater Vitaeic Chant
+28568,Scroll of Superior Vitaeic Chant
+28569,Scroll of Lesser Conveyic Chant
+28570,Scroll of Conveyic Chant
+28571,Scroll of Greater Conveyic Chant
+28572,Scroll of Superior Conveyic Chant
+28573,Scroll of Lesser Hieromantic Chant
+28574,Scroll of Hieromantic Chant
+28575,Scroll of Greater Hieromantic Chant
+28576,Scroll of Superior Hieromantic Chant
+28718,Ravenous Eater Jaw
+28719,Insatiable Eater Jaw
+28727,Abhorrent Eater Jaw
+28753,A Message from Scorus
+28754,Healing Machine Recipe
+28756,Trade Contacts
+28758,Brewmaster's Bible
+28759,Friend of Silyun Token
+28761,Friend of Sanamar Token
+28774,Wine Cellar Key
+28814,Lorca Sammel's Gauntlets
+28815,Kul'dir
+28828,Grand Mother's Medallion
+28832,Gonjoku Den Trade Agreement
+28833,Gonjoku's Mana Infusion
+28842,Essence of Cave Penguin
+28843,Cave Penguin Cake
+28845,Renald the Eldest Trade Proposal
+28846,Renald the Eldest Refusal
+28852,Fiun Spellcasting Gloves
+28853,Kam'shir
+28854,Gonjoku Den Trade Proposal
+28855,Lubziklan al-Luq Trade Proposal
+28858,Armored Skeleton Guise
+28859,Armored Undead Guise
+28860,Scarecrow Guise
+28862,Burun Guruk Mask
+28863,Burun Ruuk Mask
+28864,Chittick Mask
+28865,Mite Mask
+28867,Modified Left Peg Leg
+28926,Salvaging Gem of Forgetfulness
+28983,Hand-Written Journal
+28985,Remains of Xi Ru
+28986,Burial Urn
+29017,Scroll of Lesser Endless Well
+29018,Scroll of The Endless Well
+29019,Scroll of Greater Endless Well
+29020,Scroll of Superior Endless Well
+29021,Scroll of Lesser Soothing Wind
+29022,Scroll of The Soothing Wind
+29023,Scroll of Greater Soothing Wind
+29024,Scroll of Superior Soothing Wind
+29025,Scroll of Lesser Golden Wind
+29026,Scroll of The Golden Wind
+29027,Scroll of Greater Golden Wind
+29028,Scroll of Superior Golden Wind
+29050,Ruschk Hunter Leggings
+29058,Helm of Gratitude
+29093,Viamontian Guardian Bracelet
+29103,K'nath Lair Portal
+29161,Brew Kettle
+29230,Ishaq's Mace
+29231,Tanami's Crossbow
+29266,Ciandra's Fortune
+29267,Quick Learner
+29268,Might of the Seventh Mule
+29269,Critical Protection
+29270,Clutch of the Miser
+29271,Enduring Enchantment
+29272,Innate Renewal
+29273,Charmed Smith
+29274,Caustic Enhancement
+29275,Enhancement of the Mace Turner
+29276,Storm's Enhancement
+29277,Fiery Enhancement
+29278,Icy Enhancement
+29279,Enhancement of the Arrow Turner
+29280,Enhancement of the Blade Turner
+29282,Shadow of the Seventh Mule
+29283,Archmage's Endurance
+29284,Jibril's Essence
+29285,Yoshi's Essence
+29286,Celdiseth's Essence
+29287,Ciandra's Essence
+29288,Koga's Essence
+29289,Oswald's Enhancement
+29290,Bleeargh's Fortitude
+29291,Enduring Calm
+29292,Siraluun's Blessing
+29293,Steadfast Will
+29294,Reinforcement of the Lugians
+29295,Blank Augmentation Gem
+29328,Guide to Chat
+29335,Academy Exit Token
+29394,Viamontian Reconnaissance
+29475,Seven Habits of Effective Adventurers
+29494,Breastplate of Karlun
+29508,Maddened Fiun Heart
+29511,Medallion of the Red Bull
+29542,Enscorcelled Robe
+29543,Armsman's Robe
+29544,Marksman's Robe
+29552,Gem of Perfect Balance
+29553,Gem of Damage Addition
+29554,Gem of Damage Modification
+29555,Gem of Perfect Health
+29556,Gem of Inner Brilliance
+29557,Gem of Mana Management
+29558,Gem of Perfect Speed
+29559,Gem of Inner Will
+29560,Gem of Inner Might
+29571,Salvaged Aquamarine
+29572,Salvage
+29573,Salvaged Black Opal
+29574,Salvaged Emerald
+29575,Salvaged Fire Opal
+29576,Salvaged Granite
+29577,Salvaged Imperial Topaz
+29578,Salvage
+29579,Salvage
+29580,Salvage
+29581,Salvaged Steel
+29582,Salvaged Sunstone
+29591,Qin Xikit's Crown
+29608,Black Spawn Den Portal Device
+29609,Citadels Portal Device
+29610,Lesser Direlands Device
+29611,Outland Portal Device
+29612,Olthoi Lands Portal Device
+29647,Violet Ball
+29653,Black Marbles
+29654,Mixed Marbles
+29655,White Marbles
+29802,Burun Kukuur Floatee
+29810,Badlands Siraluun Dress
+29811,Kithless Siraluun Dress
+29812,Littoral Siraluun Dress
+29813,Marsh Siraluun Dress
+29814,Strand Siraluun Dress
+29815,Tidal Siraluun Dress
+29816,Timber Siraluun Dress
+29817,Untamed Siraluun Dress
+29818,Badlands Siraluun Headdress
+29819,Kithless Siraluun Headdress
+29820,Littoral Siraluun Headdress
+29821,Marsh Siraluun Headdress
+29822,Strand Siraluun Headdress
+29823,Tidal Siraluun Headdress
+29824,Timber Siraluun Headdress
+29825,Untamed Siraluun Headdress
+29908,Tidal Siraluun Tewhate
+29909,Badlands Siraluun Okane
+29910,Marsh Siraluun Waaika
+29911,Timber Siraluun Matihao
+29912,Littoral Siraluun Hoeroa
+29913,Strand Siraluun Taiaha
+29914,Untamed Siraluun Pikestaff
+29915,Kithless Siraluun Stave
+30046,Silyun Portal Gem
+30055,Beacon Gem
+30094,Foolproof Aquamarine
+30095,Foolproof Black Garnet
+30096,Foolproof Black Opal
+30097,Foolproof Emerald
+30098,Foolproof Fire Opal
+30099,Foolproof Imperial Topaz
+30100,Foolproof Jet
+30101,Foolproof Peridot
+30102,Foolproof Red Garnet
+30103,Foolproof Sunstone
+30105,Foolproof Yellow Topaz
+30106,Foolproof Zircon
+30181,Pearl of Acid Baning
+30182,Olthoi's Jewel
+30183,Alchemist's Crystal
+30184,Scholar's Crystal
+30185,Executor's Jewel
+30186,Smithy's Crystal
+30187,Hunter's Crystal
+30188,Observer's Crystal
+30189,Thorsten's Crystal
+30190,Pearl of Blade Baning
+30191,Pearl of Blood Drinking
+30192,Pearl of Bludgeon Baning
+30193,Tusker's Jewel
+30194,Elysa's Crystal
+30195,Chef's Crystal
+30196,Wayfarer's Pearl
+30197,Enchanter's Crystal
+30199,Oswald's Crystal
+30200,Deceiver's Crystal
+30201,Pearl of Defending
+30202,Ursuin's Pearl
+30203,Inferno's Jewel
+30204,Pearl of Flame Baning
+30205,Fletcher's Crystal
+30206,Magus's Pearl
+30207,Pearl of Frost Baning
+30208,Gelid's Jewel
+30209,Physician's Crystal
+30210,Warrior's Jewel
+30211,Pearl of Heart Seeking
+30212,Pearl of Hermetic Linking
+30213,Pearl of Impenetrability
+30214,Artificer's Crystal
+30215,Tinker's Crystal
+30216,Vaulter's Crystal
+30217,Monarch's Crystal
+30218,Life Giver's Crystal
+30219,Pearl of Lightning Baning
+30220,Astyrrian's Jewel
+30221,Thief's Crystal
+30222,Adherent's Crystal
+30224,Resister's Crystal
+30225,Imbuer's Crystal
+30226,Converter's Crystal
+30227,Mage's Jewel
+30228,Evader's Crystal
+30229,Dodger's Crystal
+30230,Pearl of Pierce Baning
+30231,Archer's Jewel
+30232,Sprinter's Pearl
+30233,Zefir's Crystal
+30234,Lich's Pearl
+30235,Duelist's Jewel
+30237,Pearl of Spirit Drinking
+30239,Melee's Jewel
+30240,Lugian's Pearl
+30241,Pearl of Swift Killing
+30242,Ben Ten's Crystal
+30245,Hieromancer's Crystal
+30246,Artist's Crystal
+30255,Grand Casino Golden Keyring
+30256,Grand Casino Golden Keyring
+30257,Grand Casino Golden Keyring
+30260,Salvaged White Sapphire
+30261,Dangerous Portal Device
+30262,Ancient Armored Helm
+30263,Ancient Armored Helm
+30264,Ancient Armored Helm
+30393,Suzuhara's Girth of Flame Protection
+30397,Note to Baijin
+30401,Wallbound Niffis
+30403,Champion of Silyun Token
+30404,Champion of Sanamar Token
+30491,A List of Items
+30501,A List of Items
+30508,A List of Items
+30546,Coat of the Zaikhal Defender
+30634,Cyphis Suldow's Half Moon Spear
+30645,Aviator's Cap
+30675,Agent of Arcanum List
+30702,Royal Color
+30703,Royal Oil
+30704,Royal Paint
+30705,Royal Dye
+30744,Hero of Silyun Token
+30745,Replica of a Tursh Totem
+30798,Black Marrow Tea
+30807,The Orphanage
+30812,Antiquated Compass
+30813,Black Luster Pearl
+30857,Sezzherei's Lair
+30939,Hero of Sanamar Token
+30972,Bag of Life Stone Chips
+30999,Academy Library Key
+31000,Blackmoor's Favor
+31001,Asheron's Benediction
+31031,Snow Flake Charm
+31037,Ruschk Scalp
+31039,Ruschk Trials
+31221,Thrungus Hovel Locations
+31234,Lubziklan al-Luq Trade Agreement
+31285,The Queen's Missive
+31288,Blade of the Realm
+31291,Renlen's Grace
+31304,Luminous Robe
+31306,Story of Lunnum's Pyre
+31310,Darling's Collar
+31322,Squalid Leggings
+31330,Scribe's Quill
+31331,Scribe's Quill
+31332,Scribe's Quill
+31333,Scribe's Quill
+31336,Fake Niffis Pearl
+31346,Lugian Commander's Insignia
+31350,Mosswart Armband
+31353,Olthoi Larvae Steak
+31355,Olthoi Slasher Carapace
+31363,Axe Head Helm
+31366,Decorative Ursuin Head
+31382,Vestibule Lock
+31383,Scroll of Raven Fury
+31413,Translated Dericost Tome
+31415,Account of the Spear of Mukkir
+31416,Journal of High Archon Kraest
+31421,Ursuin Toy
+31425,Rage of Grael Gem
+31440,The Grael Rebellion
+31441,The Song of Grael
+31510,Surloshen's Helm
+31603,Plate Armoredillo Punisher Plaque
+31606,Repugnant Eater Ripper Plaque
+31608,Ebon Gromnie Eradicator Plaque
+31610,Iron-Spined Chittick Immolator Plaque
+31611,Arctic Mattekar Annihilator Plaque
+31612,Dire Mattekar Dispatcher Plaque
+31613,Mosswart Worshipper Whipper Plaque
+31614,Olthoi Ripper Reducer Plaque
+31615,Polardillo Pummeler Plaque
+31616,Violator Grievver Vetoer Plaque
+31617,Blood Shreth Butcher Plaque
+31618,Naughty Skeleton Snuffer Plaque
+31619,Wicked Skeleton Walloper Plaque
+31620,Deathcap Defeater Plaque
+31621,Polar Ursuin Pounder Plaque
+31622,K'nath An'dras Assassinator Plaque
+31624,Floeshark Flogger Plaque
+31626,Mottled Carenzi Mauler Plaque
+31627,Tukora Lieutenant Trouncer Plaque
+31661,Official Agents of the Arcanum Notice
+31668,Tome of Blood and Bone
+31674,Orange Monster Sprout
+31676,Red Monster Sprout
+31678,Yellow Monster Sprout
+31693,Squalid Shield
+31698,Fine Leather Scraps
+31699,Fine Metal Scraps
+31708,Hea Bone and Hide Shirt
+31732,Last Known Location of Muldaveus
+31733,Muldaveus Sightings
+31751,Squalid Coat
+31755,Fertilized Sundew
+31756,Fertilized Fly Trap
+31757,Fertilized Pitcher Plant
+31871,Watery Token
+31872,Watcher Token
+31881,Brilliant Shard
+31977,Rose Quartz Wedding Ring
+31978,Rose of Celdon
+31984,Book of Xik Minru
+31985,Book of Xik Minru
+32024,Offering to Xik Minru
+32025,Shadow Stalker Title Token
+32086,Refurbisher's Tally
+32111,Man-At-Arms Thrasher Plaque
+32112,Voracious Hunter Plaque
+32113,Siraluun Slasher Plaque
+32114,Windreave Stalker Plaque
+32121,Remoran Fist
+32148,Shadow Wings Breastplate
+32149,White Rabbit Mask
+32151,Virindi Desecrator Mask
+32152,Bathrobe of Ordinary Comfort
+32154,Ghost Guise
+32155,Ursuin Guise
+32156,Maddened Fiun Mask
+32157,Hollow Minion Mask
+32158,Homunculus Mask
+32159,Penguin Mask
+32160,Uber Penguin Mask
+32161,Ruschk Mask
+32162,Snowman Mask
+32163,Two Headed Snowman Mask
+32165,Giant Snowman Mask
+32166,Snowman Mask with Hat
+32167,Snowman Mask with Fez
+32169,Eye Patch
+32207,Candy Corn
+32226,Mistress Gabille's Notes
+32229,Master Vaserio's Notes
+32254,Gem of Ardent Loyalty
+32260,Plain Mukkir Orb
+32261,Solid Mukkir Orb
+32262,Detailed Mukkir Orb
+32263,Intricate Mukkir Orb
+32278,Collegium Occultus Ring
+32359,Glenden Wood Recall Orb
+32485,Snowy Cabin Snowglobe
+32488,Winter Orb
+32492,Scroll of Glenden Wood Recall
+32495,Mace of Winter Flame
+32497,Spear of Winter Flame
+32499,Axe of Winter Flame
+32500,Farelaith's Untranslated Journal
+32504,Our Bitter Winter
+32511,Shield of Yanshi
+32520,Fleet Strike Gauntlets
+32548,Unerring Strike Bow
+32549,True Strike Bow
+32550,Steady Strike Bow
+32587,Instructions
+32588,Repaired Shadow Stone
+32591,Sketch of a Viamontian
+32615,Necklace of the Elemental Adepts
+32630,Whispering Blade Gloves
+32651,Shadowfire Stone
+32653,Repaired Stone Infuser
+32657,Dormant Shadowfire Stone
+32661,Ciandra's Stone Infuser Instructions
+32669,Strathelar Pennant
+32672,Black Page of Salt and Ash
+32679,Whispering Blade Boots
+32687,Rossu Morta Boots
+32698,Shield of Strathelar
+32718,Rat Tail Bracelet
+32750,Instructions for Essence Recovery
+32758,Prismatic Oil
+32769,Replica Sword of Bellenesse
+32782,Shield of Sanamar
+32783,Shield of Silyun
+32839,Shield of the Strathelar Elite
+32846,Viamontian Pennant of Loyalty
+32849,Tethana Manifesto
+32968,An Ancient Masonry on Aerlinthe
+32990,Ring of the Whispering Blade
+33003,Translated Bound Falatacot Fragment
+33012,Ring of the Rossu Morta
+33104,Helm of Isin Dule
+33154,Necklace of the Golden Flame
+33159,Isin Dule's Instructions
+33183,Isin Dule's Orders
+33186,Pack Harbinger
+33202,Harbinger Arm Guard
+33243,Finger of the Harbinger
+33463,Rossu Morta Chapterhouse Recall Orb
+33484,Whispering Blade Chapterhouse Recall Orb
+33608,Pathwarden Supply Key
+33620,Salvage
+33621,Salvage
+33686,Lesser Mukkir Slayer Stone
+33687,Mukkir Slayer Stone
+33688,Greater Mukkir Slayer Stone
+33694,Mukkir Aspect Slayer Title Token
+33717,Black Spear of Ruschk Protection
+33718,Black Spear of Mukkir Strength
+33719,Black Spear of Shadow Renewal
+33825,Sawato Bandit's Mask
+33827,Old Footlocker Key
+33884,White Gateway Token
+33885,Black Gateway Token
+33886,Abyssal Gateway Token
+33887,Helm of the White Totem
+33888,Helm of the Black Totem
+33889,Helm of the Abyssal Totem
+33919,Baby Drudge Crate
+33923,Armoredillo Egg
+33924,Baby Thrungus Crate
+33925,Ursuin Cub Kennel
+33926,Letter to Renald the Eldest; from Larinne Kerendova
+33927,Letter to Turien Di Furza; from Larinne Kerendova
+33928,Letter to Nen Ai; from Larinne Kerendova
+33929,Letter to May'ad ibn Ibsar; from Larinne Kerendova
+33930,Baby Pet Token
+33931,May'ad ibn Ibsar's Reply
+33932,Nen Ai's Reply
+33933,Renald the Eldest's Reply
+33934,Turien Di Furza's Reply
+33940,Enhanced Crystal Sword
+33941,Enhanced Osseous Mace
+33942,Enhanced Serpent's Fang
+33944,Enhanced Soul Staff
+33945,Enhanced Fetid Dirk
+33946,Enhanced Basalt Blade
+33949,Enhanced Gauntlets of Marksmanship
+33950,Enhanced Robe of the Tundra
+33951,Enhanced Robe of the Tundra
+33952,Enhanced Robe of the Tundra
+33953,Enhanced Dark Sorcerer's Phylactery
+33954,Kilif Zefir Sites
+33955,List of Hunted Creatures
+33960,Uninscription Stone
+33965,Tipped Pack Cow
+33973,Shou-jen Jika-Tabi
+33974,Shou-jen Shozoku Sleeve Gauntlets
+33975,Shou-jen Shozoku Jacket
+33976,Shou-jen Shozoku Mask
+33977,Shou-jen Shozoku Trousers
+33981,Pet Penguin Igloo
+33982,Exquisite Bone Handle
+33983,Superb Bone Handle
+33984,Fine Bone Handle
+34002,Mi Krau-Li's Remastered Jitte
+34004,Crimson Night Gem Setting
+34025,Falatacot Abbess Mask
+34026,Mask of the Hopeslayer
+34027,Shadow Mask
+34096,Fresh Zombie Arm
+34097,Fresh Zombie Head
+34098,Fresh Zombie Leg
+34099,Fresh Zombie Torso
+34100,The Red Bull
+34143,The Boar of Cinghalle
+34144,The Stag of Bellenesse
+34214,The Dragon of Power
+34217,Mask of the Malik
+34218,The Helm of the Golden Flame
+34255,Karlun's Visage
+34257,Asheron's Lesser Benediction
+34267,Mystical Mug
+34276,Ancient Empyrean Trinket
+34277,Ancient Falatacot Trinket
+34278,Words of the High Matriarch
+34291,Gem of Balance
+34299,The Rise and Fall of the Tanada
+34316,Soul Hunter's Orders
+34317,Copy of Soul Hunter's Orders
+34341,Tachi of Grace
+34347,Ruminations on Portal Creation
+34349,Letter to Bretself the Translator
+34353,Ruminations and Warnings on Portal Creation
+34364,Folded Missive
+34378,Marked Candy Wrapper
+34381,Small Sack of Penguin Treats
+34402,Neydisa Snowglobe
+34449,Colosseum Ticket
+34460,Asheron's Departure Journal
+34500,Western Vault Notes
+34501,Northern Vault Notes
+34502,Eastern Vault Notes
+34505,A Note on Ancient Goblets
+34506,A Note on Ancient Necklaces
+34507,A Note on Ancient Rings
+34843,The Founding of Kor-Gursha
+34850,Tiriun Mushroom
+34855,Tiriun Mushroom Cap
+34856,Tiriun Mushroom Stalk
+34857,Tiriun Mushroom Spores
+34879,Superb Imprinting Mote
+34884,Imprinting Mote
+34889,Quality Imprinting Mote
+34916,Inactive Blank Golem
+34933,Finding Imprinting Motes
+34967,Inert Mucor
+34968,Enhanced Mucor
+35112,Burun Weaponcrafter's Note
+35173,Empowered Empyrean Robe
+35180,Hulking Bunny Slippers
+35295,Shield of Perfect Light
+35296,Pack Tower Guardian
+35309,Tanada Gate Medallion
+35310,Copy of Tanada House of Water Orders
+35313,Channeled Tanada Medallion
+35345,Shard of Harraag's Dagger
+35383,Ancient Mhoire Coin
+35409,Torn Cloth Scrap
+35410,Torn Cloth Scrap
+35411,Torn Cloth Scrap
+35412,Torn Cloth Scrap
+35413,Torn Cloth Scrap
+35414,Torn Cloth Scrap
+35415,Torn Cloth Scrap
+35416,Torn Cloth Scrap
+35417,Torn Cloth Scrap
+35418,Torn Cloth Scrap
+35419,Torn Cloth Scrap
+35420,Torn Cloth Scrap
+35421,Torn Cloth Scrap
+35422,Torn Cloth Scrap
+35423,Torn Cloth Scrap
+35424,Torn Cloth Scrap
+35425,Torn Cloth Scrap
+35426,Torn Cloth Scrap
+35479,Scroll of Bur Recall
+35565,Observations: Harraag
+35566,Observations: Harraag
+35568,Cull the Drudges
+35591,Cave Door Key
+35615,Blessed Spear of the Mosswart Gods
+35617,Piece of Paper
+35618,Piece of Paper
+35630,Sickle of Azaxis
+35764,Eyeslayer (Large)
+35765,Eyeslayer (Huge)
+35766,Eyeslayer (Giant)
+35803,Club of Killagurg
+35804,Demon Swarm Sword
+35805,Fists of Stone
+35807,Gladiator Diemos Statue
+35808,Arbitrator's Augmentation Token
+35852,Monouga Laboratory Portal Attunement Gem
+35857,Mask of the Depths
+35866,Translated Black Water Watcher's Shard
+35872,Colosseum Master's Robe
+35887,Paradox-touched Olthoi Shield
+35889,Head of the Paradox-touched Olthoi Queen
+35890,Paradox-touched Olthoi Weapon Token
+35912,Paradox-touched Olthoi Atlatl
+35913,Paradox-touched Olthoi Axe
+35914,Paradox-touched Olthoi Katar
+35915,Paradox-touched Olthoi Spear
+35916,Paradox-touched Olthoi Sword
+35943,King's Crown Infusion
+35963,Havala's Composite Atlatl Manual
+35982,Aegis of the Golden Flame
+36048,Visage of the Shadow Virindi
+36067,Atuakeh Dust
+36174,Harbinger's Foci
+36185,Gem of Harbinger's Acid Barrier
+36186,Gem of Harbinger's Frost Barrier
+36187,Gem of Harbinger's Flame Barrier
+36188,Gem of Harbinger's Lightning Barrier
+36189,Harbinger Blood Infusion
+36225,Translated Elemental Artifex Shard
+36226,Translated Shadow Artifex Shard
+36227,Coral Shield
+36228,Coral Shield
+36229,Rift Orb
+36230,Rift Orb
+36234,Lo Shoen's Rat Bait
+36352,Asheron Mask
+36353,Undead Sailor Mask
+36354,Cow Mask
+36355,Mukkir Mask
+36356,Undead Captain Mask
+36357,Bandana with Eyepatch
+36358,Undead Captain's Hat
+36376,Small Olthoi Venom Sac
+36445,Chocolate Gromnie
+36447,Licorice Rat
+36518,Colosseum Coin
+36524,Pumpkin Shield
+36546,Carved Wooden Shaft
+36547,Hardened Blue Crystal
+36550,Ornate Brass Banding
+36570,Salvage
+36572,Salvage
+36573,Salvage
+36604,Dojiro Sangi's Ring
+36628,Foolproof
+36638,Helm of the Crag
+36639,Crest of Kings
+36642,Powdered Chorizite Pea
+36678,Royal Summons
+36705,Scepter of Might
+36719,Balor's Robe
+36747,Empowered Bracers of the Perfect Light
+36748,Empowered Breastplate of the Perfect Light
+36749,Empowered Pauldrons of the Perfect Light
+36921,Snownado
+36942,Quiddity Ingot
+36943,Quiddity Ingot
+36944,Quiddity Ingot
+36946,Empyrean Spherule
+36948,Empowered Helm of the Perfect Light
+36949,Aerbax's Defeat
+37059,East Gate Harmonic Crystal
+37060,North Gate Harmonic Crystal
+37061,West Gate Harmonic Crystal
+37076,Purified Quiddity Ingot
+37078,Purified Quiddity Ingot
+37111,Empowered Girth of the Perfect Light
+37186,Rytheran's Journal
+37233,Ball of Fire
+37234,Ace of Hands
+37235,Two of Hands
+37236,Three of Hands
+37237,Four of Hands
+37238,Five of Hands
+37239,Six of Hands
+37240,Seven of Hands
+37241,Eight of Hands
+37242,Nine of Hands
+37243,Ten of Hands
+37244,Jack of Hands
+37245,Queen of Hands
+37246,King of Hands
+37247,Ace of Eyes
+37248,Two of Eyes
+37249,Three of Eyes
+37250,Four of Eyes
+37251,Five of Eyes
+37252,Six of Eyes
+37253,Seven of Eyes
+37254,Eight of Eyes
+37255,Nine of Eyes
+37256,Ten of Eyes
+37257,Jack of Eyes
+37258,Queen of Eyes
+37259,King of Eyes
+37290,Jester's Token
+37300,Glyph of Endurance
+37301,Glyph of Flame
+37302,Glyph of Fletching
+37303,Glyph of Focus
+37304,Glyph of Healing
+37305,Glyph of Health
+37307,Glyph of Regeneration
+37309,Glyph of Item Enchantment
+37310,Glyph of Item Tinkering
+37311,Glyph of Jump
+37312,Glyph of Leadership
+37313,Glyph of Life Magic
+37314,Glyph of Lightning
+37315,Glyph of Lockpick
+37316,Glyph of Loyalty
+37317,Glyph of Magic Defense
+37318,Glyph of Mana
+37319,Glyph of Mana Conversion
+37321,Glyph of Mana Regeneration
+37323,Glyph of Melee Defense
+37324,Glyph of Missile Defense
+37325,Glyph of Monster Appraisal
+37326,Glyph of Person Appraisal
+37327,Glyph of Piercing
+37328,Glyph of Quickness
+37329,Glyph of Run
+37330,Glyph of Salvaging
+37331,Glyph of Self
+37332,Glyph of Slashing
+37333,Glyph of Stamina
+37336,Glyph of Stamina Regeneration
+37337,Glyph of Strength
+37338,Glyph of Missile Weapons
+37339,Glyph of Light Weapons
+37340,Glyph of War Magic
+37341,Glyph of Weapon Tinkering
+37342,Glyph of Corrosion
+37343,Glyph of Alchemy
+37344,Glyph of Arcane Lore
+37345,Glyph of Armor
+37346,Glyph of Armor Tinkering
+37347,Glyph of Bludgeoning
+37348,Glyph of Frost
+37349,Glyph of Cooking
+37350,Glyph of Coordination
+37351,Glyph of Creature Enchantment
+37352,Glyph of Deception
+37353,Ink of Formation
+37354,Ink of Nullification
+37355,Ink of Objectification
+37356,Parabolic Ink
+37357,Ink of Partition
+37358,Ink of Separation
+37359,Alacritous Ink
+37360,Ink of Conveyance
+37361,Ink of Direction
+37362,Quill of Extraction
+37363,Quill of Infliction
+37364,Quill of Introspection
+37365,Quill of Benevolence
+37369,Glyph of Heavy Weapons
+37373,Glyph of Finesse Weapons
+37402,Club of Surprising Cunning
+37494,Jester's Marker
+37515,Pack Aerbax
+37516,Enhanced Mana Elixir
+37517,Enhanced Health Elixir
+37559,Writ of Apology
+37614,Principles of the Celestial Hand
+37615,Canon of the Eldrytch Web
+37616,Tenets of the Radiant Blood
+37618,Celestial Hand Letter of Introduction
+37619,Eldrytch Web Letter of Introduction
+38043,Diplomatic Message from Harlune
+38044,Green Mire Yoroi Cuirass
+38048,Green Mire Yari
+38049,Lilitha's Broken Bow
+38050,Lilitha's Bow
+38082,Rytheran's Mnemosyne
+38083,Visage of Menilesh
+38226,A Field Guide to Tainted Nodes
+38228,Celestial Hand Commendation Ribbon
+38229,Eldrytch Web Commendation Ribbon
+38230,Radiant Blood Commendation Ribbon
+38234,Celestial Hand Trade Token
+38236,Radiant Blood Trade Token
+38237,Eldrytch Web Trade Token
+38245,Eye of T'thuun
+38246,Scroll of Prophecy
+38247,Finger Bone of Mishfain
+38248,Skull of Mishfain
+38249,Sacred Deep Water
+38250,Spear of Baalfroth; the Slayer
+38251,Temple Horn
+38252,Hagrafash Tooth Necklace
+38253,Blood Pearl
+38254,Coral's Heart
+38314,Initiate's Treasure Key
+38316,Knight's Treasure Key
+38317,Lord's Treasure Key
+38318,Master's Treasure Key
+38333,Reefhunter's Reckoning
+38334,Reefhunter's Reckoning
+38335,Reefhunter's Reckoning
+38336,Brood Mother's Reckoning
+38337,Brood Mother's Reckoning
+38338,Brood Mother's Reckoning
+38392,Celestial Hand Initiate Armor Writ
+38393,Eldrytch Web Initiate Armor Writ
+38394,Radiant Blood Initiate Armor Writ
+38397,Celestial Hand Initiate's Handbook
+38398,Eldrytch Web Initiate's Handbook
+38399,Radiant Blood Initiate's Handbook
+38456,Mana Forge Key
+38517,Celestial Hand Breastplate Key
+38518,Eldrytch Web Breastplate Key
+38519,Radiant Blood Breastplate Key
+38520,Celestial Hand Gauntlets Key
+38521,Eldrytch Web Gauntlets Key
+38522,Radiant Blood Gauntlets Key
+38523,Celestial Hand Girth Key
+38524,Eldrytch Web Girth Key
+38525,Radiant Blood Girth Key
+38526,Celestial Hand Greaves Key
+38527,Eldrytch Web Greaves Key
+38528,Radiant Blood Greaves Key
+38529,Celestial Hand Helm Key
+38530,Eldrytch Web Helm Key
+38531,Radiant Blood Helm Key
+38532,Celestial Hand Pauldrons Key
+38533,Eldrytch Web Pauldrons Key
+38534,Radiant Blood Pauldrons Key
+38535,Celestial Hand Sollerets Key
+38536,Eldrytch Web Sollerets Key
+38537,Radiant Blood Sollerets Key
+38538,Celestial Hand Tassets Key
+38539,Eldrytch Web Tassets Key
+38540,Radiant Blood Tassets Key
+38541,Celestial Hand Vambraces Key
+38542,Eldrytch Web Vambraces Key
+38543,Radiant Blood Vambraces Key
+38544,Celestial Hand Armor Writ
+38545,Eldrytch Web Armor Writ
+38546,Radiant Blood Armor Writ
+38612,Altered Dark Remoran Fin
+38615,Crystal of Perception
+38640,Haroush's Key
+38641,Joroshi's Key
+38642,Donnarion's Key
+38711,Archaeologist's Tracing Paper
+38716,Supplies for Massilor
+38722,Society Treasure Key
+38726,Black Market Gem of Dispelling
+38760,Glyph of Magic Item Tinkering
+38910,Blighted Claw
+38917,Braced Mana Forge Key
+38918,Strengthened Mana Forge Key
+38919,Fortified Mana Forge Key
+38920,Reinforced Mana Forge Key
+38964,Carenzi Race Ticket
+38965,Carenzi Race Ticket Stub
+38966,Monster Fight Ticket
+38967,Monster Fight Ticket Stub
+38992,Grand Casino Key
+39027,Armored Sclavus Mask
+39028,Armored Sclavus Mask
+39029,Armored Sclavus Mask
+39287,Golden Key
+39745,Explorer's Backpack
+39984,Adventurer's Token
+40326,Fist of Enlightenment
+40340,Skull of One Thousand Torments
+40344,Crystal of Spectral Blood
+40490,Apostate Orders
+40491,Apostate Orders
+40508,Machinist's Gloves
+40582,Skipping Stone
+40583,Aged Mysterious Untranslated Scroll
+40801,Nexus Crawler's Mask
+40808,Aetheric Resonator
+40908,Reforged Ashbane
+41021,Research Notes
+41022,Aetherium Research Notes
+41023,Research Notes
+41024,Aetherium Research Notes
+41188,Copy of Apostate Excavation Master's Orders
+41189,Apostate Excavation Master's Orders
+41197,Coat of Darkness
+41198,Gauntlets of Darkness
+41199,Helm of Darkness
+41200,Leggings of Darkness
+41201,Sollerets of Darkness
+41204,Gear Shield
+41257,T'ing's Crystal
+41472,Infused Creature Magic
+41473,Infused Item Magic
+41474,Infused Life Magic
+41475,Infused War Magic
+41476,Master of the Five Fold Path
+41477,Master of the Steel Circle
+41478,Frenzy of the Slayer
+41479,Infused Void Magic
+41480,Iron Skin of the Invincible
+41481,Hand of the Remorseless
+41482,Eye of the Remorseless
+41490,Master of the Focused Eye
+41542,Unstable Mana Stone
+41635,Ravenous Two Handed Spear
+41637,Hollow Two Handed Spear
+41639,Acidic Weeping Two Handed Spear
+41640,Electric Weeping Two Handed Spear
+41641,Flaming Weeping Two Handed Spear
+41642,Frozen Weeping Two Handed Spear
+41713,Whispering Blade Token
+41739,Two Handed Combat Gem of Forgetfulness
+41740,Two Handed Combat Gem of Enlightenment
+41747,Glyph of Two Handed Combat
+41788,Ultimate Singularity Greatsword
+41789,Singularity Greatsword
+41790,Bound Singularity Greatsword
+41791,Assault Greatsword
+41794,Greatblade of the Quiddity
+41809,Damaged Celestial Hand Commendation Ribbon
+41810,Damaged Eldrytch Web Commendation Ribbon
+41811,Damaged Radiant Blood Commendation Ribbon
+41929,Story of Ries Woron
+41930,Translated Tomb Writings
+41931,Ancient Journal
+41945,Strange Jewel
+42019,Mhoire Sword of Courage
+42207,Ornate Nekode
+42208,Silver Atlatl
+42209,Tetsubo Slugger
+42490,Enchanted Mana Stone
+42667,Top Hat
+42709,Royal Bouquet
+42710,Aligned Mana Stone
+42729,Attuned Essence Gem
+42948,Well-Balanced Lugian Greataxe
+43041,Paradox-touched Olthoi Staff
+43042,Paradox-touched Olthoi Great Sword
+43043,Paradox-touched Olthoi Wand
+43044,Paradox-touched Olthoi Bow
+43045,Paradox-touched Olthoi Crossbow
+43046,Paradox-touched Olthoi Dagger
+43047,Paradox-touched Olthoi Mace
+43056,Paradox-touched Olthoi Wand
+43070,Empyrean Portalspace Stabilizer
+43084,Brightly Glowing Data Crystal
+43142,Ornate Gear Marker
+43167,Jack of All Trades
+43185,Gem of Knowledge
+43187,Gem of Knowledge
+43189,Gem of Knowledge
+43197,Apostate Grand Director's Mask
+43241,Gurog Guise
+43259,Glowing Apostate Shard
+43274,Empyrean Over-robe
+43319,Scroll of Clouded Soul
+43379,Glyph of Damage
+43380,Glyph of Void Magic
+43387,Glyph of Nether
+43400,Void Magic Gem of Enlightenment
+43402,Void Magic Gem of Forgetfulness
+43407,Corruptor's Crystal
+43420,Corruptor's Gauntlets
+43472,Luminous Pearl of Blood Drinking
+43473,Luminous Crystal of Surging Strength
+43474,Luminous Crystal of Towering Defense
+43475,Luminous Pearl of Defending
+43476,Luminous Pearl of Heart Seeking
+43477,Luminous Pearl of Spirit Drinking
+43478,Luminous Crystal of Vitality
+43479,Light Infused Healing Kit
+43504,Draught of Revitalization
+43534,Luminance; and the Paths of the Empyrean
+43807,Bloodstone Report
+43813,Sturdy Bloodstone Wand
+43814,Delicate Bloodstone Wand
+43817,Shadownether Stone
+43895,Strange Purple Crystal from The Shadows
+43901,Promissory Note
+43919,Token of Resistance Augmentation Changing
+44006,Empowered Robe of the Perfect Light
+44178,Contract for Hamud's Demise
+44240,A'nekshay Token
+44292,Idol of black Crystal
+44352,Armoredillo Hunting: Lost City of Neftet (Level 200+)
+44353,Golem Hunting: Lost City of Neftet (Level 200+)
+44354,Mu-miyah Hunting: Lost City of Neftet (Level 200+)
+44355,Reedshark Hunting: Lost City of Neftet (Level 200+)
+44356,A'nekshay Bracer Collecting (Level 200+)
+44357,Prickly Pear Collecting (Level 200+)
+44358,Stone Tablet Collecting (Level 200+)
+44636,A'nekshay Slayer Stone
+44647,Life-attuned Shadowfire Stone
+44711,Lesser Stamina Kit
+44712,Greater Mana Kit
+44713,Lesser Mana Kit
+44714,Greater Stamina Kit
+44715,Low-Stakes Gambling Token
+44716,Mid-Stakes Gambling Token
+44717,High-Stakes Gambling Token
+44718,Golden Key
+44719,Gem of Lesser Luminance
+44720,Gem of Greater Luminance
+44722,Armoredillo
+44723,Auroch
+44724,Banderling
+44725,Burun
+44726,Carenzi
+44727,Chicken
+44728,Chittick
+44729,Cow
+44730,Crystal
+44731,Doll
+44732,Drudge
+44733,Eater
+44734,Elemental
+44735,Fiun
+44736,Gearknight
+44737,Ghost
+44738,Golem
+44739,Grievver
+44740,Gromnie
+44741,Hollow Minion
+44742,Isparian
+44743,Idol
+44744,Knath'taed
+44745,Lugian
+44746,Margul
+44747,Marionette
+44748,Mattekar
+44749,Mite
+44750,Moar
+44751,Moarsman
+44752,Monouga
+44753,Mosswart
+44754,Mukkir
+44755,Niffis
+44756,Olthoi
+44757,Penguin
+44758,Rabbit
+44759,Rat
+44760,Remoran
+44761,Rift
+44762,Ruschk
+44763,Scarecrow
+44764,Sclavus
+44765,Shadow
+44766,Shark
+44767,Shreth
+44768,Simulacrum
+44769,Siraluun
+44770,Skeleton
+44771,Sleech
+44772,Slithis
+44773,Snowman
+44774,Statue
+44775,Thrungus
+44776,Tumerok
+44777,Tusker
+44778,Undead
+44779,Ursuin
+44780,Virindi
+44781,Phyntos Wasp
+44782,Wisp
+44783,Zefir
+44994,Book 1: The Apostates
+44995,Book 2: The Gurogs and the beginnings of the Plan
+44996,Book 3: The Time Ritual and the Sand Kings
+44997,Book 4: Further Manipulations of Time
+44998,Strathelar Royal Cloak
+45030,Balor's Over-robe
+45031,Hoary Mattekar Over-robe
+45078,Bag of Gumdrops
+45079,Bag of Gumdrops
+45080,Bag of Gumdrops
+45081,Bag of Gumdrops
+45360,Rogue's Crystal
+45366,Brawler's Crystal
+45367,Warrior's Crystal
+45368,Berzerker's Crystal
+45369,Knight's Crystal
+45370,Glyph of Dirty Fighting
+45371,Glyph of Dual Wield
+45372,Glyph of Recklessness
+45373,Glyph of Shield
+45374,Glyph of Sneak Attack
+45375,Dirty Fighting Gem of Forgetfulness
+45376,Dual Wield Gem of Forgetfulness
+45377,Recklessness Gem of Forgetfulness
+45378,Shield Gem of Forgetfulness
+45379,Sneak Attack Gem of Forgetfulness
+45380,Dirty Fighting Gem of Enlightenment
+45381,Dual Wield Gem of Enlightenment
+45382,Recklessness Gem of Enlightenment
+45383,Shield Gem of Enlightenment
+45384,Sneak Attack Gem of Enlightenment
+45493,Rare Coin
+45681,Investigating the Bloodstones (Level 200+)
+45682,Nalicana's Test (Level 200+)
+45769,Deru Avatar's Gem
+45783,A Page of the Book of Eibhil
+45850,Letter from Uber P
+45875,Lucky Gold Letter
+45906,Seasoned Explorer Compound Bow
+45907,Amateur Explorer Compound Bow
+45908,Seasoned Explorer Arbalest
+45954,Seasoned Explorer Greataxe
+45956,Seasoned Explorer Nether Staff
+45957,Amateur Explorer Nether Staff
+45958,Seasoned Explorer Baton
+45959,Amateur Explorer Baton
+45960,Amateur Explorer Vambraces
+45961,Seasoned Explorer Breastplate
+45962,Amateur Explorer Breastplate
+45963,Seasoned Explorer Gauntlets
+45964,Amateur Explorer Gauntlets
+45965,Seasoned Explorer Girth
+45966,Amateur Explorer Girth
+45967,Seasoned Explorer Greaves
+45968,Amateur Explorer Greaves
+45969,Seasoned Explorer Helm
+45970,Amateur Explorer Helm
+45971,Seasoned Explorer Pauldrons
+45972,Amateur Explorer Pauldrons
+45973,Seasoned Explorer Shield
+45975,Seasoned Explorer Boots
+45976,Amateur Explorer Boots
+45977,Seasoned Explorer Tassets
+45978,Amateur Explorer Tassets
+45979,Seasoned Explorer Vambraces
+45982,Seasoned Explorer Axe Cast
+45997,Seasoned Explorer Bracelet Of Coordination
+45998,Amateur Explorer Bracelet Of Coordination
+45999,Seasoned Explorer Bracelet Of Strength
+46000,Amateur Explorer Bracelet Of Strength
+46001,Seasoned Explorer Necklace Of Focus
+46002,Amateur Explorer Necklace Of Focus
+46003,Seasoned Explorer Ring Of Endurance
+46004,Amateur Explorer Ring Of Endurance
+46005,Seasoned Explorer Ring Of Quickness
+46006,Amateur Explorer Ring Of Quickness
+46007,Seasoned Explorer Pants
+46008,Amateur Explorer Pants
+46009,Seasoned Explorer Shirt
+46010,Amateur Explorer Shirt
+46021,Letter from Mouf
+46022,Letter from Mouf and Uber P
+46023,Pet Mouf Igloo
+46037,Atlan Axe
+46071,Atlan Mace
+46088,Atlan Sword
+46105,Atlan Two Handed Sword
+46122,Atlan Wand
+46139,Atlan Bow
+46145,Isparian Crossbow
+46154,Isparian Dagger
+46163,Isparian Spear
+46172,Isparian Staff
+46181,Isparian Wand
+46194,Isparian Two Handed Sword
+46283,Pragmatic Guide to Atlan Weapons
+46360,The Story of the Lost Sisters
+46361,The Story of the Lost Sisters
+46362,The Story of the Lost Sisters
+46423,Stipend
+46454,Society Gem of Lesser Luminance
+46461,Middle Gate Key
+46828,Purified Mouryou Katana
+46829,Purified Mouryou Nanjou-tachi
+46830,Purified Mouryou Nodachi
+46831,Purified Mouryou Wakizashi
+46832,Purified Mouryou Nekode
+46941,Modified Taulandoi
+46942,Modified Taulandoi
+46943,Modified Taulandoi
+46944,Modified Taulandoi
+46945,Modified Saulandoi
+46948,Modified Elemental Master Robe
+46949,Modified Elemental Master Robe
+46959,Modified Iasparailaun
+46960,Modified Raudaloi
+46966,Modified Gauraloi
+47055,Spirit of Izexi Gem
+47192,Translated Orders for Zrikux
+47196,Translated Orders for Zrikux
+47199,Forging Gloves
+47831,Sealed Letter
+48707,Mug of Warm Cider
+48746,Aged Legendary Key
+48747,Legendary Key
+48748,Legendary Key
+48749,Legendary Key
+48750,Legendary Key
+48938,Legendary Seed of Mornings
+48939,Legendary Seed of Harvests
+48940,Legendary Seed of Twilight
+49455,Glyph of Summoning
+49481,Summoning Gem of Forgetfulness
+49484,Summoning Gem of Enlightenment
+49563,Facility Hub Portal Gem
+49767,Contract for Escape
+51216,Hive Gem of Dispelling
+51301,Translated Message Shard
+51366,Prototype Bloodstone Shard
+51372,Frozen Valley Portal Gem
+51373,Bracelet of Thorns
+51374,Bracelet of Storms
+51388,Translated Cracked Message Shard
+51389,Translated Chipped Message Shard
+51422,Virindi Cage
+51583,Journal of a Soldier
+51584,Torn Note
+51593,Lightning Cloud
+51600,Focused Splinter of Hatred
+51601,Focused Splinter of Misery
+51602,Focused Splinter of Anger
+51658,Tainted Aetherium Oil
+51777,Freebooter Advancement Gem
+51778,Freebooter Luminance Gem
+51784,Spirit Crystal
+51785,Spirited Apathy Guard
+51787,Spirited Bloodlust Guard
+51847,Spirited Apathy Guard
+51848,Spirited Envy Guard
+51849,Spirited Envy Guard
+51851,Spirited Bloodlust Guard
+51853,Spirited Spite Guard
+51869,Contract for Kill: Rynthid Minions
+51870,Contract for Kill: Empowered Wisps
+51871,Contract for Kill: Rynthid Rare Boss
+51872,Contract for Kill: Rynthid Slayers
+51873,Contract for Kill: Rynthid Ragers
+51874,Contract for Kill: Rynthid Sorcerers
+51875,Contract for Kill: Rynthid Rifts
+51899,Casting Stone
+51921,Sealed Scroll for Commander Presk
+51922,Sealed Scroll for Raksaa
+51954,Durable Legendary Key
+51963,Legendary Key
+52010,Legendary Key
+52023,Luminous Crystal of Rare Armor Damage Boost V
+52025,Luminous Crystal of Rare Damage Reduction V
+52033,Exquisite Casino Key
+52036,Purified Crimson Scarab
+52247,Idol of the Recluse
+52264,Idol of the Recluse
+52732,Storming Portal Axe
+52733,Vortex Thorn
+52782,Gauntlet Treasure Key
+52783,Gauntlet Treasure Key
+52784,Gauntlet Vault Key
+52796,Gauntlet Ticket
+52797,Gauntlet Coin
+52968,Infused Amber Shard
+52985,Amber Infused Honey
+53016,Corrupted Amber: Bracers of the Corrupted Heart.
+53017,Corrupted Amber: Gauntlets of the Corrupted Heart.
+53018,Corrupted Amber: Helm of the Corrupted Heart.
+53019,Corrupted Amber: Pauldrons of the Corrupted Heart.
+53020,Corrupted Amber: Sollerets of the Corrupted Heart.
+53021,Corrupted Amber: Breastplate of the Corrupted Soul.
+53022,Corrupted Amber: Girth of the Corrupted Soul.
+53023,Corrupted Amber: Greaves of the Corrupted Soul.
+53024,Corrupted Amber: Tassets of the Corrupted Soul.
+53066,Empowered Amber: Bracers of Life
+53067,Empowered Amber: Breastplate of Life
+53068,Empowered Amber: Gauntlets of Life
+53069,Empowered Amber: Girth of Life
+53070,Empowered Amber: Greaves of Life
+53071,Empowered Amber: Helm of Life
+53072,Empowered Amber: Pauldrons of Life
+53073,Empowered Amber: Sollerets of Life
+53074,Empowered Amber: Tassets of Life
+53145,Luminous Amber of the 1st Tier Paragon
+53148,Luminous Amber of the 3rd Tier Paragon
+53150,Luminous Amber of the 5th Tier Paragon
+53151,Luminous Amber of the 6th Tier Paragon
+53152,Luminous Amber of the 7th Tier Paragon
+53156,Luminous Amber of the 11th Tier Paragon
+53157,Luminous Amber of the 12th Tier Paragon
+53158,Luminous Amber of the 13th Tier Paragon
+53161,Luminous Amber of the 16th Tier Paragon
+53162,Luminous Amber of the 17th Tier Paragon
+53163,Luminous Amber of the 18th Tier Paragon
+53166,Luminous Amber of the 21st Tier Paragon
+53167,Luminous Amber of the 22nd Tier Paragon
+53168,Luminous Amber of the 23rd Tier Paragon
+53171,Luminous Amber of the 26th Tier Paragon
+53172,Luminous Amber of the 27th Tier Paragon
+53173,Luminous Amber of the 28th Tier Paragon
+53176,Luminous Amber of the 31st Tier Paragon
+53177,Luminous Amber of the 32nd Tier Paragon
+53178,Luminous Amber of the 33rd Tier Paragon
+53181,Luminous Amber of the 36th Tier Paragon
+53183,Luminous Amber of the 38th Tier Paragon
+53186,Luminous Amber of the 41st Tier Paragon
+53187,Luminous Amber of the 42nd Tier Paragon
+53188,Luminous Amber of the 43rd Tier Paragon
+53191,Luminous Amber of the 46th Tier Paragon
+53193,Luminous Amber of the 48th Tier Paragon
+53293,Luminous Amber: Bracers of Thunderous Blows
+53294,Luminous Amber: Pauldrons of Thunderous Blows
+53295,Luminous Amber: Greaves of the Tower
+53296,Luminous Amber: Tassets of the Tower
+53297,Luminous Amber: Breastplate of the Bulwark
+53298,Luminous Amber: Girth of the Bulwark
+53299,Luminous Amber: Gauntlets of the Storm
+53300,Luminous Amber: Sollerets of the Storm
+53301,Luminous Amber: Helm of Healing
+53302,Scroll of Viridian Rise Recall
+53305,Gem of Verdant Force
+53307,Stormwood Atlatl
+53308,Stormwood Axe
+53309,Stormwood Bow
+53310,Stormwood Crossbow
+53312,Stormwood Mace
+53313,Stormwood Spear
+53314,Stormwood Staff
+53315,Stormwood Greatsword
+53316,Stormwood Sword
+53317,Stormwood Claw
+53318,Stormwood Wand
+53320,Stormwood Axe
+53321,Stormwood Bow
+53322,Stormwood Crossbow
+53323,Stormwood Dagger
+53324,Stormwood Mace
+53325,Stormwood Spear
+53327,Stormwood Greatsword
+53328,Stormwood Sword
+53329,Stormwood Claw
+53330,Stormwood Wand
+53331,Derubloom Wand
+53332,Corrupted Heartwood Wand
+53333,Derubloom Wand
+53334,Corrupted Heartwood Wand
+53335,Scroll of Clouded Soul II
+53336,Scroll of Searing Disc II
+53337,Scroll of Horizon's Blades II
+53338,Scroll of Cassius' Ring of Fire II
+53339,Scroll of Nuhmudira's Spines II
+53340,Scroll of Halo of Frost II
+53341,Scroll of Eye of the Storm II
+53342,Scroll of Tectonic Rifts II
+53343,Scroll of Ring of Skulls II
+53356,Farmer's Basement Portal Gem
+53440,Empowered Amber: Shield Reinforcement
+53441,Luminous Amber: Shield Fortification
+53450,Viridian Rise Deru Portal Sending Gem
+53452,Corrupted Amber: Weapon of the Corrupted Heart.
+53453,Corrupted Amber: Weapon of the Corrupted Soul.
+70005,Tethana's Price
+70007,Hagra's Treaty
+70094,Offering to Xik Minru
+70095,Offering to Xik Minru
+70096,Offering to Xik Minru
+70097,Offering to Xik Minru
+70191,Amateur Explorer Axe Cast
+70193,Amateur Explorer Dagger Cast
+70194,Seasoned Explorer Dagger Cast
+70195,Amateur Explorer Mace Cast
+70196,Seasoned Explorer Mace Cast
+70197,Amateur Explorer Spear Cast
+70198,Seasoned Explorer Spear Cast
+70199,Amateur Explorer Staff Cast
+70200,Seasoned Explorer Staff Cast
+70201,Amateur Explorer Sword Cast
+70202,Seasoned Explorer Sword Cast
+70203,Amateur Explorer Unarmed Cast
+70204,Seasoned Explorer Unarmed Cast
+70206,Amateur Explorer Arbalest
+70207,Seasoned Explorer Slingshot
+70208,Amateur Explorer Slingshot
+70210,Amateur Explorer Shield
+70254,Amateur Explorer Greataxe
+70272,Mistress Halmera's Notes
+70274,Master Alizari's Notes
+70288,Broken Occultus Seal
+70338,Swift Strike Gauntlets
+70339,Quick Strike Gauntlets
+70363,Research Notes
+70921,Atlan's Coded Notebook
+70971,Whispering Blade Introduction
+71040,Barely Comprehensible Magic Scroll
+71081,Gladiator Diemos Pass Stub
+71142,The Royal Bull of Sanamar
+71189,Shimmering Prismatic Oil
+71246,Two Hander Specialist's Gauntlets
+71359,Amulet of the Green Crystal
+71382,Staff of Red Crystal
+71394,Sword of the White Crystal
+71759,Blighted Wand
+71760,Blighted Atlatl
+71761,Blighted Bow
+71762,Blighted Crossbow
+71763,Blighted Two Handed Spear
+71764,Blighted Mace
+71765,Blighted Axe
+71766,Blighted Dagger
+71767,Blighted Spear
+71768,Blighted Staff
+71769,Blighted Sword
+71770,Black Market Advancement Gem
+71882,Penguin Egg
+71883,Partially-eaten Cookie
+71884,Portable Igloo
+72003,Scroll of Viridian Rise Tree Recall
+72004,Stormwood Atlatl
+72005,Stormwood Staff
+72006,Stormwood Dagger
+72034,Spirited Apathy Guard
+72035,Spirited Bloodlust Guard
+72036,Spirited Envy Guard
+72037,Spirited Spite Guard
+72038,Spirited Spite Guard
+72131,Crystal Artifact of Torment
+72132,Crystal Artifact of Rage
+72168,Translated Dulled Message Shard
+72169,Translated Faded Message Shard
+72170,Translated Fractured Message Shard
+72204,Mhoire Sword of Virtue
+72280,Jester Prison Key
+72297,Torn Parchment
+72298,Torn Parchment
+72299,Torn Parchment
+72300,Torn Parchment
+72301,Torn Parchment
+72302,Torn Parchment
+72303,Torn Parchment
+72304,Torn Parchment
+72305,Torn Parchment
+72306,Torn Parchment
+72307,Torn Parchment
+72308,Torn Parchment
+72626,Coded Note from Tanada Kutekei
+72628,Legendary Key
+72745,Rift Opening Device
+72746,Rift Closing Device
+72799,The Sisters of Light
+72843,Door Key
+72891,Modified Dauloirae
+72938,Potion
+72939,Potion
+72940,Potion
+72941,Potion
+72942,Potion
+72943,Potion
+72944,Potion
+72945,Potion
+72946,Potion
+72947,Potion
+72966,Interactions and Observations; 'Gear Knights'
+72975,Sleeping Armoredillo
+72977,Sleeping Tusker
+72979,Sleeping Ursuin
+72980,Drugged Meat
+72997,Rytheran's Letter
+73050,Thief's List
+73067,Count Dardante's Island Portal Gem
+73246,Purified Quiddity Ingot
+73259,Directives
+80016,Carenzi Cup
+80023,Void Crystal
+80078,Pon Mi's confession
+80302,Radiant Blood Letter of Introduction
+80306,Corrupted Mana Shard
+80438,Ornate Armor Writ
+81080,Mysterious Untranslated Scroll
+87040,Translated Thief of Dreams Message Shard
+87141,Enhanced Skeletal Atlatl
+87142,Enhanced Energy Crown
+87143,Enhanced Obsidian Axe
+87153,Monster Fight Shirt
+87214,K'nath Core
+87216,Empowered K'nath Core
+87220,Small Ruschk Ice Totem
+87222,Vial of strange fluid
+87273,Observations and Instructions: Dojiro Sangi
+87458,Arm; Mind and Heart Upgrades
+87459,Bastion of Tukal
+87460,Sleeves of Inexhaustibility
+87461,Spear of Purity
+87462,Staff of Clarity
+87467,The Story of the Lost Sisters
+87468,The Story of the Lost Sisters
+87476,Carved Platinum Heart
+87481,Plucked Eye of T'thuun
+87522,Elder Spirits Seal Fragment
+87528,Translated Elder Spirits Tablet
+87536,Messenger's Journal
+87546,Head of Pontifex Maegris
+87549,Rossu Morta Token
+87588,Ruschk Aspect Slayer Token
+87613,Shadow Aspect Slayer Title Token
+87656,A Formal Request
+87670,Medallion of the Sword
+87671,Sealed Missive
+87680,Tanada House of Water Orders
+87737,Fine Atlatl Handle
+87738,Superb Atlatl Handle
+87739,Exquisite Atlatl Handle
+87740,Carved Great Mattekar Horn
+87823,Royal Olthoi Jelly
+87824,Large Corrupted Mana Shard
+87826,Wharu Fetish
+87837,Faintly Glowing Data Crystal
+87838,Glowing Data Crystal
+88201,Seed of Essence
+88216,Seed of Essence
+88228,Seed of Essence
+88413,Ingot

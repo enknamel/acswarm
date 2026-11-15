@@ -1,7 +1,7 @@
 //! A journey's NPC step: walked to, handed its item or used, then through the portal it summons
 //! in front of it or carried off (a teleport): Faladha the Emissary's portal to Aerlinthe for a
-//! 10,000 note (`portals::npc_ways`). Its retries and give-up are a gem's (`gem_room::gem_next`),
-//! counted from when the NPC's own emote delays are over.
+//! 10,000 note (`portals::npc_ways`). Objects it asks used first are walked to and used before it
+//! (Browerk's Eyes). Retries and give-up are a gem's (`gem_room::gem_next`), after its emotes.
 
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,7 @@ struct NpcStep<'a> {
     item: Option<u32>,
     summons: bool,
     secs: f32,
+    first: &'a [(u32, Place)],
     mouth: Place,
 }
 
@@ -35,6 +36,7 @@ impl Client {
             item,
             portal,
             secs,
+            first,
             mouth,
             ..
         } = step
@@ -47,6 +49,7 @@ impl Client {
             item: *item,
             summons: portal.is_some(),
             secs: *secs,
+            first,
             mouth: *mouth,
         };
         self.npc_step(&step, now)
@@ -55,6 +58,11 @@ impl Client {
     fn npc_step(&mut self, step: &NpcStep, now: Instant) -> Option<Goal> {
         let me = self.my_position()?;
         let first = self.travel.state.gem_used.is_none();
+        if first {
+            if let Some(next) = self.npc_first_use(step, me, now) {
+                return next;
+            }
+        }
         if first && me.distance(step.mouth.at) > crate::visit::REACH {
             if !self.is_in_region(step.mouth) {
                 return self.overland_goal(step.mouth.at.truncate());
@@ -126,6 +134,40 @@ impl Client {
             GemNext::GiveUp => self.travel_npc_refused(step, "opened no way"),
         }
         None
+    }
+
+    /// The step's next object to use before its NPC (`NpcStep::first`): walked to, then used once
+    /// (each starts a server event, so a use more is harmless); `None` once all are used.
+    fn npc_first_use(
+        &mut self,
+        step: &NpcStep,
+        me: glam::Vec3,
+        now: Instant,
+    ) -> Option<Option<Goal>> {
+        let used = &self.travel.state.firsts_used;
+        let &(wcid, place) = step.first.iter().find(|(w, _)| !used.contains(w))?;
+        if me.distance(place.at) > crate::visit::REACH {
+            if !self.is_in_region(place) {
+                return Some(self.overland_goal(place.at.truncate()));
+            }
+            return Some(Some(Goal::At {
+                place,
+                within: NPC_STOP,
+            }));
+        }
+        let Some(guid) = self.npc_near(wcid, place) else {
+            self.travel_npc_refused(step, "has something to use first that is not there");
+            return Some(None);
+        };
+        if self.hands_busy(now) {
+            return Some(None);
+        }
+        tracing::info!("travel: using {wcid} before {}", step.name);
+        self.session
+            .send_action(ac_net::messages::action::USE, &guid.to_le_bytes());
+        self.autoplay.cast_sent = Some(now);
+        self.travel.state.firsts_used.push(wcid);
+        Some(None)
     }
 
     /// The NPC of weenie class `npc` in view nearest its spot `at`, within [`NPC_NEAR`].

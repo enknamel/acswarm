@@ -35,6 +35,9 @@ AWARD_LUMINANCE = 113
 BRANCHING = {20, 21, 30, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 51, 58, 59, 60, 67, 71,
              75, 76, 79, 80, 82, 89, 102, 103, 104, 105, 114, 121}
 LEVEL_STAT = 25
+# InqEvent, asking whether a server event runs, and its replies (EmoteType.cs, EmoteCategory.cs).
+INQ_EVENT, EVENT_OK, EVENT_NO = 51, 27, 28
+EVENT_UNREAD = "a check of type %d" % INQ_EVENT
 # ACE's top level (Player_Xp.cs GetMaxLevel): a band reaching it is open above.
 MAX_LEVEL = 275
 DEPTH = 8
@@ -749,6 +752,8 @@ def walk(data, root):
                     cats = ((QUEST_OK, True), (QUEST_NO, False))
                 elif t in (INQ_INT, INQ_OWNS):
                     cats = ((TEST_OK, True), (TEST_NO, False))
+                elif t == INQ_EVENT:
+                    cats = ((EVENT_OK, True), (EVENT_NO, False))
                 else:
                     # A check the client cannot read: every reply keyed on it is a path.
                     alts = [x for x in data.outcomes(obj, None, a["msg"]) if x["id"] not in seen]
@@ -870,7 +875,27 @@ def way_of(data, obj, effects):
             did = 31 if data.summon_link[a["spell"]] <= 1 else 48
             if (obj, did) in data.link_portal:
                 return data.link_portal[(obj, did)], secs
+        # A sending cast on whoever it runs for (EmoteManager.cs:223-233) carries them to the
+        # spell's position (WorldObject_Magic.cs:323-325): Qin Xikit's temple Guardian.
+        if a["type"] in (CAST_SPELL, CAST_INSTANT) and a["spell"] in data.spell_pos:
+            cell, x, y, z = data.spell_pos[a["spell"]]
+            return (0, cell, x, y, z, 0, 0, ""), secs
     return None
+
+
+def event_starters(data, events, cell):
+    """For each event a way asks running, a placed object in `cell`'s landblock whose use starts
+    it (the Eyes of the Watcher fuelling Browerk's Portal Device), as `wcid:CELL:x:y:z`; None when
+    one has none."""
+    out = set()
+    for ev in sorted(set(events)):
+        at = sorted((o, pc, px, py, pz) for kind, o, _ in data.starts.get(ev, ()) if kind == "use"
+                    for pc, px, py, pz in data.placed.get(o, ()) if pc >> 16 == cell >> 16)
+        if not at:
+            return None
+        o, pc, px, py, pz = at[0]
+        out.add("%d:%08X:%s:%s:%s" % (o, pc, px, py, pz))
+    return sorted(out)
 
 
 def npc_ways(data, never):
@@ -890,9 +915,10 @@ def npc_ways(data, never):
                     continue
                 way, secs = found
                 r = read_path(data, root, branches, effects, never)
-                if r["unread"] or r["kill"] or r["timer"] or r["start"] or r["unneeds"]:
+                unread = [u for u in r["unread"] if u != EVENT_UNREAD]
+                if unread or r["kill"] or r["timer"] or r["start"] or r["unneeds"]:
                     continue
-                if r.get("waiting") or len(r["items"]) > (root["cat"] == GIVE):
+                if r.get("waiting") or r.get("event_off") or len(r["items"]) > (root["cat"] == GIVE):
                     continue
                 portal, cell, x, y, z, lo, hi, flag = way
                 band_lo = max(r["band"][0], lo)
@@ -902,9 +928,13 @@ def npc_ways(data, never):
                 needs = sorted(set(r["needs"]) | ({flag.lower()} if flag else set()))
                 item = root["wcid"] if root["cat"] == GIVE else 0
                 for pc, px, py, pz in places:
+                    first = event_starters(data, r["events"], pc)
+                    if first is None:
+                        continue
                     out.add((str(obj), data.name.get(obj, ""), "%08X" % pc, px, py, pz, str(item),
                              ";".join(needs), str(band_lo), str(band_hi), str(portal),
-                             "%08X" % cell, x, y, z, "%g" % round(secs, 1)))
+                             "%08X" % cell, x, y, z, "%g" % round(secs, 1),
+                             ";".join(first)))
     return sorted(out)
 
 
@@ -949,7 +979,7 @@ def read_path(data, root, branches, effects, never):
     `never`: flags no row of the file stamps, so never held; None on the first pass."""
     stamped = stamps_of(effects)
     r = {"band": [0, 0], "timer": "", "repeat": 0, "kill": None, "items": [], "needs": [],
-         "start": None, "unneeds": [], "unread": []}
+         "start": None, "unneeds": [], "unread": [], "events": []}
     if root["cat"] in (GIVE, REFUSE):
         r["items"].append((root["wcid"], 1))
     for t, ok, a in branches:
@@ -959,6 +989,15 @@ def read_path(data, root, branches, effects, never):
         q = qname(a["msg"])
         quest = data.quest.get(q)
         counter = q in data.counter_of
+        if t == INQ_EVENT:
+            # A server event the client cannot see running: unread for a quest, while a way its
+            # starters' uses can open first keeps the events it asks running (`event_starters`).
+            r["unread"].append(EVENT_UNREAD)
+            if not ok:
+                r["event_off"] = True
+            elif a["msg"]:
+                r["events"].append(a["msg"].lower())
+            continue
         if t == INQ_INT:
             if num(a["stat"]) != LEVEL_STAT:
                 r["unread"].append("a check of stat %d" % int(num(a["stat"])))
@@ -1745,6 +1784,10 @@ def main():
     with open(os.path.join(out_dir, "goal_items.csv"), "w", encoding="utf-8", newline="") as f:
         f.write(GOAL_ITEMS_HEADER)
         write_rows(f, [(str(c), data.name.get(c, "")) for c in goals])
+    with open(os.path.join(out_dir, "reward_items.csv"), "w", encoding="utf-8", newline="") as f:
+        f.write(REWARD_ITEMS_HEADER)
+        write_rows(f, [(str(c), data.name[c]) for c in sorted(reward_items(rows_out))
+                       if data.name.get(c)])
     ways = npc_ways(data, asked - stamped)
     summoned = {(c,) + w for c, w in data.summons.items()}
     summoned |= {(int(r[0]),) + data.link_portal[(int(r[0]), d)]
@@ -1841,6 +1884,11 @@ GOAL_ITEMS_HEADER = """\
 # quest_sources.csv. wcid,name. Regenerate with reference/scripts/data/quests.sh.
 """
 
+REWARD_ITEMS_HEADER = """\
+# Every item a quest in quests.csv gives, by name: the quest book's rewards
+# (ac_world::quest_chain::reward_name). wcid,name. Regenerate with reference/scripts/data/quests.sh.
+"""
+
 PICKUPS_HEADER = """\
 # Items whose pickup the server limits (an item's Quest, PropertyString 33): picked up while its
 # stamp waits, "You have solved this quest too recently!" (Player_Inventory.cs:1249-1262).
@@ -1931,10 +1979,12 @@ SUMMONS_HEADER = """\
 NPC_WAYS_HEADER = """\
 # Ways a placed NPC opens for whoever hands it an item or uses it: a portal it summons in front
 # of it (Faladha the Emissary's to Aerlinthe, for a 10,000 note) or a teleport (EmoteType 99).
-# npc_wcid,npc,cell,x,y,z,item,needs,min_level,max_level,portal_wcid,to_cell,to_x,to_y,to_z,secs
+# npc_wcid,npc,cell,x,y,z,item,needs,min_level,max_level,portal_wcid,to_cell,to_x,to_y,to_z,secs,first
 # item: what is handed, 0 for a use. needs: flags held first, ;-separated. Level band 0: open.
-# portal_wcid 0: a teleport. x/y/z local to the cell's landblock. secs: the NPC's emote delays
-# before the portal is summoned or the teleport made.
+# portal_wcid 0: a teleport (EmoteType 99, or a sending spell cast). x/y/z local to the cell's
+# landblock. secs: the NPC's emote delays before the portal is summoned or the teleport made.
+# first: placed objects in the NPC's landblock used first, ;-separated wcid:cell:x:y:z, each
+# starting a server event the NPC asks running (Browerk's Portal Device, the Eyes of the Watcher).
 # Regenerate with reference/scripts/data/quests.sh.
 """
 
