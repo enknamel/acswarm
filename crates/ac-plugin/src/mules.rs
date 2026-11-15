@@ -149,7 +149,7 @@ impl Mules {
                 c.set_mule_kept(kept.clone());
             }
             let Some(i) = self.roster_of(c) else { continue };
-            mule_rules(c);
+            mule_rules(c, cx.now);
             if c.is_mule_holding() {
                 self.roster[i].ready = true;
                 self.roster[i].room = Some(c.room_anywhere());
@@ -380,7 +380,12 @@ impl Mules {
 
 /// A mule's rules: autoplay on, off the team, the Academy done first, and a mule after it, buying
 /// only packs.
-fn mule_rules(c: &mut Client) {
+fn mule_rules(c: &mut Client, now: Instant) {
+    // Found not a mule: what it set off on under the rules every session is given first (the
+    // hunter's buy list, its quest calls) is dropped, or the mule is never parked to be met.
+    if !c.autoplay.config.mule {
+        c.town_run_stop(now);
+    }
     let cfg = &mut c.autoplay.config;
     cfg.enabled = true;
     cfg.mule = true;
