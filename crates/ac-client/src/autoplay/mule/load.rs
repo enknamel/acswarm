@@ -75,16 +75,19 @@ impl Client {
             self.autoplay.muling.loading = false;
             return false;
         }
-        if !self.autoplay.muling.loading && self.pack_low_on_room() {
+        // Short of slots, or of weight as a town run counts it: salvage bags weigh 100 each, and a
+        // pack of them sent him to town with 42 slots free and never called the mule.
+        let cfg = self.autoplay.config.growth.clone();
+        let full = self.pack_low_on_room() || self.laden(&cfg);
+        if !self.autoplay.muling.loading && full {
             // Only an appraisal tells a tinkered or inscribed thing: asked before the load is read.
             let unknown = self.unappraised_load();
             if !unknown.is_empty() {
                 self.appraise_many(unknown);
             }
         }
-        if !self.autoplay.muling.loading && self.pack_low_on_room() && !self.mule_load().is_empty()
-        {
-            tracing::info!("muling: the pack is low, a mule is wanted");
+        if !self.autoplay.muling.loading && full && !self.mule_load().is_empty() {
+            tracing::info!("muling: the pack is low or heavy, a mule is wanted");
             self.autoplay.muling.loading = true;
             self.autoplay.muling.mule_full = false;
             // Another mule may take what the last refused.

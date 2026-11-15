@@ -246,3 +246,35 @@ fn a_trip_to_the_mule_is_not_taken_back_to_the_area() {
     c.autoplay.muling.loading = false;
     assert!(c.autoplay_keep_to_area(now));
 }
+
+#[test]
+fn a_pack_heavy_with_kept_things_wants_a_mule_with_slots_to_spare() {
+    // 93% of his capacity in salvage bags and 42 slots free: the weight sent him to town, which
+    // sells none of it, and the mule was never called.
+    let mut c = character_of_level(no_data(), 75);
+    crate::testkit::with_a_pack(&mut c, 100);
+    stand(&mut c, HOLTBURG, glam::Vec3::new(84.0, 7.1, 94.0));
+    a_loot_profile(&mut c, "mule-load-test");
+    c.autoplay.config.growth.mule_runs = true;
+    carried(
+        &mut c,
+        0x8000_0031,
+        "Breastplate",
+        kind::ARMOR,
+        LootAction::Keep,
+    );
+    assert!(!c.pack_low_on_room());
+    assert!(!c.is_mule_wanted(), "light, with room: no mule");
+    // Strength 60, capacity 9000; ENCUMBRANCE_VAL (5), what the server says is carried, at the
+    // wall of three times that.
+    c.world.stats.attributes[0].base = 60;
+    let (_, capacity) = c.burden();
+    assert_eq!(capacity, 9_000);
+    c.world.stats.ints.retain(|(k, _)| *k != 5);
+    c.world.stats.ints.push((5, (capacity * 3) as i32));
+    assert!(!c.pack_low_on_room(), "slots to spare");
+    assert!(
+        c.is_mule_wanted(),
+        "heavy with kept things and no mule called"
+    );
+}
