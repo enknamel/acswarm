@@ -312,6 +312,14 @@ impl Client {
         let Some(since) = self.autoplay.growth.quiet_since else {
             return false;
         };
+        // A patrol of an area since swapped for another is let go: keep to the area would pull
+        // the walk back each tick (test: a_patrol_of_an_area_swapped_out_is_let_go).
+        if let Some((goal, _)) = self.autoplay.growth.looking_to {
+            let corners = self.hunting_area().and_then(crate::hunt::corners);
+            if corners.is_some_and(|c| !crate::hunt::inside(goal, &c)) {
+                self.autoplay.growth.looking_to = None;
+            }
+        }
         // A roam or patrol under way is asked for each tick until it arrives or is refused.
         if self.autoplay.growth.looking_to.is_some() {
             if self.followed_leader().is_none() && self.look_about() {

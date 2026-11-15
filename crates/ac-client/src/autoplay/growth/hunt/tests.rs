@@ -1169,3 +1169,37 @@ fn a_ground_stood_on_over_its_landblock_s_edge_is_waited_at_not_left() {
     assert!(!c.grow_hunt(now, &cfg), "{}", c.autoplay.status);
     assert!(!c.traveling(), "left: {}", c.autoplay.status);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_patrol_of_an_area_swapped_out_is_let_go() {
+    // Its point in the old area "test", the area now "test2": the patrol walked out, keeping to
+    // the area walked back, six times a second.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    let me = c.player.as_ref().unwrap().world_position();
+    let now = Instant::now();
+    let cfg = Growth::default();
+    c.world.stats.level = 20;
+    let square = |x: f32| crate::hunt::Shape::Outline {
+        points: vec![
+            [x - 20.0, me.y - 20.0],
+            [x + 20.0, me.y - 20.0],
+            [x + 20.0, me.y + 20.0],
+            [x - 20.0, me.y + 20.0],
+        ],
+    };
+    c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {
+        name: "test2".into(),
+        shape: square(me.x),
+    });
+    let old = glam::Vec2::new(me.x + 120.0, me.y);
+    c.autoplay.growth.looking_to = Some((old, "nothing in sight; looking about test".into()));
+    c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(60));
+    c.grow_hunt(now, &cfg);
+    assert_ne!(
+        c.autoplay.growth.looking_to.as_ref().map(|l| l.0),
+        Some(old),
+        "still walking the old area's patrol"
+    );
+}
