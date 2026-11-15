@@ -466,6 +466,7 @@ impl AddForm {
                 sex: SEXES.get(self.sex).map(|s| s.0.to_string()),
                 template: TEMPLATES.get(self.template).map(|s| s.to_string()),
                 town: TOWNS.get(self.town).map(|s| s.to_string()),
+                strong: false,
             })
         } else {
             None
@@ -2433,6 +2434,7 @@ mod tests {
                 town: Some("Holtburg".into()),
                 heritage: Some("Aluvian".into()),
                 sex: Some("m".into()),
+                strong: false,
             }),
             role,
         }
@@ -2481,6 +2483,7 @@ mod tests {
                 town: Some("Holtburg".into()),
                 heritage: Some("Aluvian".into()),
                 sex: Some("m".into()),
+                strong: false,
             }),
         };
         let fleet = Fleet {

@@ -598,3 +598,32 @@ fn a_run_whose_recall_is_still_going_up_waits_for_it_not_crossing_the_counter_of
     assert_eq!(run.vendor, "Shopkeeper Renald the Elder");
     assert_eq!(run.phase, Phase::Going);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_run_stands_aside_for_the_mule() {
+    // A run under way and a mule to load took the journey from each other every few seconds, and
+    // the recall each planned never went up.
+    use crate::autoplay::steps::{worth_muling, worth_town_run};
+    let holtburg = 0xA9B4_0019;
+    let now = Instant::now();
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    let renald = Vec2::new(32_587.2, 34_578.3);
+    c.autoplay.growth.run = Some(run_to(renald, now));
+    assert!(worth_town_run(&c, now) > 0.0, "a run under way goes on");
+    let me = c.player.as_ref().unwrap().world_position();
+    c.autoplay.muling.loading = true;
+    c.autoplay.muling.meet = Some(crate::autoplay::Meet {
+        name: "Mule".into(),
+        place: ac_world::Place {
+            at: me - glam::Vec3::X * 60.0,
+            cell: holtburg,
+        },
+    });
+    assert_eq!(
+        worth_town_run(&c, now),
+        0.0,
+        "the run took the journey from the mule"
+    );
+    assert!(worth_muling(&c, now) > 0.0);
+}

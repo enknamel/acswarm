@@ -495,6 +495,11 @@ pub(crate) fn draw(
                         "what it takes, and how, is edited in the Loot profiles window".to_string()
                     },
                 );
+                ui.checkbox(&mut cfg.loot.on_the_road, "loot on the way somewhere")
+                    .on_hover_text(
+                        "Off: on a town run, or walking to the hunting ground or a mule, bodies \
+                         are left; one already open and a pursued quest creature's still are",
+                    );
                 // A count, so a character with nothing worth taking can be
                 // told from one that is not looting: Blargerton's log said
                 // "emptied" either way.
@@ -900,6 +905,7 @@ impl Autoplay {
             },
             loot: Loot {
                 profile: "Starter".into(),
+                on_the_road: true,
             },
             growth: Default::default(),
             mule: false,
@@ -1229,8 +1235,20 @@ impl Plugin for Autoplay {
         // yet there threw the rules away and never tried again: a
         // headless run would silently play by the defaults, and whether
         // it did came down to timing.
+        // A mule host's session plays by the mule's rules alone: given these first, a new mule set
+        // off with the hunter's buy list and quest calls before its own rules came.
+        let mules: Vec<String> = cx
+            .board
+            .get(crate::mules::ACCOUNTS_KEY)
+            .and_then(|v| v.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|m| m.get("account")?.as_str().map(str::to_string))
+            .collect();
         if let Some(c) = cx.try_client() {
-            c.autoplay.config = saved;
+            if !mules.contains(&c.config.account) {
+                c.autoplay.config = saved;
+            }
             self.applied.insert(i);
         }
     }

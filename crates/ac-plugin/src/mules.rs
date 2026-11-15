@@ -152,7 +152,10 @@ impl Mules {
             mule_rules(c, cx.now);
             if c.is_mule_holding() {
                 self.roster[i].ready = true;
-                self.roster[i].room = Some(c.room_anywhere());
+                // Slots and weight both: a full one refuses with slots to spare (Str 10, 4499 of
+                // 4500), and counted by slots it was picked, and refused, again and again.
+                let by_weight = c.burden_room() / LOAD_BURDEN;
+                self.roster[i].room = Some(c.room_anywhere().min(by_weight));
             }
         }
         if let Some(account) = self.refused.take() {
@@ -204,7 +207,11 @@ impl Mules {
                 password: m.password.clone(),
                 character: Some(m.character.clone()),
                 // Made where the account lacks it: a new mule's first login.
-                create: (!m.ready).then(|| CreateSpec::named(m.character.clone())),
+                // Strength at its most: a mule's carrying is 150 a point of it.
+                create: (!m.ready).then(|| CreateSpec {
+                    strong: true,
+                    ..CreateSpec::named(m.character.clone())
+                }),
                 // Off the team: a follower would join the party's supplies and be shopped for.
                 role: Role::Manual,
             });
@@ -377,6 +384,9 @@ impl Mules {
             .unwrap_or(0)
     }
 }
+
+/// Burden of one thing loaded, for a mule's room by weight: a full salvage bag's.
+const LOAD_BURDEN: u32 = 100;
 
 /// A mule's rules: autoplay on, off the team, the Academy done first, and a mule after it, buying
 /// only packs.

@@ -161,6 +161,7 @@ impl std::str::FromStr for SessionSpec {
                 town: field(4),
                 heritage: field(5),
                 sex: field(6),
+                strong: false,
             }),
             _ => None,
         };

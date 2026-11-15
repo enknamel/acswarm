@@ -239,6 +239,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
         sex: cli.gender.clone(),
         template: cli.template.clone(),
         town: cli.start_area.clone(),
+        strong: false,
     });
     let mut specs: Vec<SessionSpec> = cli
         .clients

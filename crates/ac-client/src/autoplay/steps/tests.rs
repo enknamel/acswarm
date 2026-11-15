@@ -648,3 +648,31 @@ fn a_reflex_that_claims_the_tick_names_the_step_that_did() {
         "the reflex that claimed the tick did not name itself"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn with_road_looting_off_a_body_on_the_way_somewhere_is_left() {
+    let holtburg = 0xA9B4_0019;
+    let mut c = crate::testkit::standing_at(holtburg, glam::Vec3::new(84.0, 84.0, 94.0));
+    let me = c.player.as_ref().unwrap().world_position();
+    let now = Instant::now();
+    let guid = 0x8000_0001;
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            position: crate::testkit::placed(holtburg, me),
+            ..crate::testkit::corpse(guid, "Corpse of Drudge Slave")
+        },
+    );
+    assert!(c.travel_to(me.truncate() + glam::Vec2::new(150.0, 0.0)));
+    assert!(c.on_its_way());
+    assert!(
+        worth_looting(&c, now) > 0.0,
+        "looted on the road by default"
+    );
+    c.autoplay.config.loot.on_the_road = false;
+    assert_eq!(worth_looting(&c, now), 0.0, "a body on the road was looted");
+    // Arrived, or no journey: looted again.
+    c.cancel_travel();
+    assert!(worth_looting(&c, now) > 0.0);
+}

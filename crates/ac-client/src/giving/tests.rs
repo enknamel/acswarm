@@ -176,6 +176,24 @@ fn a_refuse_emote_by_code_alone_ends_the_gives() {
 }
 
 #[test]
+fn a_give_cancelled_on_the_way_to_the_mule_goes_again_not_refused() {
+    // Just through a portal and still walking: the server's walk to the mule was cut short (0x36)
+    // and all 55 things were taken for refused, the mule let go with none.
+    let now = Instant::now();
+    let mut c = in_holtburg();
+    beside(&mut c, MULE, "Mule", 0, 1.0);
+    stack_of(&mut c, 0x8000_0001, SEEDS, 1);
+    assert!(c.give_all(MULE, SEEDS, None));
+    c.tick_giving(now);
+    c.move_refused.insert(0x8000_0001, (ACTION_CANCELLED, now));
+    c.tick_giving(now);
+    assert!(c.giving.is_some(), "a cancelled give ended the gives");
+    assert!(!c.is_give_refused(0x8000_0001));
+    c.tick_giving(now + CANCELLED_AGAIN);
+    assert_eq!(gives_sent(&c).len(), 2);
+}
+
+#[test]
 fn a_give_turned_away_mid_emote_goes_again_once_the_wait_is_over() {
     let now = Instant::now();
     let mut c = in_holtburg();

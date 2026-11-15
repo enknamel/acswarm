@@ -426,6 +426,20 @@ impl CharacterBuild {
         rules.attribute_credits as i64 - self.attribute_points_used() as i64
     }
 
+    /// Strength at its most, the others lowered, the highest first, until the points fit.
+    pub fn strength_first(&mut self, rules: &Rules) {
+        self.set_attribute(STRENGTH, ATTRIBUTE_MAX);
+        while self.attribute_points_left(rules) < 0 {
+            let Some(i) = (0..self.attributes.len())
+                .filter(|&i| i != STRENGTH && self.attributes[i] > ATTRIBUTE_MIN)
+                .max_by_key(|&i| self.attributes[i])
+            else {
+                break;
+            };
+            self.attributes[i] -= 1;
+        }
+    }
+
     /// Set an attribute, clamped to 10..=100. Returns the value stored.
     pub fn set_attribute(&mut self, index: usize, value: u32) -> u32 {
         let v = value.clamp(ATTRIBUTE_MIN, ATTRIBUTE_MAX);
@@ -767,6 +781,10 @@ pub struct CreateSpec {
     pub template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub town: Option<String>,
+    /// Strength the most creation allows, the points taken from the rest: a mule's, whose carrying
+    /// is 150 a point of it (Player_Inventory.cs:46-50).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strong: bool,
 }
 
 impl CreateSpec {
@@ -780,14 +798,18 @@ impl CreateSpec {
 
     /// The build this spec describes, with the heritage's rules.
     pub fn build(&self, assets: &Assets) -> Result<(CharacterBuild, Rules), String> {
-        CharacterBuild::from_options(
+        let (mut build, rules) = CharacterBuild::from_options(
             assets,
             &self.name,
             self.heritage.as_deref(),
             self.sex.as_deref(),
             self.template.as_deref(),
             self.town.as_deref(),
-        )
+        )?;
+        if self.strong {
+            build.strength_first(&rules);
+        }
+        Ok((build, rules))
     }
 
     /// One line for a log or a panel: "Bow Hunter, Holtburg".
@@ -1390,6 +1412,22 @@ mod tests {
             ..spec
         };
         assert!(bad.build(&assets).unwrap_err().contains("unknown template"));
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_strong_spec_has_the_most_strength_and_is_still_a_valid_build() {
+        let assets = ac_scene::Assets::open(ac_dat::test_data_dir()).unwrap();
+        let weak = CreateSpec::named("Mule One");
+        let (build, _) = weak.build(&assets).unwrap();
+        assert!(build.attributes[STRENGTH] < ATTRIBUTE_MAX);
+        let strong = CreateSpec {
+            strong: true,
+            ..weak
+        };
+        let (build, rules) = strong.build(&assets).unwrap();
+        assert_eq!(build.attributes[STRENGTH], ATTRIBUTE_MAX);
+        assert!(build.validate(&rules).is_ok(), "{:?}", build.attributes);
     }
 
     #[test]

@@ -179,7 +179,7 @@ fn fight_worth(engaged: bool, owes_a_body: bool, nearest: f32) -> f32 {
 /// What a town run is worth: one under way its place, hit or not; a new one nothing in a fight,
 /// just under looting while bodies of ours wait, and its place otherwise; the step says whether
 /// one is due (`grow_town_run`).
-fn worth_town_run(client: &Client, now: Instant) -> f32 {
+pub(crate) fn worth_town_run(client: &Client, now: Instant) -> f32 {
     let growth = &client.autoplay.growth;
     // A pursued quest's call on its giver goes with town runs off.
     let for_quest = client.pursuit_call().is_some() || growth.is_quest_run();
@@ -190,6 +190,11 @@ fn worth_town_run(client: &Client, now: Instant) -> f32 {
     // a leader is followed (test: a_run_under_way_keeps_its_old_place). Hit on the road, it walks
     // on: the fight passes everything by there, and nothing else moves the legs
     // (a_run_under_way_walks_on_while_hit).
+    // A mule met first, a run under way held till it is loaded: the two took the journey from each
+    // other every few seconds and the recall never went up (test: a_run_stands_aside_for_the_mule).
+    if client.is_muling() {
+        return 0.0;
+    }
     if growth.town_run_under_way() {
         return RUN_UNDER_WAY;
     }
@@ -201,7 +206,7 @@ fn worth_town_run(client: &Client, now: Instant) -> f32 {
 }
 
 /// Loading a mule: set off once its host says where it stands; under way, carried on as a run is.
-fn worth_muling(client: &Client, _now: Instant) -> f32 {
+pub(crate) fn worth_muling(client: &Client, _now: Instant) -> f32 {
     let m = &client.autoplay.muling;
     if !(m.loading && m.meet.is_some()) && m.fetch.is_none() {
         return 0.0;
@@ -244,10 +249,13 @@ fn worth_looting(client: &Client, now: Instant) -> f32 {
     // most of the way there, and only the looting closes it. Scoring it
     // out would stop the looting on a held body and leave it open.
     let in_hand = client.autoplay.corpse_claim(now).map(|(guid, _)| guid);
+    // The player's choice: on the way somewhere, no new body but a pursued one.
+    let passing = !client.autoplay.config.loot.on_the_road && client.on_its_way();
     let waiting = client
         .world
         .objects
         .values()
+        .filter(|o| !passing || in_hand == Some(o.guid) || sought == Some(o.guid))
         // Exactly the bodies the looting would go to (see
         // [`Client::corpse_for_us`]). A body the looting has finished
         // with, set aside, out of reach, or claimed by a teammate is not

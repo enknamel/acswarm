@@ -226,6 +226,14 @@ pub struct Loot {
     /// character would quietly stop reading its profile.
     #[serde(default = "starter")]
     pub profile: String,
+    /// Bodies opened on the way somewhere (a town run, the walk to a ground or a mule); off, only
+    /// one already open and a pursued quest creature's are.
+    #[serde(default = "on")]
+    pub on_the_road: bool,
+}
+
+fn on() -> bool {
+    true
 }
 
 /// The profile the shelf seeds itself with, which is what a character
@@ -236,7 +244,10 @@ fn starter() -> String {
 
 impl Default for Loot {
     fn default() -> Self {
-        Loot { profile: starter() }
+        Loot {
+            profile: starter(),
+            on_the_road: true,
+        }
     }
 }
 

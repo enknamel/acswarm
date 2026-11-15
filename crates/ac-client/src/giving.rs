@@ -21,6 +21,11 @@ const ANSWER_LOST: Duration = Duration::from_secs(20);
 const ATTUNED_ITEM: u32 = 0x0426;
 /// ACE's `TradeAiRefuseEmote` (0x04CD): an NPC's Refuse emote (Player_Inventory.cs:3465).
 const REFUSE_EMOTE: u32 = 0x04CD;
+/// ACE's `ActionCancelled` (0x0036): its walk to the receiver cut short, not a refusal
+/// (Player_Inventory.cs:3249-3259).
+const ACTION_CANCELLED: u32 = 0x0036;
+/// After a give cancelled on the way, the next is sent this much later (guess: a tick or two).
+const CANCELLED_AGAIN: Duration = Duration::from_secs(1);
 /// PropertyInt Attuned (114), an assessment property; 2 is Sticky (AttunedStatus.cs).
 const ATTUNED: u32 = 114;
 const STICKY: i32 = 2;
@@ -264,6 +269,12 @@ impl Client {
                     // That one stays; the rest may go (Player_Inventory.cs:3280-3283).
                     self.give_refused(sent.item, "attuned: no player can be given it");
                     g.items.retain(|&i| i != sent.item);
+                } else if err == ACTION_CANCELLED
+                    && g.busy < crate::autoplay::growth::GIVE_BUSY_TRIES
+                {
+                    g.busy += 1;
+                    g.again_at = Some(now + CANCELLED_AGAIN);
+                    return None;
                 } else {
                     let why = match err {
                         REFUSE_EMOTE => format!("{} handed it back", g.to_name),
