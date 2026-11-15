@@ -13,6 +13,8 @@ pub(crate) struct Room {
     pub(crate) past_the_wall: bool,
     /// How much more loot it means to carry (see `Client::carry_room`).
     pub(crate) carry: u32,
+    /// Laden with town runs on: the run is due, and no body waits on it (see `Client::laden`).
+    pub(crate) laden: bool,
 }
 
 impl Room {
@@ -22,6 +24,7 @@ impl Room {
         pack_low: false,
         past_the_wall: false,
         carry: u32::MAX,
+        laden: false,
     };
 }
 
@@ -162,6 +165,10 @@ impl Client {
             } else {
                 self.carry_room(&self.autoplay.config.growth)
             },
+            // Asked only once a body was left for its weight, as `carry` is.
+            laden: !self.autoplay.left_for_weight.is_empty()
+                && self.autoplay.config.growth.town_runs
+                && self.laden(&self.autoplay.config.growth),
         }
     }
 }

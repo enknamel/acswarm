@@ -378,6 +378,25 @@ fn a_body_reached_with_a_full_pack_is_set_aside_and_owed_again_after_the_sale() 
 }
 
 #[test]
+fn a_laden_character_opens_no_new_body_with_a_run_due() {
+    // Blargerton among Biaka: every fresh body gave a coin, was set aside too laden, and the
+    // town run, ranked under looting while bodies waited, never went.
+    let t0 = Instant::now();
+    let ap = Autoplay::default();
+    let (me, at) = (glam::Vec3::ZERO, glam::Vec3::new(5.0, 0.0, 0.0));
+    let fresh = 0x8000_9003;
+    let laden = Room {
+        laden: true,
+        ..Room::PLENTY
+    };
+    assert!(ap.corpse_owed(fresh, at, me, t0, Room::PLENTY));
+    assert!(
+        !ap.corpse_owed(fresh, at, me, t0, laden),
+        "a fresh body opened while laden"
+    );
+}
+
+#[test]
 fn a_body_left_for_its_weight_waits_on_room_not_on_a_clock() {
     // Laden, a character shut every body with something heavy on it as
     // too laden and set it aside for half a minute. As each wait ran

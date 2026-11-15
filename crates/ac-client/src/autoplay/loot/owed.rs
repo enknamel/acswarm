@@ -191,9 +191,13 @@ impl Autoplay {
     ///
     /// Nor does a body this character stands by for a fellow (see
     /// [`Autoplay::stands_by`]), while that fellow could still come for it.
+    ///
+    /// Nor any body once laden with town runs on: each fresh one took a coin, was set aside too
+    /// laden, and held the due run off (a_laden_character_opens_no_new_body_with_a_run_due).
     pub(crate) fn corpse_waiting(&self, guid: u32, now: Instant, room: Room) -> bool {
         !room.pack_low
             && !room.past_the_wall
+            && !room.laden
             && !self.looted.contains(&guid)
             && !self.shelved.held(&guid, now)
             && !self.stands_by(guid, now)
