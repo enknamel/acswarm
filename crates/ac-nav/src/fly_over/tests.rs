@@ -182,3 +182,25 @@ fn a_walk_with_no_way_on_foot_rises_crosses_above_both_ends_and_comes_in_level()
     let r = Route::flown_across(near, goal);
     assert_eq!(r.points(), [goal.at]);
 }
+
+#[test]
+fn a_flight_replanned_in_the_air_climbs_no_higher() {
+    // Each replan of a dungeon flight rose 5 m over where the body was, and Blargerton climbed
+    // to 5.7 km in 0x01A60325 over an hour, never crossing.
+    let goal = Place {
+        at: Vec3::new(221.6, 31794.9, 12.0),
+        cell: 0x01A6_02B6,
+    };
+    let mut at = Vec3::new(247.2, 31792.8, 24.0);
+    for _ in 0..10 {
+        let r = Route::flown_across(
+            Place {
+                at,
+                cell: 0x01A6_0325,
+            },
+            goal,
+        );
+        at = r.points()[0];
+    }
+    assert_eq!(at.z, 24.0, "climbed");
+}

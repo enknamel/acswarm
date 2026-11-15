@@ -14,7 +14,7 @@ use crate::routing::{Route, Waypoint};
 pub const TRAP_BERTH: f32 = 0.5;
 /// A capsule's floor-to-crown height: a leg this far below a sphere's bottom still touches it.
 const BODY_HEIGHT: f32 = 2.0;
-/// A walk the graph has no way for is flown this far above the higher of its ends (metres).
+/// A walk the graph has no way for is flown this far above its goal, or from higher (metres).
 pub const GAP_CLEARANCE: f32 = 5.0;
 /// A flight's last stretch, flown level at its goal's height (metres, flat): a portal fires only
 /// on a move into its mouth (ACE `PhysicsObj.cs:4357`), and one sunk onto from above may not.
@@ -215,9 +215,10 @@ fn rebuilt(route: &Route, ends: &[(Vec3, u32)], stretches: &[Stretch]) -> Route 
 
 impl Route {
     /// The walk from `from` to `goal` flown whole, where the graph has no way across (a gap, a
-    /// drop it cannot climb back, a portal hung above its floor): straight up to
-    /// [`GAP_CLEARANCE`] above the higher end, level across, down [`LEVEL_IN`] short of the goal
-    /// and level into it; one that short flown straight at it.
+    /// drop it cannot climb back, a portal hung above its floor): up to [`GAP_CLEARANCE`] above
+    /// the goal, or level from higher, across, down [`LEVEL_IN`] short of the goal and level into
+    /// it; one that short flown straight at it. A replan in the air rises no further
+    /// (a_flight_replanned_in_the_air_climbs_no_higher).
     pub fn flown_across(from: Place, goal: Place) -> Route {
         let flown = |at: Vec3, cell: u32| Waypoint {
             place: Place { at, cell },
@@ -230,7 +231,7 @@ impl Route {
                 waypoints: vec![flown(goal.at, goal.cell)],
             };
         }
-        let high = from.at.z.max(goal.at.z) + GAP_CLEARANCE;
+        let high = from.at.z.max(goal.at.z + GAP_CLEARANCE);
         let short = goal.at.truncate() - flat.normalize() * LEVEL_IN;
         Route {
             waypoints: vec![
