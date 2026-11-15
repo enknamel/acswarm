@@ -87,6 +87,9 @@ pub(super) enum Errand {
     /// that buys none of it is never chosen -- that was the walk to a
     /// tailor with a pack of peas, and home again with the peas.
     Sell,
+    /// To pack loose coin into MMDs at a counter that stocks them, the run's last stop: coin
+    /// takes a slot per 25,000, and a run is for room (a_run_ends_packing_its_coin_into_notes).
+    Notes,
 }
 
 impl Errand {
@@ -95,6 +98,7 @@ impl Errand {
         match self {
             Errand::Buy => look.worth_going(),
             Errand::Sell => look.selling > 0,
+            Errand::Notes => look.notes,
         }
     }
 }

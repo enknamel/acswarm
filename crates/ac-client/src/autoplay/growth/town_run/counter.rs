@@ -16,6 +16,8 @@ use crate::{Client, Goal};
 /// How long a counter whose window bought none of the pack is left out of the choice: a shelf
 /// list does not change between runs, and runs follow each other with no wait.
 const BUYS_NONE_HOLD: Duration = Duration::from_secs(60 * 60);
+/// The MMD's face value in pyreals (`ac_world::shops::MMD`, a 250,000 trade note).
+const MMD_FACE: u32 = 250_000;
 
 /// What a run waiting on a counter's window does next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -657,8 +659,12 @@ impl Client {
         // can't restock in full, go and hunt (a_run_short_of_coin_goes_hunting_not_round_the_shops).
         let can_pay_more = run.short_with.is_none_or(|was| self.spendable() > was);
         let buying = can_pay_more && (needs.iter().any(|n| n.urgent) || more_to_buy);
+        // Loose coin worth an MMD packed at a counter that stocks them, once: a run is for room.
+        let notes_due =
+            run.errand != Errand::Notes && self.purse() >= ac_vendor::errand::note_cost(MMD_FACE);
         // With no slot at all the next counter could not pay out either.
-        let wanting = self.room_anywhere() > 0 && (buying || still_full || more_to_sell);
+        let shopping = buying || still_full || more_to_sell;
+        let wanting = self.room_anywhere() > 0 && (shopping || notes_due);
         // No cap on stops: each is a counter not yet visited this run that the forecast says helps.
         if wanting {
             // The next counter is chosen by what is still on the list,
@@ -680,10 +686,14 @@ impl Client {
             // By the one rule every stop is chosen by (`errands_for`), from anywhere: a recall
             // makes the trip, and a second stop held to the town it was in walked past a counter
             // that took the loot.
-            let errands = self.errands_for(cfg, &needs);
+            let errands = match shopping {
+                true => self.errands_for(cfg, &needs),
+                false => vec![Errand::Notes],
+            };
             let picked = self.choose_stop(cfg, &needs, &ways, &errands, &run.visited, now);
             if let Some((errand, vendor, at, look)) = picked {
-                if look.worth_going() && self.grow_travel(counter_place(at), VENDOR_REACH) {
+                let worth = look.worth_going() || errand == Errand::Notes;
+                if worth && self.grow_travel(counter_place(at), VENDOR_REACH) {
                     let what = if more_to_sell {
                         format!("the rest of the loot ({})", self.loot_left(cfg))
                     } else {
@@ -699,7 +709,9 @@ impl Client {
                     // This stop's own reason: the run's named the first counter's wares, which
                     // this one may not stock (an_urgent_need_comes_before_the_loot_and_the_loot_is_sold_on_the_way).
                     let stocks: Vec<&str> = look.stocks.iter().map(String::as_str).collect();
-                    let reason = if stocks.is_empty() {
+                    let reason = if errand == Errand::Notes {
+                        "packing coin into notes".to_string()
+                    } else if stocks.is_empty() {
                         format!("selling {what}")
                     } else {
                         format!("short of {}", a_few(&stocks))

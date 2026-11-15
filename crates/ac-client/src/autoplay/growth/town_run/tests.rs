@@ -235,6 +235,50 @@ fn an_urgent_need_comes_before_the_loot_and_the_loot_is_sold_on_the_way() {
     assert!(!on.reason.contains("Arrowshafts"), "{}", on.reason);
 }
 
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_run_ends_packing_its_coin_into_notes() {
+    // Blargerton sold at the Pawn Shopkeep, which stocks no MMDs, and walked off with 383,151 in
+    // coin: sixteen slots of a pack the run was made to empty.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 20;
+    let keep = c.autoplay.config.team.restock.money_slots;
+    with_a_pack(&mut c, 4 + keep);
+    pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
+    pea_in_the_pack(&mut c, 0x8000_0011, "Iron Pea", 8328, 2_500);
+    pea_in_the_pack(&mut c, 0x8000_0012, "Iron Pea", 8328, 2_500);
+    pea_in_the_pack(&mut c, 0x8000_0013, "Iron Pea", 8328, 2_500);
+    let cfg = c.autoplay.config.growth.clone();
+    let now = Instant::now();
+    assert!(
+        c.grow_town_run(now, &cfg),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+    let run = c.autoplay.growth.run.take().expect("no run");
+    // Sold: the peas gone, the coin in.
+    for g in 0x8000_0010..=0x8000_0013 {
+        c.world.objects.remove(&g);
+    }
+    coin_in_the_pack(&mut c, 0x8000_0030, 383_151);
+    c.cancel_travel();
+    assert!(
+        c.grow_run_next(run, now, &cfg, None),
+        "went home with the coin"
+    );
+    let on = c.autoplay.growth.run.clone().expect("no stop for notes");
+    assert_eq!(on.errand, Errand::Notes, "{}", on.reason);
+    assert!(
+        shop_named(&on.vendor).stocks_wcid(ac_world::shops::MMD),
+        "{} stocks no MMDs",
+        on.vendor
+    );
+    // That stop made, the run ends whatever coin is left: never a tour for notes.
+    c.cancel_travel();
+    assert!(!c.grow_run_next(on, now, &cfg, None) || c.autoplay.growth.run.is_none());
+}
+
 /// Every counter within `reach` of the character that would pay for
 /// a pea, held off.
 pub(super) fn nobody_near_buys_peas(c: &mut Client, reach: f32, now: Instant) -> usize {

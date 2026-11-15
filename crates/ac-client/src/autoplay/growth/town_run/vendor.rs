@@ -94,6 +94,8 @@ pub struct Forecast {
     /// many things that is.
     pub takings: u32,
     pub selling: usize,
+    /// It stocks MMDs, so loose coin can be packed into notes there.
+    pub notes: bool,
     /// The journey there as the planner put it ("2 portals, about 3 min"); empty until planned.
     pub route: String,
 }
@@ -207,6 +209,7 @@ fn forecast(
     let mut f = Forecast {
         shop: shop.name.clone(),
         purse,
+        notes: shop.stocks_wcid(ac_world::shops::MMD),
         ..Default::default()
     };
     for (need, needle) in wants {
@@ -321,6 +324,7 @@ fn better_counter(errand: Errand, a: (&Forecast, f32), b: (&Forecast, f32)) -> s
             .cmp(&fa.takings)
             .then_with(|| fb.selling.cmp(&fa.selling))
             .then_with(to_buy),
+        Errand::Notes => std::cmp::Ordering::Equal,
     }
     .then_with(|| near_a.total_cmp(&near_b))
 }
@@ -489,7 +493,7 @@ impl Client {
         // of what is carried. Walking to one that does not is the trip
         // there and the trip back with the same pack, and there is no
         // nearest-counter fallback for it.
-        if errand == Errand::Sell {
+        if errand != Errand::Buy {
             return None;
         }
         // Nothing sells what is wanted, nothing is wanted at all, or
