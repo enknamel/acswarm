@@ -1102,8 +1102,13 @@ def build(data, never):
     as for read_path. Every path that does something for the character is a row."""
     reasons = defaultdict(int)
     paths, starts, npc_gives = [], [], defaultdict(set)
-    for obj in sorted(data.placed):
-        if data.wtype[obj] not in (10, 12):
+    # What a generator puts on the ground and gives by its Use is a source, not a giver: His
+    # Master's Voice's Tomb Rubble (80066, Use: GiveItem 70024).
+    made = {o for o in list(data.by_obj) if o not in data.placed
+            and data.kind.get(o) in (10, 12) and data.made_on_ground(o)
+            and any(s["cat"] == USE for s in data.by_obj[o])}
+    for obj in sorted(set(data.placed) | made):
+        if data.kind.get(obj) not in (10, 12):
             continue
         sets = data.by_obj[obj]
         roots = []
@@ -1146,6 +1151,8 @@ def build(data, never):
                 if root["cat"] == USE and not r["items"]:
                     for wcid, _ in r["gives"]:
                         npc_gives[wcid].add(obj)
+                if obj in made:
+                    continue
                 if (root["cat"] == USE and does == ["flag"] and r["stamps"] and not r["items"]
                         and not r["kill"] and not r["unread"]):
                     starts.append(r)
@@ -1401,7 +1408,9 @@ def build(data, never):
         if kind == "combine":
             where = ""
         elif kind in ("npc", "floor", "container", "use", "give", "portal", "revealed"):
-            if kind == "npc" or (kind == "give" and data.placed.get(c)):
+            if kind == "npc":
+                spots = data.placed.get(c) or sorted(set(data.made_on_ground(c)))
+            elif kind == "give" and data.placed.get(c):
                 spots = data.placed.get(c, [])
             elif kind == "give":
                 spots = sorted(set(data.made_on_ground(c)))
@@ -1877,8 +1886,8 @@ SOURCES_HEADER = """\
 # per kill), kill (a creature counting for the counter, or whose death starts the event, itself
 # or heard by a watcher there, or stamps the flag), give (an NPC handed its keys starts the
 # event), portal (going through it stamps the flag), revealed (as portal, made by a generator
-# once something reveals it: the Colosseum's, arenas.csv), npc (a placed NPC whose talk gives
-# the item), floor (made on the ground by a
+# once something reveals it: the Colosseum's, arenas.csv), npc (a placed NPC, or an object a generator
+# puts out, whose talk gives the item), floor (made on the ground by a
 # generator; wcid is the item's own), container (a chest that holds it, chance per fill), use
 # (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried
 # item a recipe makes it on; nowhere to go). landblocks: hex landblock:spawn entries;... (for

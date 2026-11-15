@@ -62,7 +62,9 @@ where li.weenie_Class_Id in
 q emote 'select id, object_Id, category, probability, coalesce(weenie_Class_Id, 0),
   coalesce(quest, "")
 from weenie_properties_emote
-where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select ev.object_Id
+where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select
+  ue.object_Id from weenie_properties_emote ue join weenie_properties_generator g
+  on g.weenie_Class_Id = ue.object_Id where ue.category = 7) or object_Id in (select ev.object_Id
   from weenie_properties_emote ev join weenie_properties_emote_action ea on ea.emote_Id = ev.id
   where ea.type in (23, 24, 88) or (ev.category = 3 and ea.type = 22) or ev.category = 37)
 order by object_Id, id;'
@@ -76,6 +78,8 @@ q action 'select a.emote_Id, a.order, a.type, coalesce(a.message, ""), coalesce(
 from weenie_properties_emote_action a
 where a.emote_Id in (select id from weenie_properties_emote
   where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select
+    ue.object_Id from weenie_properties_emote ue join weenie_properties_generator g
+    on g.weenie_Class_Id = ue.object_Id where ue.category = 7) or object_Id in (select
     ev.object_Id from weenie_properties_emote ev join weenie_properties_emote_action ea
     on ea.emote_Id = ev.id where ea.type in (23, 24, 88) or (ev.category = 3 and ea.type = 22)
     or ev.category = 37))

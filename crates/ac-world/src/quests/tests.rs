@@ -497,3 +497,15 @@ fn the_chakron_holds_its_inquisitors_at_load() {
     let camp = rate(12023, 0x252D);
     assert!(camp.load < 1.0 && camp.per_hour < 5.0, "{camp:?}");
 }
+
+#[test]
+fn an_item_a_spawned_objects_use_gives_has_that_object_for_its_source() {
+    // His Master's Voice asks Tomb Rubble (70024), handed out by using the Tomb Rubble a
+    // generator puts in the tomb while its event runs; only placed objects were looked at.
+    let rubble = sources_of(&Want::Item(70024))
+        .find(|s| s.wcid == 80066)
+        .expect("the Tomb Rubble a source");
+    assert_eq!(rubble.kind, Yield::Npc);
+    assert_eq!(rubble.event.as_deref(), Some("tombrubbleevent"));
+    assert!(!rubble.places.is_empty());
+}
