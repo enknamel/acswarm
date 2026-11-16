@@ -514,6 +514,12 @@ impl Client {
         if self.visiting().is_some() {
             return true;
         }
+        // The player's hunting area stands while a pursued quest sets it aside: the quest's grounds are
+        // its own journeys' to reach, and the level table picks no other
+        // (a_hunting_area_is_never_left_for_a_better_ground_while_a_quest_is_pursued).
+        if self.autoplay.config.fight.area.is_some() {
+            return false;
+        }
         let Some((g, earn)) = self.best_ground(level as u32, &skip, now) else {
             let tier = self.proven_tier() + 1;
             self.autoplay.note(

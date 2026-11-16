@@ -1203,3 +1203,36 @@ fn a_patrol_of_an_area_swapped_out_is_let_go() {
         "still walking the old area's patrol"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_hunting_area_is_never_left_for_a_better_ground_while_a_quest_is_pursued() {
+    // Blargerton, Matron Hive East his area, with a pursued quest waiting out its timer: the pursuit
+    // set the area aside, handed the hunt back, and the level table sent him 6.8 km to Brier Wasps.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    let now = Instant::now();
+    let cfg = Growth::default();
+    c.world.stats.level = 120;
+    c.autoplay.growth.proven_tier = 7;
+    c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {
+        name: "matron".into(),
+        shape: crate::hunt::Shape::Dungeon {
+            landblock: 0x6146_0000,
+            rooms: Vec::new(),
+        },
+    });
+    c.pursuit = vec![crate::autoplay::growth::pursuit::PursuitLine {
+        id: "stipendtimer".into(),
+        title: "Stipend".into(),
+        step: crate::autoplay::growth::pursuit::PursuitStep::Waiting { until: u64::MAX },
+        working: true,
+        via: None,
+    }];
+    assert!(c.is_pursuing() && c.hunting_area().is_none());
+    c.autoplay.growth.hunting_at = Some(holtburg >> 16);
+    c.autoplay.growth.roams = ROAMS;
+    c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(600));
+    assert!(!c.grow_hunt(now, &cfg), "{}", c.autoplay.status);
+    assert_eq!(c.autoplay.growth.bound, None, "bound for another ground");
+}
