@@ -180,6 +180,7 @@ impl Client {
             server_walk_refused: None,
             frame_at: Instant::now(),
             dodge_to: None,
+            stepped_aside: None,
             dodge: dodge::State::default(),
             speed_boost: DEFAULT_SPEED_BOOST,
             jump_height: DEFAULT_JUMP_HEIGHT,

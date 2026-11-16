@@ -2217,7 +2217,19 @@ fn a_device_fuelled_by_eyes_has_each_eye_used_before_it() {
     // Walking off before the server answers cancels its walk to the eye: the use never lands.
     let held = c.travel_npc_wait(&step, t0 + Duration::from_millis(500));
     assert!(held.is_none(), "off before the eye answered: {held:?}");
+    // A heal cast cut the server's walk to the eye: its UseDone says nothing, the eye is used again.
+    c.last_used = None;
     c.use_done = Some((0, t0 + Duration::from_millis(600)));
+    c.autoplay.cast_answered();
+    let _ = c.travel_npc_wait(&step, t0 + Duration::from_millis(700));
+    assert_eq!(
+        c.travel.state.firsts_used,
+        [29715],
+        "the cut use not sent again"
+    );
+    assert_eq!(c.last_used, Some(0x7000_0001), "the eye not used again");
+    c.autoplay.cast_answered();
+    c.use_done = Some((0, t0 + Duration::from_millis(800)));
     let goal = c.travel_npc_wait(&step, t0 + Duration::from_secs(1));
     assert!(
         matches!(goal, Some(Goal::At { place, .. }) if place.at.distance(far) < 1.0),

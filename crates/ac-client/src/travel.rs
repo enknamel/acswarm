@@ -115,8 +115,8 @@ struct StepState {
     summoned_uses: u32,
     /// The NPC step's objects used first (`Step::Npc::first`), by weenie class.
     firsts_used: Vec<u32>,
-    /// When the last of them was used, till the server answers (UseDone).
-    first_sent: Option<Instant>,
+    /// When the last of them was used, and which object, till the server answers (UseDone).
+    first_sent: Option<(Instant, u32)>,
     /// The step's walk end on its floor, once the region holds it.
     end: Option<Place>,
     /// The overland corridor, while the region does not hold the walk end.

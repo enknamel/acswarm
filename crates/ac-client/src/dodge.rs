@@ -1308,6 +1308,7 @@ impl Client {
             goal.y
         );
         self.dodge_to = Some((goal, now + LASTS));
+        self.stepped_aside = Some(now);
         self.steering.reset();
         self.autoplay
             .say(Doing::Dodging, format!("dodging {name}{from}"));

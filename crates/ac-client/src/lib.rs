@@ -407,6 +407,8 @@ pub struct Client {
     /// A sidestep out of a spell's way (see `dodge`): where to, and
     /// until when. Outranks every other movement goal while it lasts.
     pub dodge_to: Option<(glam::Vec3, Instant)>,
+    /// When the last sidestep set off: it cuts off a server walk to a use sent before it.
+    pub(crate) stepped_aside: Option<Instant>,
     /// The projectiles being watched for it.
     pub dodge: dodge::State,
     /// Client-side multiplier on the run speed (see
