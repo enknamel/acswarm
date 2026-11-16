@@ -659,14 +659,14 @@ impl Client {
         }
     }
 
-    /// A wanted buff down (under `never_below`) that could go up here, by name: no journey sets off
-    /// without it, the player's rule. A wand left on the corpse with none carried is no bar.
+    /// A wanted buff not up at all that could go up here, by name: nothing sets off without every
+    /// buff in place, the player's rule; one up and running low is the urgent pass's, not a hold
+    /// (a_journey_waits_for_a_buff_that_is_down). A wand left on the corpse with none carried is no bar.
     pub(crate) fn buff_down(&self, now: Instant) -> Option<String> {
         if !self.has_buff_clock() {
             return Some("every buff (the server's clock not in yet)".into());
         }
-        let within = self.autoplay.config.buffs.never_below;
-        let (spell, _, _, name, _) = self.due_buff(within, now)?;
+        let (spell, _, _, name, _) = self.due_buff(0.0, now)?;
         let no_caster = matches!(self.can_cast(spell), crate::magic::CastCheck::NoCaster);
         let carries_one = self
             .world
