@@ -5158,4 +5158,12 @@ fn the_sarcophagus_past_the_temple_is_worked_towards() {
         "{:?}",
         c.autoplay.announced
     );
+    // And it is gone for: the Sarcophagus out of reach, the board read "passed over: cannot be
+    // asked now" and never fetched the Crown.
+    let step = again(&mut c, now + std::time::Duration::from_secs(5));
+    assert!(
+        step.words(0).contains("Ensorcelled Dais"),
+        "{}",
+        step.words(0)
+    );
 }

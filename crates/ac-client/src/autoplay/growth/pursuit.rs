@@ -552,14 +552,22 @@ impl Ask<'_> {
                 (None, None) if *end == QuestEnd::Keep && line.kind == Kind::Item => {
                     PursuitStep::Finished
                 }
+                // A giver no journey reaches has its way had first, as a hunt's ground does: the
+                // Crown for Qin Xikit's Sarcophagus (the_sarcophagus_past_the_temple_is_worked_towards).
                 (None, None) => match self.chosen_short(line, end) {
                     Some((more, of)) => return self.hunt_step(line, more, &of, end),
-                    None => stuck(format!("{} cannot be asked now", line.giver)),
+                    None => {
+                        let why = format!("{} cannot be asked now", line.giver);
+                        return self.way_first(&line.id, (stuck(why), None));
+                    }
                 },
             },
             QuestState::NotTaken { from, flag } => match self.asking.take_up_at(from, flag) {
                 Some((_, row, at)) => PursuitStep::TakeUp { row, at },
-                None => stuck(format!("{from} cannot be asked now")),
+                None => {
+                    let why = format!("{from} cannot be asked now");
+                    return self.way_first(&line.id, (stuck(why), None));
+                }
             },
             QuestState::Needs { more, of } => {
                 let (more, of) = self
