@@ -424,13 +424,15 @@ impl Client {
             if self.start_quest_call(row, at, now) {
                 return true;
             }
-            let id = self
-                .pursuit
-                .iter()
-                .find(|l| l.working)
-                .map(|l| l.id.clone());
-            let why = format!("no way to {}", row.giver);
-            self.hold_pursuit(&id.unwrap_or_default(), why, now);
+            let line = self.pursuit.iter().find(|l| l.working);
+            let (id, title): (String, String) = line
+                .map(|l| (l.id.clone(), l.title.clone()))
+                .unwrap_or_default();
+            // What opens a way to the giver first, as for a fetch: the Qin Xikit tomb's
+            // Sarcophagus lies past the temple (the_sarcophagus_past_the_temple_is_worked_towards).
+            if !self.want_way_to((&id, &title), row.giver, at, now) {
+                self.hold_pursuit(&id, format!("no way to {}", row.giver), now);
+            }
         }
         if !cfg.town_runs {
             return false;

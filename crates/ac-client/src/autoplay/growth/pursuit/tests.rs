@@ -5121,3 +5121,41 @@ fn the_blood_puzzle_works_back_through_the_crown_the_flags_and_the_font_event() 
         ]
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_sarcophagus_past_the_temple_is_worked_towards() {
+    // Blargerton, QinXikitBeaten held: "pursuit passed over: no way to Sarcophagus of High
+    // Matriarch, Qin Xikit", whose tomb only the reward Guardian, past the temple, sends to.
+    let mut c = mage_pursuing("qinxikitcomplete", "chained-quests");
+    c.world.stats.level = 120;
+    let now = Instant::now();
+    c.travel.quests_done = [
+        "RoadsJournal",
+        "OnBrowerkQuest",
+        "BloodPuzzleCompleted",
+        "QinXikitBeaten",
+    ]
+    .iter()
+    .map(|h| h.to_string())
+    .collect();
+    let step = again(&mut c, now);
+    assert!(step.words(0).contains("Sarcophagus"), "{}", step.words(0));
+    c.server_quests_read = true;
+    let cfg = c.autoplay.config.growth.clone();
+    c.grow_town_run(now, &cfg);
+    assert!(
+        c.autoplay.growth.pursuit_held.is_empty(),
+        "{:?}: {}",
+        c.autoplay.growth.pursuit_held,
+        c.autoplay.status
+    );
+    // The Crown's gem leads back to the temple, as for the blood puzzle.
+    let gems = &c.autoplay.growth.pursuit_gems;
+    assert!(
+        gems.iter()
+            .any(|g| g.quest == "qinxikitcomplete" && g.name == "Qin Xikit's Crown"),
+        "{:?}",
+        c.autoplay.announced
+    );
+}

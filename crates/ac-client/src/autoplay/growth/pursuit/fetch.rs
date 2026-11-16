@@ -428,39 +428,7 @@ impl Client {
                 self.autoplay.say(Doing::Traveling, why);
                 return Some(true);
             }
-            // No way but past a portal asking a flag (the Sanatorium Chest, beyond the
-            // Singularity Caul's island): the flag first; else a gem's exit (the Mistress' Chest
-            // on Ithaenc's island), as for a hunt's ground; dropped only when neither leads there.
-            let quests = self.travel.quests_done.clone();
-            let place = [(goal.cell >> 16, goal)];
-            if let Some(flag) = self.flag_way(&place, &quests) {
-                let why = format!(
-                    "for {}: the {flag} flag first, to reach {label}",
-                    line.title
-                );
-                tracing::info!("pursuit: {}: {why}", line.id);
-                self.autoplay.note(why, now);
-                self.autoplay.growth.want_flag(&line.id, flag);
-                self.quest_board_at = None;
-                return Some(false);
-            }
-            if let Some(gem) = self.gem_way(&place, &quests) {
-                let why = format!("for {}: {} first, to reach {label}", line.title, gem.name);
-                tracing::info!("pursuit: {}: {why}", line.id);
-                self.autoplay.note(why, now);
-                self.autoplay.growth.want_gem(&line.id, gem);
-                self.quest_board_at = None;
-                return Some(false);
-            }
-            if let Some(e) = self.event_way(&place, &quests, now) {
-                let why = format!("for {}: the {e} event first, to reach {label}", line.title);
-                tracing::info!("pursuit: {}: {why}", line.id);
-                self.autoplay.note(why, now);
-                self.autoplay.growth.want_event(&line.id, e);
-                self.quest_board_at = None;
-                return Some(false);
-            }
-            if self.want_portal_way((&line.id, &line.title), &label, &place, &quests, now) {
+            if self.want_way_to((&line.id, &line.title), &label, goal, now) {
                 return Some(false);
             }
             self.drop_source(key, format!("no way to {label}"), now);
@@ -794,5 +762,40 @@ impl Client {
                 let d = |p: &Place| p.at.distance(place.at);
                 d(&a.1).total_cmp(&d(&b.1))
             })
+    }
+}
+
+impl Client {
+    /// No journey reaches `goal` (`label` in words): what opens a way there is wanted first, as
+    /// for a hunt's ground; false when nothing does.
+    pub(crate) fn want_way_to(
+        &mut self,
+        (id, title): (&str, &str),
+        label: &str,
+        goal: Place,
+        now: Instant,
+    ) -> bool {
+        // A portal asking a flag (the Sanatorium Chest, beyond the Singularity Caul's island): the
+        // flag first; else a gem's exit (the Mistress' Chest on Ithaenc's island); else an event.
+        let quests = self.travel.quests_done.clone();
+        let place = [(goal.cell >> 16, goal)];
+        let first = if let Some(flag) = self.flag_way(&place, &quests) {
+            self.autoplay.growth.want_flag(id, flag.clone());
+            format!("the {flag} flag")
+        } else if let Some(gem) = self.gem_way(&place, &quests) {
+            let name = gem.name.clone();
+            self.autoplay.growth.want_gem(id, gem);
+            name
+        } else if let Some(e) = self.event_way(&place, &quests, now) {
+            self.autoplay.growth.want_event(id, e.clone());
+            format!("the {e} event")
+        } else {
+            return self.want_portal_way((id, title), label, &place, &quests, now);
+        };
+        let why = format!("for {title}: {first} first, to reach {label}");
+        tracing::info!("pursuit: {id}: {why}");
+        self.autoplay.note(why, now);
+        self.quest_board_at = None;
+        true
     }
 }
