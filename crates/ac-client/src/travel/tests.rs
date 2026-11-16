@@ -2214,6 +2214,10 @@ fn a_device_fuelled_by_eyes_has_each_eye_used_before_it() {
         "the device used before its eyes"
     );
     c.autoplay.cast_answered();
+    // Walking off before the server answers cancels its walk to the eye: the use never lands.
+    let held = c.travel_npc_wait(&step, t0 + Duration::from_millis(500));
+    assert!(held.is_none(), "off before the eye answered: {held:?}");
+    c.use_done = Some((0, t0 + Duration::from_millis(600)));
     let goal = c.travel_npc_wait(&step, t0 + Duration::from_secs(1));
     assert!(
         matches!(goal, Some(Goal::At { place, .. }) if place.at.distance(far) < 1.0),

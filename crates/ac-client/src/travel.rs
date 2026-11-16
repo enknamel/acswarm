@@ -115,6 +115,8 @@ struct StepState {
     summoned_uses: u32,
     /// The NPC step's objects used first (`Step::Npc::first`), by weenie class.
     firsts_used: Vec<u32>,
+    /// When the last of them was used, till the server answers (UseDone).
+    first_sent: Option<Instant>,
     /// The step's walk end on its floor, once the region holds it.
     end: Option<Place>,
     /// The overland corridor, while the region does not hold the walk end.
@@ -1229,8 +1231,11 @@ impl Client {
             {
                 // Finding room for the portal, using the gem, and seeing
                 // that it works. A step to open ground is the only walk.
+                self.travel.last_seen = Some(me);
                 return self.travel_gem_wait(guid, &name, summons, now);
             } else if let Some(npc @ Step::Npc { .. }) = &step {
+                // Its walks are ours (Browerk's Eyes, 115 m apart): no carrying off.
+                self.travel.last_seen = Some(me);
                 return self.travel_npc_wait(npc, now);
             }
         }

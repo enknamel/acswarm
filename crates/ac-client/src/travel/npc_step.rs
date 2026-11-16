@@ -15,6 +15,9 @@ use crate::{Client, Goal};
 const NPC_STOP: f32 = 1.5;
 /// The NPC is looked for this near its spot in the data (metres): it may wander a little.
 const NPC_NEAR: f32 = 20.0;
+/// A use of an object before the NPC is answered within this, else sent again: a walk off before
+/// its UseDone cancels the server's walk to it (Player_Move2.cs:172, guess).
+const FIRST_ANSWER: Duration = Duration::from_secs(10);
 
 /// What an NPC step is: its NPC, what it is handed, whether it summons, and its emotes' delay.
 struct NpcStep<'a> {
@@ -136,14 +139,25 @@ impl Client {
         None
     }
 
-    /// The step's next object to use before its NPC (`NpcStep::first`): walked to, then used once
-    /// (each starts a server event, so a use more is harmless); `None` once all are used.
+    /// The step's next object to use before its NPC (`NpcStep::first`): walked to, used, and stood
+    /// at till the server answers (each starts a server event, so a use more is harmless); `None`
+    /// once all are used.
     fn npc_first_use(
         &mut self,
         step: &NpcStep,
         me: glam::Vec3,
         now: Instant,
     ) -> Option<Option<Goal>> {
+        if let Some(sent) = self.travel.state.first_sent {
+            match self.use_done.filter(|(_, at)| *at >= sent) {
+                Some(_) => self.travel.state.first_sent = None,
+                None if now.duration_since(sent) < FIRST_ANSWER => return Some(None),
+                None => {
+                    self.travel.state.first_sent = None;
+                    self.travel.state.firsts_used.pop();
+                }
+            }
+        }
         let used = &self.travel.state.firsts_used;
         let &(wcid, place) = step.first.iter().find(|(w, _)| !used.contains(w))?;
         if me.distance(place.at) > crate::visit::REACH {
@@ -167,6 +181,7 @@ impl Client {
             .send_action(ac_net::messages::action::USE, &guid.to_le_bytes());
         self.autoplay.cast_sent = Some(now);
         self.travel.state.firsts_used.push(wcid);
+        self.travel.state.first_sent = Some(now);
         Some(None)
     }
 
