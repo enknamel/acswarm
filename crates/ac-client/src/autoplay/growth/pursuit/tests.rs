@@ -5064,6 +5064,32 @@ fn a_sealed_valve_is_used_and_its_event_taken_for_on() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn the_font_guardian_waits_for_the_last_valves_event_to_start() {
+    // Used 5.4 s after the fourth valve, it heard EventHeatFont4 not yet on (Fail_Case).
+    let want = Want::Event("eventfontbrowerkstopgap".into());
+    let source = ac_world::quests::sources_of(&want)
+        .find(|s| s.kind == Yield::Start)
+        .expect("the Font Guardian starts it");
+    let (mut c, line) = fetching(|at| PursuitStep::AskFor { source, at });
+    let PursuitStep::AskFor { at, .. } = line.step else {
+        unreachable!()
+    };
+    lying(&mut c, REPAIR_GOLEM, source.wcid, "Font Guardian", at);
+    let now = Instant::now();
+    for e in &source.needs {
+        c.note_event(e, now);
+    }
+    let soon = now + Duration::from_secs(5);
+    assert_eq!(c.grow_fetch(&line, soon), Some(true));
+    assert_eq!(c.autoplay.growth.fetching, None, "not used yet");
+    let later = now + Duration::from_secs(9);
+    assert_eq!(c.grow_fetch(&line, later), Some(true));
+    let f = c.autoplay.growth.fetching.clone().expect("used");
+    assert_eq!((f.act, f.guid), (fetch::Act::Start, REPAIR_GOLEM));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_blood_puzzle_works_back_through_the_crown_the_flags_and_the_font_event() {
     // Passed over with "Qin Xikit's Crown comes from Ensorcelled Dais: autoplay cannot fetch it
     // yet": 0x00F2 was taken for sealed, its one way in the Hidden Crown an event puts out.

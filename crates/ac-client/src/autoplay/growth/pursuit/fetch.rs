@@ -484,6 +484,13 @@ impl Client {
         if self.hands_busy(now) {
             return Some(true);
         }
+        if let PursuitStep::AskFor { source, .. } = line.step {
+            if let Some(e) = self.unsettled_need(source, now) {
+                let why = format!("for {}: waiting for {e} to start", line.title);
+                self.autoplay.say(Doing::Looting, why);
+                return Some(true);
+            }
+        }
         if !self.has_room_for(line, now) {
             return Some(false);
         }

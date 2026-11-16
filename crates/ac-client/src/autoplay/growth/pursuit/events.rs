@@ -20,6 +20,9 @@ const WAITS: f32 = 2.0;
 const PORTAL_SEEN_NEAR: f32 = 15.0;
 /// What its starter's use is given to put an event's portal out before it is taken for shut (guess).
 const PORTAL_COMES: Duration = Duration::from_secs(20);
+/// A used starter's script plays before its StartEvent (EmoteManager.cs:1632): the Sealed Valve's
+/// event came 6.2 s after its use (measured live); what asks the event waits this long.
+const EVENT_LANDS: Duration = Duration::from_secs(8);
 
 /// Each weenie class only an event puts out, and that event: seeing one says it is on.
 fn gated() -> &'static BTreeMap<u32, String> {
@@ -201,6 +204,16 @@ impl Client {
         events.retain(|_, e| !self.is_event_on(e, now));
         self.autoplay.growth.pursuit_events = events.clone();
         events
+    }
+
+    /// An event start `s` asks that was started less than [`EVENT_LANDS`] ago: its use waits.
+    pub(super) fn unsettled_need<'a>(&self, s: &'a Source, now: Instant) -> Option<&'a str> {
+        let on = &self.autoplay.growth.events_on;
+        let fresh = |n: &String| {
+            on.since(n)
+                .is_some_and(|t| now.saturating_duration_since(t) < EVENT_LANDS)
+        };
+        s.needs.iter().find(|n| fresh(n)).map(String::as_str)
     }
 
     /// The event the give `s` starts, handed its item.
