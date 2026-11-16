@@ -29,10 +29,15 @@
 # Usage: reference/scripts/data/hunting.sh > crates/ac-world/data/hunting.csv
 set -e
 
-SQL='SET SESSION max_execution_time=20000; with recursive spawn(inst, wcid, depth, n) as (
-  select li.guid, li.weenie_Class_Id, 0, 1 from landblock_instance li
+SQL='SET SESSION max_execution_time=20000; with recursive spawn(inst, wcid, depth, n, gated) as (
+  select li.guid, li.weenie_Class_Id, 0, 1, 0 from landblock_instance li
   union all
-  select s.inst, g.weenie_Class_Id, s.depth + 1, s.n * greatest(g.max_Create, 1) from spawn s
+  -- gated: spawned under a generator tied to a server event (GeneratorEvent, string 34), which
+  -- spawns only while that event runs (WorldObject_Generators.cs:400-409): a wave or a boss, not steady
+  select s.inst, g.weenie_Class_Id, s.depth + 1, s.n * greatest(g.max_Create, 1),
+    greatest(s.gated, exists(select 1 from weenie_properties_string e where e.object_Id = s.wcid
+      and e.type = 34))
+  from spawn s
   join weenie_properties_generator g on g.object_Id = s.wcid
   where s.depth < 4
     -- an entry put in a container, a hand or a shop (where_Create Contain, Wield, Shop:
@@ -46,7 +51,7 @@ surface as (
 mon as (
   select s.inst, s.wcid, li.obj_Cell_Id >> 16 lb,
     if((li.obj_Cell_Id & 65535) < 256, "o", "d") kind,
-    li.origin_X x, li.origin_Y y, lv.value lv, nm.value nm, max(s.n) n
+    li.origin_X x, li.origin_Y y, lv.value lv, nm.value nm, max(s.n) n, max(s.gated) gated
   from spawn s
   join landblock_instance li on li.guid = s.inst
   join weenie c on c.class_Id = s.wcid and c.type = 10
@@ -80,14 +85,15 @@ select hex(m.lb), round(avg(m.x), 0), round(avg(m.y), 0), count(*),
   (select b.lv from bynm b where b.lb = m.lb and b.kind = m.kind order by b.n desc, b.lv, b.nm limit 1),
   (select b.nm from bynm b where b.lb = m.lb and b.kind = m.kind order by b.n desc, b.lv, b.nm limit 1),
   round(sum(w.xp * m.n) / sum(m.n), 0), greatest(round(sum(w.hp * m.n) / sum(m.n), 0), 1),
-  sum(m.n), m.kind, max(w.tier)
+  sum(m.n), m.kind, max(w.tier), sum(m.n * m.gated),
+  coalesce(round(sum(w.xp * m.n * (1 - m.gated)) / nullif(sum(m.n * (1 - m.gated)), 0), 0), 0)
 from kept m join worth w on w.wcid = m.wcid
 group by m.lb, m.kind
 having m.kind = "o" or (sum(m.n) >= 10 and sum(w.xp * m.n) > 0);'
 
 cat <<'HEADER'
 # Hunting grounds of Dereth: the landblocks where monsters spawn.
-# landblock,x,y,count,min_level,max_level,level,name,xp,health,creatures,kind,tier
+# landblock,x,y,count,min_level,max_level,level,name,xp,health,creatures,kind,tier,gated,steady_xp
 # The landblock is hex; x/y are the average spawn point, local to it.
 # count is the number of spawn entries, min/max the level range among
 # them, and level/name the creature that spawns most often there. xp
@@ -96,6 +102,9 @@ cat <<'HEADER'
 # up at once (their max spawns). kind is o for open ground, d for a
 # dungeon (a landblock with nothing outdoors; its way in is a portal).
 # tier is the highest loot tier of anything that spawns there, 0 none.
+# gated is how many of the creatures spawn only while a server event runs
+# (a wave, a boss: a quest may start it, a hunt cannot count on it), and
+# steady_xp the average a kill awards over the rest, 0 when none are.
 # Regenerate with reference/scripts/data/hunting.sh (reads the ACE
 # world database, the community's reconstruction of retail's server
 # data; the client has no copy of its own).
@@ -104,8 +113,8 @@ HEADER
 docker exec ace-db sh -c \
   "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -N --batch ace_world -e '$SQL'" \
   2>/dev/null |
-  awk -F'\t' 'NF == 13 {
+  awk -F'\t' 'NF == 15 {
     gsub(/,/, ";", $8)
-    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
   }' |
   LC_ALL=C sort -t, -k1,1

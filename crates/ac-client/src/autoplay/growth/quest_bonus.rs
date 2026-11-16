@@ -134,6 +134,7 @@ mod tests {
         let better = Ground {
             landblock: 0xFFFE,
             xp: rats.xp + 20,
+            steady_xp: rats.steady_xp.map(|x| x + 20),
             ..rats.clone()
         };
         assert!(better.worth() > rats.worth());

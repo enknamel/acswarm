@@ -31,6 +31,10 @@ pub struct Ground {
     pub creatures: u32,
     /// The highest loot tier of anything spawning here, 0 for none known.
     pub max_tier: u32,
+    /// Of `creatures`, those only a server event spawns (a wave, a boss: WorldObject_Generators.cs:400-409).
+    pub gated: u32,
+    /// The XP a kill of the rest awards, on average; `None` where the row does not say (then `xp`).
+    pub steady_xp: Option<u32>,
     /// A dungeon's way in; `None` for open ground.
     pub entrance: Option<Entrance>,
 }
@@ -156,7 +160,7 @@ impl Ground {
 
     /// How busy it is, from 0 to 1: one creature at a time is mostly waiting ([`HALF_BUSY`]).
     pub fn busy(&self) -> f32 {
-        let c = self.creatures as f32;
+        let c = self.creatures.saturating_sub(self.gated) as f32;
         c / (c + HALF_BUSY)
     }
 
@@ -197,7 +201,12 @@ impl Ground {
 
     /// [`Ground::worth`] with `extra` XP a kill on top: what an active quest pays per kill here.
     pub fn worth_with(&self, extra: f32) -> f32 {
-        (self.xp as f32 + extra) / self.health.max(1) as f32 * self.busy()
+        (self.kill_xp() as f32 + extra) / self.health.max(1) as f32 * self.busy()
+    }
+
+    /// The XP a kill here awards to a hunt: of the steady spawns, an event's waves and bosses left out.
+    pub fn kill_xp(&self) -> u32 {
+        self.steady_xp.unwrap_or(self.xp)
     }
 }
 
@@ -210,8 +219,9 @@ fn parse(text: &str) -> Vec<Ground> {
             continue;
         }
         let f: Vec<&str> = line.split(',').collect();
-        // The tier came after the kind, so a row written before it existed still reads.
-        if f.len() != 12 && f.len() != 13 {
+        // The tier came after the kind, and the event-gated count and steady XP after it, so a row
+        // written before either existed still reads.
+        if !matches!(f.len(), 12 | 13 | 15) {
             continue;
         }
         let Ok(landblock) = u32::from_str_radix(f[0], 16) else {
@@ -249,6 +259,8 @@ fn parse(text: &str) -> Vec<Ground> {
             health,
             creatures,
             max_tier: f.get(12).and_then(|t| int(t)).unwrap_or(0),
+            gated: f.get(13).and_then(|t| int(t)).unwrap_or(0),
+            steady_xp: f.get(14).and_then(|t| int(t)),
             entrance,
         });
     }
@@ -341,6 +353,8 @@ mod tests {
             health: 100,
             creatures: count,
             max_tier: 0,
+            gated: 0,
+            steady_xp: None,
             entrance: None,
         }
     }
@@ -565,5 +579,18 @@ mod tests {
             at(some.landblock).map(|g| g.landblock),
             Some(some.landblock)
         );
+    }
+
+    #[test]
+    fn an_arena_of_event_waves_and_bosses_is_no_hunting_ground() {
+        // Blargerton went 27 km to the Colosseum (0x00AF) for "Pumpkin Kin" at 8.8M XP a kill:
+        // the average of the Pumpkin King's and Thunder Chicken's bosses, which only events spawn.
+        let arena = at(0x00AF).expect("the Colosseum's row");
+        assert_eq!(arena.gated, arena.creatures);
+        assert_eq!(arena.worth(), 0.0);
+        // The Olthoi of Matron Hive East spawn without one.
+        let hive = at(0x6146).expect("Matron Hive East");
+        assert_eq!(hive.gated, 0);
+        assert!(hive.worth() > 0.0);
     }
 }

@@ -610,7 +610,7 @@ impl Client {
             if g.tier().is_none_or(|t| t > survived) {
                 return 0.0;
             }
-            let xp = g.xp as f32 + ground_bonus(&pay, g);
+            let xp = g.kill_xp() as f32 + ground_bonus(&pay, g);
             if !caster {
                 return g.worth_with(ground_bonus(&pay, g));
             }
