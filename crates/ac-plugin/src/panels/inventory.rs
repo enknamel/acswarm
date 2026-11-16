@@ -27,6 +27,8 @@
 //!   equips it in a free side slot.
 
 use super::{caption, has_sheet, item_row, title, title_bar, window, Item, ItemDrag, Source};
+
+mod equipment;
 use crate::icons::{IconCache, IconLayers};
 use crate::Settings;
 use crate::{egui, Client, Ctx, Plugin};
@@ -116,6 +118,8 @@ pub(crate) fn slots(packs: &[Pack], foci: &[(u32, String)], capacity: u32) -> Ve
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct InventoryView {
     pub rows: Vec<Row>,
+    /// What is worn, by guid, and the slot bits it is worn in (`ac_world::equip`).
+    pub worn: Vec<(u32, u32)>,
     /// Our own guid: the main pack's container id.
     pub me: u32,
     /// Items directly in the main pack (packs excluded) and its capacity.
@@ -253,6 +257,11 @@ pub(crate) fn view(c: &Client) -> Option<InventoryView> {
     rows.sort_by(|a, b| a.item.name.cmp(&b.item.name));
     Some(InventoryView {
         rows,
+        worn: c
+            .world
+            .wielded()
+            .map(|o| (o.guid, o.wielded_location))
+            .collect(),
         me,
         main_count,
         main_capacity: player.map(|p| p.items_capacity).unwrap_or(0),
@@ -313,6 +322,8 @@ pub(crate) struct Actions {
     pub empty_pack: Vec<u32>,
     /// Every one carried of this item's kind, to the selected NPC or player: (wcid, to).
     pub give_all: Vec<(u32, u32)>,
+    /// An item dropped on an equipment slot: (item, the slot bits to wear it at).
+    pub wear: Vec<(u32, u32)>,
 }
 
 /// The panel's own state: search line, chip, sort, folded packs.
@@ -329,6 +340,8 @@ pub(crate) struct State {
     pub descending: bool,
     pub folded: Vec<u32>,
     pub worn_folded: bool,
+    /// The equipment view folded behind its header.
+    pub equip_folded: bool,
     /// An item waiting for something to be used on (crafting: an alembic
     /// on a reagent, an oil on a weapon, a key on a chest). The next item
     /// clicked is the target. Not kept across restarts.
@@ -736,6 +749,7 @@ pub(crate) fn draw(
                         .filter(|i| pred(&v.rows[*i]))
                         .collect()
                 };
+                equipment::draw(ui, v, &mut st.equip_folded, &mut actions);
                 // Worn.
                 let worn = rows_in(&|r| r.item.wielded);
                 if !worn.is_empty() {
@@ -1003,6 +1017,7 @@ impl Inventory {
         Inventory {
             source: Source::Demo(InventoryView {
                 rows,
+                worn: Vec::new(),
                 me,
                 main_count: 3,
                 main_capacity: 102,
@@ -1118,6 +1133,9 @@ impl Plugin for Inventory {
             }
             for g in actions.activated {
                 c.interact(g);
+            }
+            for (g, at) in actions.wear {
+                c.wear_at(g, at);
             }
             for (from, to) in actions.merge {
                 c.merge_stacks(from, to, None);

@@ -177,6 +177,36 @@ pub mod item_type {
 /// and the `wielded_location` of something already equipped. These are
 /// the slots the character description sends.
 pub mod equip {
+    // Clothing and armour by body area (ACE EquipMask.cs:12-26): the "wear" bits are the under layer
+    // and head, hands and feet; the "armor" bits the outer layer of the rest.
+    pub const HEAD_WEAR: u32 = 0x0000_0001;
+    pub const CHEST_WEAR: u32 = 0x0000_0002;
+    pub const ABDOMEN_WEAR: u32 = 0x0000_0004;
+    pub const UPPER_ARM_WEAR: u32 = 0x0000_0008;
+    pub const LOWER_ARM_WEAR: u32 = 0x0000_0010;
+    pub const HAND_WEAR: u32 = 0x0000_0020;
+    pub const UPPER_LEG_WEAR: u32 = 0x0000_0040;
+    pub const LOWER_LEG_WEAR: u32 = 0x0000_0080;
+    pub const FOOT_WEAR: u32 = 0x0000_0100;
+    pub const CHEST_ARMOR: u32 = 0x0000_0200;
+    pub const ABDOMEN_ARMOR: u32 = 0x0000_0400;
+    pub const UPPER_ARM_ARMOR: u32 = 0x0000_0800;
+    pub const LOWER_ARM_ARMOR: u32 = 0x0000_1000;
+    pub const UPPER_LEG_ARMOR: u32 = 0x0000_2000;
+    pub const LOWER_LEG_ARMOR: u32 = 0x0000_4000;
+    /// Every body-area bit above: what a piece of clothing or armour covers.
+    pub const COVERAGE: u32 = 0x0000_7FFF;
+    // Jewellery and the rest (EquipMask.cs:27-42).
+    pub const NECK: u32 = 0x0000_8000;
+    pub const WRIST_LEFT: u32 = 0x0001_0000;
+    pub const WRIST_RIGHT: u32 = 0x0002_0000;
+    pub const FINGER_LEFT: u32 = 0x0004_0000;
+    pub const FINGER_RIGHT: u32 = 0x0008_0000;
+    pub const TRINKET: u32 = 0x0400_0000;
+    pub const CLOAK: u32 = 0x0800_0000;
+    pub const SIGIL_ONE: u32 = 0x1000_0000;
+    pub const SIGIL_TWO: u32 = 0x2000_0000;
+    pub const SIGIL_THREE: u32 = 0x4000_0000;
     pub const MELEE_WEAPON: u32 = 0x0010_0000;
     pub const SHIELD: u32 = 0x0020_0000;
     pub const MISSILE_WEAPON: u32 = 0x0040_0000;

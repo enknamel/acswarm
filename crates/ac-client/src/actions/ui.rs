@@ -105,6 +105,40 @@ impl Client {
         }
     }
 
+    /// Wear or wield carried `guid` at `location` (`ac_world::equip` bits), first taking off what
+    /// is worn there: ACE refuses a taken slot ("You must remove your X", Player_Inventory.cs:1801-1809).
+    pub fn wear_at(&mut self, guid: u32, location: u32) {
+        use ac_net::messages::action;
+        let Some(me) = self.world.player_guid else {
+            return;
+        };
+        let Some(o) = self.world.objects.get(&guid) else {
+            return;
+        };
+        if !self.world.is_carried(guid) && o.wielder != Some(me) {
+            return;
+        }
+        let name = o.name.clone();
+        let in_the_way: Vec<(u32, String)> = self
+            .world
+            .wielded()
+            .filter(|w| w.guid != guid && w.wielded_location & location != 0)
+            .map(|w| (w.guid, w.name.clone()))
+            .collect();
+        for (g, off) in in_the_way {
+            tracing::info!("take off {off} ({g:#010x}) to wear {name}");
+            let mut w = ac_net::wire::Writer::new();
+            w.u32(g).u32(me).u32(0);
+            self.session
+                .send_action(action::PUT_ITEM_IN_CONTAINER, &w.finish());
+        }
+        tracing::info!("wear {name} ({guid:#010x}) at {location:#x}");
+        let mut w = ac_net::wire::Writer::new();
+        w.u32(guid).u32(location);
+        self.session
+            .send_action(action::GET_AND_WIELD_ITEM, &w.finish());
+    }
+
     /// Report the stop on the wire before using `guid`, something in the world: a stop reported
     /// after the use cancels the walk the server starts for it, and the use with it (ACE
     /// `GameActionMoveToState.cs:22-23`, `Player_Move.cs:101-107`).
