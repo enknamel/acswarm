@@ -436,6 +436,21 @@ fn the_jaw_chain_reads_in_plain_words() {
 }
 
 #[test]
+fn an_aetheria_field_says_to_kill_its_wisps_then_use_the_stone_in_it() {
+    let rows: Vec<_> = ac_world::quests::rows_of("efulnorthmanafieldused").collect();
+    let log = QuestLog::default();
+    let step = hand_in_step(&rows, &known(&log, &[], &place_of)).expect("a step");
+    assert!(
+        step.text().starts_with(
+            "Kill 4 Shivering Crystalline Wisp there, then use Aligned Mana Stone standing in \
+             Upper Level North Aetheria Mana Field"
+        ),
+        "{}",
+        step.text()
+    );
+}
+
+#[test]
 fn a_flag_nobody_gives_says_so_and_a_held_one_is_done() {
     let link = |flag: &str| ChainLink::Flag {
         flag: flag.into(),

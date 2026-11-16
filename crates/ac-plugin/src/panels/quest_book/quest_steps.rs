@@ -264,6 +264,23 @@ pub(crate) fn hand_in_step(rows: &[&Row], k: &Known) -> Option<Step> {
             step.say(" to ")
         }
         (_, Handing::Talk | Handing::Read) => Step::default().say("Talk to "),
+        (_, Handing::Use) => {
+            // "Kill 4 Shivering Crystalline Wisp there, then use Aligned Mana Stone standing in".
+            let mut step = Step::default();
+            for (i, &(wcid, n)) in row.clears.iter().enumerate() {
+                let name = ac_world::elements::creature_by_id(wcid)
+                    .map_or_else(|| format!("creature {wcid}"), |c| c.name.clone());
+                step = step.say(if i == 0 { "Kill " } else { ", " });
+                step = step.say(format!("{n} ")).link(Facet::Creature, &name);
+            }
+            let item = row.item.as_ref().map_or("it", |i| i.name);
+            let step = step.say(if row.clears.is_empty() {
+                "Use "
+            } else {
+                " there, then use "
+            });
+            step.link(Facet::Item, item).say(" standing in ")
+        }
     };
     let mut step = giver_at(step, row, k);
     let mut others: Vec<&str> = rows.iter().map(|r| r.giver).collect();

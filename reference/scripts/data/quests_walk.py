@@ -30,6 +30,8 @@ QUEST_OK, QUEST_NO, TEST_OK, TEST_NO, GOTO_SET = 12, 13, 22, 23, 32
 # EmoteType (ACE.Entity/Enum/EmoteType.cs).
 AWARD_XP, GIVE_ITEM, INQ_QUEST, STAMP, INQ_SOLVES = 2, 3, 21, 22, 30
 INQ_INT, LEVEL_XP, NO_SHARE_XP, GOTO, SET_SOLVES, TAKE, INQ_OWNS = 36, 49, 62, 67, 70, 74, 76
+# SetIntStat: a stat of the character's set to a value (EmoteManager.cs:1180-1186).
+SET_INT = 53
 AWARD_LUMINANCE = 113
 # Every branching type (EmoteManager.EmoteIsBranchingType); the ones not read above end a path.
 BRANCHING = {20, 21, 30, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 51, 58, 59, 60, 67, 71,
@@ -106,6 +108,24 @@ class Data:
                               "cell": f[15] if len(f) > 18 else "",
                               "at": tuple(f[16:19]) if len(f) > 18 else (),
                               "delay": num(f[19]) if len(f) > 19 else 0.0})
+        # Signals a carried item sends when used (UseSendsSignal, PropertyString 51: Gem.cs:69-72),
+        # by signal lowercased: an object hearing one runs its set of that key (category 37).
+        self.signal_items = defaultdict(list)
+        for wcid, value in rows(dump, "signals"):
+            self.signal_items[value.lower()].append(int(wcid))
+        # Who starts each server event by any of its sets (StartEvent, EmoteManager.cs:1287-1295).
+        self.starters = defaultdict(set)
+        for st in self.sets.values():
+            for a in st["acts"]:
+                if a["type"] == START_EVENT and a["msg"]:
+                    self.starters[a["msg"].lower()].add(st["obj"])
+        # A stat a set sets (SetIntStat) and a check asks one value of: read on a signal's paths as
+        # a need held, `intSTAT=VALUE`, and the set as stamping it (Aetheria's 322).
+        acts = [a for st in self.sets.values() for a in st["acts"]]
+        checked = {int(num(a["stat"])) for a in acts if a["type"] == INQ_INT
+                   and a["min"] != "" and a["min"] == a["max"]}
+        self.stat_tokens = checked & {int(num(a["stat"])) for a in acts if a["type"] == SET_INT}
+        self.stat_tokens.discard(LEVEL_STAT)
         self.harm = {int(i) for (i,) in rows(dump, "harm")}
         # The scrolls teaching each spell: spell -> scroll wcids.
         self.scrolls_of = defaultdict(list)
@@ -162,6 +182,7 @@ class Data:
         self.kind = {int(w): int(t) for w, t in rows(dump, "wtypes")}
         # Generator profiles by the wcid they make (WorldObject_Generators.cs:108-180).
         self.made_by = defaultdict(list)
+        self.makes = defaultdict(set)
         last = {}
         for gen, prob, wcid, where, cell, x, y, z in rows(dump, "gens"):
             g, p = int(gen), num(prob, 1.0)
@@ -171,6 +192,7 @@ class Data:
             last[g] = p if p >= 0 else was
             self.made_by[int(wcid)].append((g, min(chance, 1.0), int(where),
                                             (int(cell, 16), x, y, z)))
+            self.makes[g].add(int(wcid))
         # A creature with no corpse drops a generator on the ground where it died
         # (Creature_Death.cs:431-443): what that makes there is the creature's drop too (the
         # Dull Aetherium Ore Stockpile's nine fragments).
@@ -319,6 +341,26 @@ class Data:
 
     def level(self, wcid):
         return self.ints[wcid].get(25, 0)
+
+    def clears(self, obj, event):
+        """The creatures whose deaths start `event` that `obj` itself generates, through a
+        controller it places that starts the event when its creature dies (Creature_Death.cs:123,
+        EmoteManager.cs:1287-1295): killed near `obj`, they turn it on. Else empty."""
+        out = []
+        for ctl in sorted(self.makes.get(obj, set()) & self.starters.get(event.lower(), set())):
+            out += sorted(w for w in self.makes.get(ctl, ()) if self.kind.get(w) == 10)
+        return out
+
+    def is_guard(self, obj, a):
+        """Whether carry-check `a` of `obj` only hands the item out when none is carried: its
+        failure reply gives that item, its success reply (if any) only talks. No want."""
+        wcid = int(num(a["wcid"]))
+        no = self.outcome(obj, TEST_NO, a["msg"])
+        yes = self.outcome(obj, TEST_OK, a["msg"])
+        if not isinstance(no, dict) or yes == "random":
+            return False
+        gives = any(x["type"] == GIVE_ITEM and int(num(x["wcid"])) == wcid for x in no["acts"])
+        return gives and (yes is None or all(x["type"] in COSMETIC for x in yes["acts"]))
 
     def spawn_share(self, wcid, depth=0):
         """The best share of a generator roll that puts `wcid` in the world, along its chain from
@@ -757,6 +799,9 @@ def walk(data, root):
             if t in BRANCHING:
                 if t in (INQ_QUEST, INQ_SOLVES):
                     cats = ((QUEST_OK, True), (QUEST_NO, False))
+                elif t == INQ_OWNS and root["cat"] == RECEIVE_SIGNAL and data.is_guard(obj, a):
+                    # Gives one when none is carried: only that reply is walked, asking nothing.
+                    cats = ((TEST_NO, ("guard",)),)
                 elif t in (INQ_INT, INQ_OWNS):
                     cats = ((TEST_OK, True), (TEST_NO, False))
                 elif t == INQ_EVENT:
@@ -992,16 +1037,30 @@ def read_path(data, root, branches, effects, never):
     `never`: flags no row of the file stamps, so never held; None on the first pass."""
     stamped = stamps_of(effects)
     r = {"band": [0, 0], "timer": "", "repeat": 0, "kill": None, "items": [], "needs": [],
-         "start": None, "unneeds": [], "unread": [], "events": []}
-    if root["cat"] in (GIVE, REFUSE):
+         "start": None, "unneeds": [], "unread": [], "events": [], "clears": []}
+    # A signal heard: the item used is the row's, kept. Read on its paths only (elsewhere the same
+    # checks stay unread: society ranks): events its creatures start, stat values, guards.
+    signal = root["cat"] == RECEIVE_SIGNAL
+    if root["cat"] in (GIVE, REFUSE) or signal:
         r["items"].append((root["wcid"], 1))
+    stat_needs = []
     for t, ok, a in branches:
         if isinstance(ok, str):
             r["unread"].append(ok)
             continue
+        if isinstance(ok, tuple):
+            continue  # a guard asks nothing
         q = qname(a["msg"])
         quest = data.quest.get(q)
         counter = q in data.counter_of
+        got = data.clears(root["obj"], a["msg"]) if t == INQ_EVENT and ok and signal else []
+        if got:
+            r["clears"] += got
+            continue
+        stat = int(num(a["stat"])) if t == INQ_INT else 0
+        if ok and signal and stat in data.stat_tokens and a["min"] == a["max"]:
+            stat_needs.append("int%d=%d" % (stat, int(num(a["min"]))))
+            continue
         if t == INQ_EVENT:
             # A server event the client cannot see running: unread for a quest, while a way its
             # starters' uses can open first keeps the events it asks running (`event_starters`).
@@ -1104,7 +1163,17 @@ def read_path(data, root, branches, effects, never):
             continue
     if r["band"][1] >= MAX_LEVEL:
         r["band"][1] = 0
+    # A stat's value first: what sets it is a floor below the flags beside it (Aetheria's 322).
+    r["needs"] = stat_needs + r["needs"]
     return r
+
+
+def stat_stamps(data, root, effects):
+    """The stat values a signal's path sets that some check asks for, as `intSTAT=VALUE`."""
+    if root["cat"] != RECEIVE_SIGNAL:
+        return []
+    return ["int%d=%d" % (int(num(a["stat"])), int(num(a["amount"])))
+            for a in effects if a["type"] == SET_INT and int(num(a["stat"])) in data.stat_tokens]
 
 
 def write_rows(f, out):
@@ -1163,15 +1232,19 @@ def build(data, never):
             and data.kind.get(o) in (10, 12) and data.made_on_ground(o)
             and any(s["cat"] == USE for s in data.by_obj[o])}
     for obj in sorted(set(data.placed) | made):
-        if data.kind.get(obj) not in (10, 12):
-            continue
         sets = data.by_obj[obj]
-        roots = []
-        uses = [s for s in sets if s["cat"] == USE]
+        # A set heard when a carried item sending its key is used close by (Landblock.cs:985-998,
+        # WorldObject_Use.cs:47-55), on any placed object: the item is the row's, kept, not taken.
+        roots = [(dict(s, wcid=item), False) for s in sets
+                 if s["cat"] == RECEIVE_SIGNAL and obj not in made
+                 for item in sorted(data.signal_items.get(s["quest"], ()))]
+        # Used or handed things: an NPC only (Creature or Vendor), not a switch, chest or portal.
+        npc = data.kind.get(obj) in (10, 12)
+        uses = [s for s in sets if s["cat"] == USE and npc]
         if uses:
             chance = any(s["p"] < 1 for s in uses)
             roots += [(s, chance) for s in (uses if chance else uses[:1])]
-        for wcid in sorted({s["wcid"] for s in sets if s["cat"] in (GIVE, REFUSE)}):
+        for wcid in sorted({s["wcid"] for s in sets if s["cat"] in (GIVE, REFUSE) and npc}):
             for cat in (REFUSE, GIVE):
                 if cat == GIVE and obj not in data.allow_give:
                     break  # Player_Inventory.cs:3439
@@ -1200,7 +1273,8 @@ def build(data, never):
                     r["unread"].insert(0, "a random reply")
                 r.update(obj=obj, root=root, fixed=fixed, scaled=scaled, share=share,
                          luminance=luminance_of(effects),
-                         stamps=stamps_of(effects), does=does,
+                         stamps=stamps_of(effects) + stat_stamps(data, root, effects),
+                         does=does,
                          gives=[(int(num(a["wcid"])), max(int(num(a["stack"], 1)), 1))
                                 for a in effects if a["type"] == GIVE_ITEM and a["wcid"]])
                 if root["cat"] == USE and not r["items"]:
@@ -1236,7 +1310,9 @@ def build(data, never):
         elif item:
             kind, want, count = "item", str(item[0]), item[1]
             needs = r["needs"]
-            qid = r["timer"] or (r["stamps"][0] if r["stamps"] else "give:%d" % item[0])
+            heard = r["root"]["cat"] == RECEIVE_SIGNAL
+            fallback = "use:%d" % r["obj"] if heard else "give:%d" % item[0]
+            qid = r["timer"] or (r["stamps"][0] if r["stamps"] else fallback)
         else:
             kind, want, count = "talk", "", 0
             needs = r["needs"]
@@ -1310,9 +1386,12 @@ def build(data, never):
             title = data.name.get(int(q["id"][5:]), q["id"])
         elif q["id"].startswith("talk:"):
             title = "Talk to %s" % data.name.get(q["obj"], q["id"])
+        elif q["id"].startswith("use:"):
+            title = "%s at %s" % (data.name.get(q["item"][0], ""), data.name.get(q["obj"], ""))
         title = (title or q["id"]).replace(",", ";")
         pct, lo, hi = q["scaled"] or (0, 0, 0)
-        hand = "give" if q["root"]["cat"] in (GIVE, REFUSE) else "talk"
+        hand = {GIVE: "give", REFUSE: "give", RECEIVE_SIGNAL: "use"}.get(q["root"]["cat"], "talk")
+        clears = sorted({w: q["clears"].count(w) for w in q.get("clears", [])}.items())
         item = q["item"]
         it_name = data.name.get(item[0], "") if item else ""
         it_type = "%X" % (data.ints[item[0]].get(1, 0) & 0xFFFFFFFF) if item else ""
@@ -1322,15 +1401,19 @@ def build(data, never):
                str(hi), q["share"] or "none", ";".join("%d:%d" % g for g in q["gives"]),
                ";".join(q["stamps"]), str(q["repeat"]), q["timer"], ";".join(q["needs"]),
                it_name, it_type, it_value, str(q["luminance"]), ";".join(q["does"]),
-               "|".join(u.replace(",", ";") for u in dict.fromkeys(q["unread"])))
-        key = row[:-1]  # rows differing only in what was unread are one row
+               "|".join(u.replace(",", ";") for u in dict.fromkeys(q["unread"])),
+               ";".join("%d:%d" % c for c in clears))
+        # Rows differing only in what was unread are one row.
+        key = row[:COL_UNREAD] + row[COL_UNREAD + 1:]
         if key not in seen:
             seen[key] = len(rows_out)
             rows_out.append(row)
-        elif row[-1]:
+        elif row[COL_UNREAD]:
             i = seen[key]
-            both = [u for u in rows_out[i][-1].split("|") if u] + row[-1].split("|")
-            rows_out[i] = key + ("|".join(dict.fromkeys(both)),)
+            was = rows_out[i]
+            both = [u for u in was[COL_UNREAD].split("|") if u] + row[COL_UNREAD].split("|")
+            rows_out[i] = (was[:COL_UNREAD] + ("|".join(dict.fromkeys(both)),)
+                           + was[COL_UNREAD + 1:])
     rows_out = merge_random(rows_out)
     rows_out = split_by_reward(rows_out, data)
     kind_order = {"start": 0, "talk": 1, "kill": 2, "item": 3}
@@ -1669,7 +1752,7 @@ def learn_rows(data, learnt, had):
         out.append(("learn:%d" % spell, "item", data.recalls[spell].replace(",", ";"), "0",
                     "read", str(wcid), "1", "0", "0", "0", "0", "0", "0", "none", "", "", "-1",
                     "", "", data.name.get(wcid, ""), "%X" % (ints.get(1, 0) & 0xFFFFFFFF),
-                    str(ints.get(19, 0)), "0", "spell", ""))
+                    str(ints.get(19, 0)), "0", "spell", "", ""))
     return out
 
 
@@ -1710,7 +1793,7 @@ ENCOUNTER_BLOCKS = 64
 ROTATE_SECS = 420.0
 
 # Columns of a quests.csv row a random reply's alternatives may differ in and still be one row.
-COL_GIVES, COL_DOES, COL_UNREAD = 14, 23, 24
+COL_GIVES, COL_DOES, COL_UNREAD, COL_CLEARS = 14, 23, 24, 25
 
 
 def merge_random(rows_out):
@@ -1803,7 +1886,8 @@ def main():
     rows_out, givers_out, src_out, reasons = build(data, asked - stamped)
     with open(os.path.join(out_dir, "quests.csv"), "w", encoding="utf-8", newline="") as f:
         f.write(QUESTS_HEADER)
-        write_rows(f, rows_out)
+        # The clears column is written only where there is one: every other row keeps 25.
+        write_rows(f, [r if r[COL_CLEARS] else r[:COL_CLEARS] for r in rows_out])
     with open(os.path.join(out_dir, "quest_givers.csv"), "w", encoding="utf-8",
               newline="") as f:
         f.write(GIVERS_HEADER)
@@ -1951,24 +2035,28 @@ PICKUPS_HEADER = """\
 
 
 QUESTS_HEADER = """\
-# Every quest a placed NPC holds: each Use, Give or Refuse path that does anything for the
-# character, XP or not, one row per way to complete one (giver and level band); the giver's
-# placements are in quest_givers.csv. And one per recall spell's scroll, had and read.
-# id,kind,title,giver_wcid,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,luminance,does,unread
+# Every quest a placed NPC holds: each Use, Give or Refuse path (or an object's path on hearing
+# a carried item used) that does anything for the character, XP or not, one row per way to
+# complete one (giver and level band); the giver's placements are in quest_givers.csv. And one
+# per recall spell's scroll, had and read.
+# id,kind,title,giver_wcid,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,luminance,does,unread[,clears]
 # Rows sharing an id are alternatives. kind: kill, item, talk, or start (the talk that takes a
-# quest up: it stamps what the quest's rows need). hand: give (hand the item over), talk, or
-# read (a recall spell's scroll read: id learn:SPELL, giver_wcid 0, no giver).
+# quest up: it stamps what the quest's rows need). hand: give (hand the item over), talk, read
+# (a recall spell's scroll read: id learn:SPELL, giver_wcid 0, no giver), or use (the wanted
+# item, kept, used while standing in the giver, an object hearing its signal: id use:OBJECT
+# when nothing names it). clears, only where there is one: creatures wcid:count;... the giver
+# generates, all killed shortly before the use (the events their deaths start).
 # want: the item wcid, or the kill counter. count: items one hand-in takes, or kills. Levels 0
 # are open. xp is fixed; xp_level is a share of the XP to the next level, clamped to
 # xp_min/xp_max when not 0. share: all, none or allegiance. gives: wcid:count;..., and for a
 # random reply every alternative |-separated (an empty one gives nothing). stamps and needs:
-# quest flags. repeat: seconds before another solve, 0 any time, -1 once; timer: the quest its
-# wait is kept under. item, item_type (hex), item_value: the wanted item. luminance: what the
-# path awards. does: what the path does (xp, item, flag, spell, skill, luminance, title,
-# teleport, takes, stat, contract, enlightenment, type N). unread: conditions the client cannot
-# check, |-separated ("a random reply" among them). Regenerate with
-# reference/scripts/data/quests.sh (reads the ACE world database, the community's reconstruction
-# of retail's server data).
+# quest flags, or intSTAT=VALUE (a character stat set to, or asked to be, that value). repeat:
+# seconds before another solve, 0 any time, -1 once; timer: the quest its wait is kept under.
+# item, item_type (hex), item_value: the wanted item. luminance: what the path awards. does:
+# what the path does (xp, item, flag, spell, skill, luminance, title, teleport, takes, stat,
+# contract, enlightenment, type N). unread: conditions the client cannot check, |-separated
+# ("a random reply" among them). Regenerate with reference/scripts/data/quests.sh (reads the
+# ACE world database, the community's reconstruction of retail's server data).
 """
 
 GIVERS_HEADER = """\

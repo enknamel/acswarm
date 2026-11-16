@@ -3361,7 +3361,25 @@
 69994,Night Club Attendant,E74E0013,60,60,32.01
 70055,Arwyth Margyle,00300190,130.77,-9.72,-5.99
 70056,Big Chief Hagra,00390101,2.02,-23.11,0
+70119,Upper Level West Aetheria Mana Field,890402FF,20,-40,24
+70120,Aetheria Mana Field,89040340,50,-40,24
+70125,Middle Level North Aetheria Mana Field,89040247,50,-20,12.01
+70130,Middle Level South Aetheria Mana Field,89040255,50,-60,12.01
+70135,Middle Level East Aetheria Mana Field,89040291,80,-40,12.01
+70140,Middle Level West Aetheria Mana Field,8904020B,20,-40,12.01
+70141,Aetheria Mana Field,8904024C,50,-40,12.01
+70146,Lower Level North Aetheria Mana Field,89040153,50,-20,0
+70151,Lower Level South Aetheria Mana Field,89040161,50,-60,0
+70156,Lower Level East Aetheria Mana Field,8904019D,80,-40,0
+70161,Lower Level West Aetheria Mana Field,89040117,20,-40,0
+70162,Aetheria Mana Field,89040158,50,-40,0
+70167,Upper Level North Aetheria Mana Field,8904033B,50,-20,24
+70172,Upper Level South Aetheria Mana Field,89040349,50,-60,24
+70177,Upper Level East Aetheria Mana Field,89040385,80,-40,24
 70294,Balior,004401FC,70,-32,0.01
+70343,Apostate Sparkling Stopgap,21720250,33.39,147.89,144.4
+70344,Apostate Scintillating Stopgap,2172011B,96.46,83.8,114.4
+70345,Apostate Shimmering Stopgap,217201C8,120.93,89.54,132.4
 70350,Large Shattered Aetherium Core,21710016,52.72,121.8,152.6
 70350,Large Shattered Aetherium Core,22720003,2.63,50.48,166.05
 70350,Large Shattered Aetherium Core,22730021,115.26,21.92,152.23
@@ -3755,6 +3773,28 @@
 80153,Esper Node Golem,95CC0040,169.17,176.71,170.01
 80154,Halaetan Gatestone,2BF40100,36,132,68.95
 80155,Halaetan Node Golem,2BF4000E,26,135,66
+80200,Menhir Ring One,33460007,9.99,159.78,43.58
+80201,Menhir Ring Two,2545002E,130.01,129.68,-0.06
+80202,Menhir Ring Three,C9900018,65.32,180.27,14.88
+80203,Menhir Ring Four,C02D0036,159.96,129.85,258.01
+80204,Menhir Ring Five,BC11011F,60,85.45,240
+80205,Menhir Ring Six,B5710000,184.96,80.08,61.45
+80206,Menhir Ring Seven,B1280023,109.91,50.02,170.71
+80207,Menhir Ring Eight,AACC0000,9.95,100.15,48.01
+80208,Menhir Ring Nine,A9B30007,11.5,157.58,94.5
+80209,Menhir Ring Ten,95970000,117.93,109.01,224.01
+80210,Menhir Ring Eleven,86890000,26.98,126.69,106.81
+80211,Menhir Ring Twelve,81930000,123.92,88.36,124
+80212,Menhir Ring Thirteen,003D032F,179.67,-39.93,-11.99
+80213,Menhir Ring Fourteen,003A032F,179.67,-39.93,-11.99
+80214,Menhir Ring Fifteen,00B7011E,110.07,-140.25,-23.5
+80214,Menhir Ring Fifteen,00B8011E,110.07,-140.25,-23.5
+80214,Menhir Ring Fifteen,00B9011E,109.97,-140.25,-22.5
+80215,Menhir Ring Sixteen,B5F00121,115.43,-60.43,-81.19
+80216,Menhir Ring Seventeen,A8BF0000,36,156,86.01
+80217,Menhir Ring Eighteen,99E6002F,128.81,159.96,78.5
+80218,Menhir Ring Nineteen,866D0000,9.58,188.94,-0.44
+80219,Menhir Ring Twenty,22BC0000,36,180,160.01
 80343,Creeping Blight Banner of the Courtyard,F92F0012,59.89,36.1,163.35
 80347,Creeping Blight Banner of the Courtyard,F92F0012,59.89,36.1,163.35
 80348,Creeping Blight Banner of the Courtyard,F92F0012,59.89,36.1,163.35

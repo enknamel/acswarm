@@ -57,7 +57,11 @@ q placed 'select li.weenie_Class_Id, hex(li.obj_Cell_Id), round(li.origin_X, 2),
   round(li.origin_Y, 2), round(li.origin_Z, 2), w.type
 from landblock_instance li join weenie w on w.class_Id = li.weenie_Class_Id
 where li.weenie_Class_Id in
-  (select object_Id from weenie_properties_emote where category in (1, 6, 7));'
+  (select object_Id from weenie_properties_emote where category in (1, 6, 7, 37));'
+
+# Items whose use sends a signal (UseSendsSignal, PropertyString 51: Gem.cs:69-72), heard by an
+# object near (Landblock.cs:985-998) as its set of that key (category 37, EmoteManager.cs:2055).
+q signals 'select object_Id, value from weenie_properties_string where type = 51;'
 
 # And those a placed generator puts out, at the generator (Scatter and OnTop stay by it), or at the
 # profile's own cell when it names one (Specific); none through an Off event's generator: the
@@ -359,7 +363,7 @@ q components 'select object_Id from weenie_properties_int where type = 1 and val
 q encroots 'select hex(landblock), weenie_Class_Id, count(*) from encounter
 group by landblock, weenie_Class_Id;'
 
-for t in placed madenpc emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
+for t in placed signals madenpc emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
   gens chestlist locks keys stuck nocorpse recipes combines encounters roots profiles genprops crit inst links \
   encroots events genevent summonspell linkportal deathsignals portalstamps spellpos reldest hearing \
   genportals portalmet components; do

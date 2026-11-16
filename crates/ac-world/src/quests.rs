@@ -28,6 +28,9 @@ pub enum Handing {
     Give,
     Talk,
     Read,
+    /// The wanted item, kept, used while the body overlaps the giver: an object hearing the
+    /// item's signal (Gem.cs:69-72, Landblock.cs:985-998), radius 0 for the Aetheria fields.
+    Use,
 }
 
 /// What a row asks for.
@@ -145,6 +148,9 @@ pub struct Row {
     pub does: Vec<&'static str>,
     /// Conditions the client cannot check, in words ("a random reply", "a check of stat 134").
     pub unread: Vec<&'static str>,
+    /// Creatures `(wcid, count)` the giver generates, all killed shortly before a use: their
+    /// deaths start the events it asks (EmoteManager.cs:1287-1295, 300 s for the Aetheria wisps).
+    pub clears: Vec<(u32, u32)>,
 }
 
 impl Row {
@@ -448,7 +454,8 @@ fn want_of(kind: Kind, s: &str) -> Option<Want> {
 
 fn parse_row(line: &'static str) -> Option<Row> {
     let f: Vec<&'static str> = line.split(',').collect();
-    if f.len() != 25 {
+    // A 26th column, clears, only where there is one.
+    if f.len() != 25 && f.len() != 26 {
         return None;
     }
     let kind = match f[1] {
@@ -477,6 +484,7 @@ fn parse_row(line: &'static str) -> Option<Row> {
     let hand = match f[4] {
         "give" => Handing::Give,
         "read" => Handing::Read,
+        "use" => Handing::Use,
         _ => Handing::Talk,
     };
     // A scroll read has no giver.
@@ -527,7 +535,15 @@ fn parse_row(line: &'static str) -> Option<Row> {
         luminance: f[22].parse().ok()?,
         does: split_on(f[23], ';'),
         unread: split_on(f[24], '|'),
+        clears: pairs(f.get(25).copied().unwrap_or(""), 10)?,
     })
+}
+
+/// The stat and value a `intSTAT=VALUE` need or stamp names: a character stat (PropertyInt) set
+/// to, or asked to be, that value. `None` for a quest flag.
+pub fn stat_need(flag: &str) -> Option<(u32, i32)> {
+    let (stat, value) = flag.strip_prefix("int")?.split_once('=')?;
+    Some((stat.parse().ok()?, value.parse().ok()?))
 }
 
 fn parse_spots(cells: &[(u32, u32)], at: &str) -> Option<Vec<Place>> {

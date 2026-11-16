@@ -1,21 +1,25 @@
-# Every quest a placed NPC holds: each Use, Give or Refuse path that does anything for the
-# character, XP or not, one row per way to complete one (giver and level band); the giver's
-# placements are in quest_givers.csv. And one per recall spell's scroll, had and read.
-# id,kind,title,giver_wcid,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,luminance,does,unread
+# Every quest a placed NPC holds: each Use, Give or Refuse path (or an object's path on hearing
+# a carried item used) that does anything for the character, XP or not, one row per way to
+# complete one (giver and level band); the giver's placements are in quest_givers.csv. And one
+# per recall spell's scroll, had and read.
+# id,kind,title,giver_wcid,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,luminance,does,unread[,clears]
 # Rows sharing an id are alternatives. kind: kill, item, talk, or start (the talk that takes a
-# quest up: it stamps what the quest's rows need). hand: give (hand the item over), talk, or
-# read (a recall spell's scroll read: id learn:SPELL, giver_wcid 0, no giver).
+# quest up: it stamps what the quest's rows need). hand: give (hand the item over), talk, read
+# (a recall spell's scroll read: id learn:SPELL, giver_wcid 0, no giver), or use (the wanted
+# item, kept, used while standing in the giver, an object hearing its signal: id use:OBJECT
+# when nothing names it). clears, only where there is one: creatures wcid:count;... the giver
+# generates, all killed shortly before the use (the events their deaths start).
 # want: the item wcid, or the kill counter. count: items one hand-in takes, or kills. Levels 0
 # are open. xp is fixed; xp_level is a share of the XP to the next level, clamped to
 # xp_min/xp_max when not 0. share: all, none or allegiance. gives: wcid:count;..., and for a
 # random reply every alternative |-separated (an empty one gives nothing). stamps and needs:
-# quest flags. repeat: seconds before another solve, 0 any time, -1 once; timer: the quest its
-# wait is kept under. item, item_type (hex), item_value: the wanted item. luminance: what the
-# path awards. does: what the path does (xp, item, flag, spell, skill, luminance, title,
-# teleport, takes, stat, contract, enlightenment, type N). unread: conditions the client cannot
-# check, |-separated ("a random reply" among them). Regenerate with
-# reference/scripts/data/quests.sh (reads the ACE world database, the community's reconstruction
-# of retail's server data).
+# quest flags, or intSTAT=VALUE (a character stat set to, or asked to be, that value). repeat:
+# seconds before another solve, 0 any time, -1 once; timer: the quest its wait is kept under.
+# item, item_type (hex), item_value: the wanted item. luminance: what the path awards. does:
+# what the path does (xp, item, flag, spell, skill, luminance, title, teleport, takes, stat,
+# contract, enlightenment, type N). unread: conditions the client cannot check, |-separated
+# ("a random reply" among them). Regenerate with reference/scripts/data/quests.sh (reads the
+# ACE world database, the community's reconstruction of retail's server data).
 30minattributes,talk,30 Minutes to pick up Attribute Gems,44950,talk,,0,0,0,0,0,0,0,none,,usedfreeattributereset;attributereset30day;30minattributes;usedattributereset,1800,30minattributes,,,,,0,flag,a check of type 75
 30minattributes,item,30 Minutes to pick up Attribute Gems,44950,give,46421,1,0,0,0,0,0,0,none,,30minattributes,0,,,Attribute Reset Certificate,80,0,0,flag;takes,
 abductedcompleted_0313,talk,quest timer,49638,talk,,0,0,0,275000000,0,0,0,none,48748:1;20630:9,abductedcompleted_0313;legendaryquestcounter_0913,72000,abductedcompleted_0313,,,,,20000,xp;item;flag;luminance;title,a check of type 102
@@ -1073,6 +1077,21 @@ duleinformant,item,quest timer,43861,give,43859,1,0,0,0,0,0,0,none,,duleinforman
 eastwatchmoarsmencomplete_0508,item,Player has completed the Eastwatch portion of Moarsmen on the Shores,37441,give,37447,1,0,0,0,0.15,0,28092330,allegiance,,eastwatchmoarsmencomplete_0508,0,,,Huge Tainted Egg,80,0,0,xp;flag;takes,
 ebongromniekills,start,Ebon Gromnie Kill Counter,31648,talk,,0,0,0,0,0,0,0,none,,ebongromniekills,0,,,,,,0,flag,
 ebongromniekills,kill,Ebon Gromnie Kill Counter,31648,talk,ebongromniekills,25,0,0,0,1.33,0,2000000,allegiance,31608:1,ebongromnietask,72000,ebongromnietask,ebongromniekills,,,,0,xp;item;flag;title,
+efllcentermanafieldused,item,Used Aligned Mana Stone in EF Lower Level Center Aetheria Mana Field,70162,use,42710,1,0,0,0,0,0,0,none,,efllcentermanafieldused;int322=7,-1,efllcentermanafieldused,int322=3;efllnorthmanafieldused;efllsouthmanafieldused;eflleastmanafieldused;efllwestmanafieldused,Aligned Mana Stone,800,0,0,flag;stat,
+eflleastmanafieldused,item,Used Aligned Mana Stone in EF Lower Level East Aetheria Mana Field,70156,use,42710,1,0,0,0,0,0,0,none,,eflleastmanafieldused,-1,eflleastmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42671:4
+efllnorthmanafieldused,item,Used Aligned Mana Stone in EF Lower Level North Aetheria Mana Field,70146,use,42710,1,0,0,0,0,0,0,none,,efllnorthmanafieldused,-1,efllnorthmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42671:4
+efllsouthmanafieldused,item,Used Aligned Mana Stone in EF Lower Level South Aetheria Mana Field,70151,use,42710,1,0,0,0,0,0,0,none,,efllsouthmanafieldused,-1,efllsouthmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42671:4
+efllwestmanafieldused,item,Used Aligned Mana Stone in EF Lower Level West Aetheria Mana Field,70161,use,42710,1,0,0,0,0,0,0,none,,efllwestmanafieldused,-1,efllwestmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42671:4
+efmlcentermanafieldused,item,Used Aligned Mana Stone in EF Middle Level Center Aetheria Mana Field,70141,use,42710,1,0,0,0,0,0,0,none,,efmlcentermanafieldused;int322=3,-1,efmlcentermanafieldused,int322=1;efmlnorthmanafieldused;efmlsouthmanafieldused;efmleastmanafieldused;efmlwestmanafieldused,Aligned Mana Stone,800,0,0,flag;stat,
+efmleastmanafieldused,item,Used Aligned Mana Stone in EF Middle Level East Aetheria Mana Field,70135,use,42710,1,0,0,0,0,0,0,none,,efmleastmanafieldused,-1,efmleastmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42668:4
+efmlnorthmanafieldused,item,Used Aligned Mana Stone in EF Middle Level North Aetheria Mana Field,70125,use,42710,1,0,0,0,0,0,0,none,,efmlnorthmanafieldused,-1,efmlnorthmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42668:4
+efmlsouthmanafieldused,item,Used Aligned Mana Stone in EF Middle Level South Aetheria Mana Field,70130,use,42710,1,0,0,0,0,0,0,none,,efmlsouthmanafieldused,-1,efmlsouthmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42668:4
+efmlwestmanafieldused,item,Used Aligned Mana Stone in EF Middle Level West Aetheria Mana Field,70140,use,42710,1,0,0,0,0,0,0,none,,efmlwestmanafieldused,-1,efmlwestmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42668:4
+efulcentermanafieldused,item,Used Aligned Mana Stone in EF Upper Level Center Aetheria Mana Field,70120,use,42710,1,0,0,0,0,0,0,none,42645:1,efulcentermanafieldused;int322=1,-1,efulcentermanafieldused,efulnorthmanafieldused;efulsouthmanafieldused;efuleastmanafieldused;efulwestmanafieldused,Aligned Mana Stone,800,0,0,item;flag;stat,
+efuleastmanafieldused,item,Used Aligned Mana Stone in EF Upper Level East Aetheria Mana Field,70177,use,42710,1,0,0,0,0,0,0,none,,efuleastmanafieldused,-1,efuleastmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42670:4
+efulnorthmanafieldused,item,Used Aligned Mana Stone in EF Upper Level North Aetheria Mana Field,70167,use,42710,1,0,0,0,0,0,0,none,,efulnorthmanafieldused,-1,efulnorthmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42670:4
+efulsouthmanafieldused,item,Used Aligned Mana Stone in EF Upper Level South Aetheria Mana Field,70172,use,42710,1,0,0,0,0,0,0,none,,efulsouthmanafieldused,-1,efulsouthmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42670:4
+efulwestmanafieldused,item,Used Aligned Mana Stone in EF Upper Level West Aetheria Mana Field,70119,use,42710,1,0,0,0,0,0,0,none,,efulwestmanafieldused,-1,efulwestmanafieldused,,Aligned Mana Stone,800,0,0,flag,,42670:4
 eggretrievalwait,talk,Cooldown for Egg Retrieval additional rewards,42977,talk,,0,50,0,0,0,0,0,none,,,518400,eggretrievalwait,,,,,0,flag;takes,a check of type 51|not carrying Egg|another quest's wait|solve-count ranges
 eggretrievalwait,talk,Cooldown for Egg Retrieval additional rewards,42977,talk,,0,50,0,0,0,0,0,none,,eggretrievalstarted,518400,eggretrievalwait,,,,,0,flag,a check of type 51|not carrying Egg|another quest's wait|solve-count ranges
 eggretrievalwait,item,Cooldown for Egg Retrieval additional rewards,42977,talk,80227,8,50,0,0,0,0,0,none,42667:1;36376:1,eggretrievalwait,518400,eggretrievalwait,,Egg,80,1,0,item;flag;takes,a check of type 51|a check of type 20|solve-count ranges
@@ -14253,6 +14272,26 @@ mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,42519,give,4249
 mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,42519,give,42490,1,0,0,0,0.7,0,60000000,allegiance,39287:1,mehirresearchcomplete0310,0,,,Enchanted Mana Stone,800,0,0,xp;item;flag;title;takes,solve-count ranges|a check of type 75
 mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,42519,give,42490,1,0,0,0,0.4,0,30000000,allegiance,,mehirresearchcomplete0310,0,,,Enchanted Mana Stone,800,0,0,xp;flag;title;takes,solve-count ranges|a check of type 75
 mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,42519,talk,42490,1,50,0,0,0,0,0,none,42490:1,,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,item,not carrying Enchanted Mana Stone
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80200,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80201,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80202,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80203,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80204,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80205,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80206,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80207,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80208,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80209,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80210,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80211,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80212,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80213,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80214,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80215,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80216,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80217,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80218,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
+mehirresearchcomplete0310,item,Menhir Research Timer of 20 Hours,80219,use,42490,1,0,0,0,0,0,0,none,,menhirresearchnpccounter,72000,mehirresearchcomplete0310,,Enchanted Mana Stone,800,0,0,flag,a check of type 102|solve-count ranges
 memorygamedroppedaxe,talk,You've dropped the memory game axe.,29761,talk,,0,0,0,0,0,0,0,none,,,72000,memorygamedroppedaxe,,,,,0,flag;spell,
 memorygamedroppedaxe,talk,You've dropped the memory game axe.,29762,talk,,0,0,0,0,0,0,0,none,,,72000,memorygamedroppedaxe,,,,,0,spell,
 memorygamedroppedmace,talk,You've dropped the memory game mace.,29763,talk,,0,0,0,0,0,0,0,none,,,72000,memorygamedroppedmace,,,,,0,spell,
@@ -16101,9 +16140,9 @@ talk:42335,talk,Talk to Operations Aid,42335,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0
 talk:42336,talk,Talk to Operations Aid,42336,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of stat 288
 talk:42337,talk,Talk to Operations Aid,42337,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of stat 289
 talk:42716,talk,Talk to Cypher the Apprentice,42716,talk,,0,75,0,0,0,0,0,none,42710:1,,0,,efllcentermanafieldused,,,,0,item,not carrying Aligned Mana Stone
-talk:42716,talk,Talk to Cypher the Apprentice,42716,talk,,0,75,0,0,0,0,0,none,42710:1,,0,,efmlcentermanafieldused,,,,0,item,not carrying Aligned Mana Stone
-talk:42716,talk,Talk to Cypher the Apprentice,42716,talk,,0,75,0,0,0,0,0,none,42710:1,,0,,efulcentermanafieldused,,,,0,item,not carrying Aligned Mana Stone
-talk:42716,talk,Talk to Cypher the Apprentice,42716,talk,,0,75,0,0,0,0,0,none,42710:1,,0,,,,,,0,item,not carrying Aligned Mana Stone
+talk:42716,talk,Talk to Cypher the Apprentice,42716,talk,,0,75,0,0,0,0,0,none,42710:1,,0,,efmlcentermanafieldused,,,,0,item,not carrying Aligned Mana Stone|only without efllcentermanafieldused
+talk:42716,talk,Talk to Cypher the Apprentice,42716,talk,,0,75,0,0,0,0,0,none,42710:1,,0,,efulcentermanafieldused,,,,0,item,not carrying Aligned Mana Stone|only without efllcentermanafieldused|only without efmlcentermanafieldused
+talk:42716,talk,Talk to Cypher the Apprentice,42716,talk,,0,75,0,0,0,0,0,none,42710:1,,0,,,,,,0,item,not carrying Aligned Mana Stone|only without efllcentermanafieldused|only without efmlcentermanafieldused|only without efulcentermanafieldused
 talk:42955,talk,Talk to Wedding Fireworks Launcher,42955,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,type 81,a check of type 80
 talk:43399,talk,Talk to Void Magic Warden of Enlightenment,43399,talk,,0,0,0,0,0,0,0,none,43400:1,,0,,,,,,0,item,
 talk:43530,talk,Talk to Olthoi Queen,43530,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
@@ -16728,6 +16767,10 @@ uncoverrenegadescomplete0309,item,Player wait time for Uncovering the Renegades,
 unleashgearknightcomplete0909,talk,Player has completed Unleash Gear Knight Quest,41227,talk,,0,0,0,0,0,0,0,none,,unleashgearknightstart0909,72000,unleashgearknightcomplete0909,,,,,0,flag,not carrying Aetherium Core Fragment
 unleashgearknightcomplete0909,item,Player has completed Unleash Gear Knight Quest,41227,give,41226,1,0,0,0,0.4,0,396314475,allegiance,38456:1;20630:8,unleashgearknightcomplete0909,72000,aetheriumcorefragmentpickuptimer,,Aetherium Core Fragment,80,0,12000,xp;item;flag;luminance;takes,
 upperinsatiablejaw,item,Upper Insatiable Eater Jaw ,28717,give,42104,1,0,0,39900000,0,0,0,all,20630:2,,72000,upperinsatiablejaw,,Upper Insatiable Eater Jaw,80,0,0,xp;item;title;takes,
+use:70120,item,Aligned Mana Stone at Aetheria Mana Field,70120,use,42710,1,0,0,0,0,0,0,none,42645:1,,0,,efulnorthmanafieldused;efulsouthmanafieldused;efuleastmanafieldused;efulwestmanafieldused;efulcentermanafieldused,Aligned Mana Stone,800,0,0,item,
+use:70343,item,Sparkling Apostate Shard at Apostate Sparkling Stopgap,70343,use,43207,1,0,0,0,0,0,0,none,,,0,,,Sparkling Apostate Shard,800,0,0,spell,
+use:70344,item,Scintillating Apostate Shard at Apostate Scintillating Stopgap,70344,use,43208,1,0,0,0,0,0,0,none,,,0,,,Scintillating Apostate Shard,800,0,0,spell,
+use:70345,item,Shimmering Apostate Shard at Apostate Shimmering Stopgap,70345,use,43209,1,0,0,0,0,0,0,none,,,0,,,Shimmering Apostate Shard,800,0,0,spell,
 usedfloatingbottle,talk,You've used the floating bottle recently.,27805,talk,,0,0,0,0,0,0,0,none,27811:1,usedfloatingbottle,72000,usedfloatingbottle,,,,,0,item;flag,
 usedfreemeleemasteryreset,talk,Used free Melee Mastery Reset in Arwic,45471,talk,,0,0,0,0,0,0,0,none,,usedfreemeleemasteryreset;usedmeleemasteryreset,-1,usedfreemeleemasteryreset,,,,,0,flag;stat,a check of stat 354|a check of type 75
 usedfreemeleemasteryreset,talk,Used free Melee Mastery Reset in Arwic,45472,talk,,0,0,0,0,0,0,0,none,,usedfreemeleemasteryreset;usedmeleemasteryreset,-1,usedfreemeleemasteryreset,,,,,0,flag;stat,a check of stat 354|a check of type 75

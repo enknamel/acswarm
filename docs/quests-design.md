@@ -81,6 +81,23 @@ dropped:
   autoplay hands such a row in only for a quest the player switched on by hand or pursues;
 - a want nothing known drops still stays; it has no `quest_sources.csv` row.
 
+An object of any weenie type that hears a signal is a giver too: its set of category 37 keyed on a
+signal some item sends when used (UseSendsSignal, PropertyString 51: Gem.cs:69-72; heard by an object
+with HearLocalSignals whose cylinder the user's overlaps, Landblock.cs:985-998,
+WorldObject_Use.cs:47-55) is a root, its row `hand` = `use` with `want` the item, kept, not taken.
+On those paths only (elsewhere they stay unread, so society ranks are untouched):
+- an InqEvent (51) whose event a controller the object itself generates starts when its creature
+  dies (StartEvent, EmoteManager.cs:1287-1295; 300 s on, Creature_Death.cs:123) is the `clears`
+  column: those creatures killed near the object shortly before the use;
+- a carry-check whose failure reply gives the item checked and whose success reply only talks is a
+  guard, walked into its failure reply alone and asking nothing;
+- an InqIntStat on a stat some set sets, min = max, is a need `intSTAT=VALUE`, put first; a
+  SetIntStat of that stat stamps one. The client reads it from the character's own stat, never a flag.
+The Aetheria unlock (Cypher the Apprentice, 42716, gives the Aligned Mana Stone, 42710) is 15 rows:
+each floor of the Empyrean Facility (0x8904) has four side fields (`ef<UL|ML|LL><dir>manafieldused`,
+`clears` its four wisps) and a centre needing them, the middle and lower centres also
+AetheriaBitfield (322) at 1 and 3, set by the floor above (to 1, 3, 7).
+
 Rows that differ only in the giver's placement are one row; the placements are
 `quest_givers.csv`. A random reply's sets (probability < 1) that differ only in what they give are
 one row whose `gives` lists every alternative.
@@ -203,7 +220,7 @@ One row per way to complete a quest: giver and level band. Commas in names becom
 | 2 | `kind` | `kill`, `item`, `talk`, or `start` (the talk that takes a quest up: stamps what a row `needs`) |
 | 3 | `title` | what the list shows |
 | 4 | `giver_wcid` | the NPC; its name and placements are in `quest_givers.csv` |
-| 5 | `hand` | `give`: hand the item over; `talk`: use the giver |
+| 5 | `hand` | `give`: hand the item over; `talk`: use the giver; `read`: a scroll read; `use`: use the carried item standing in the giver (a signal it hears) |
 | 6 | `want` | item wcid (`item`), the counter (`kill`), empty |
 | 7 | `count` | items one hand-in takes (a Give takes one per item handed), or kills |
 | 8-9 | `min_level`, `max_level` | the giver's Level band, 0 for open |
@@ -218,6 +235,7 @@ One row per way to complete a quest: giver and level band. Commas in names becom
 | 20-22 | `item`, `item_type`, `item_value` | the wanted item's name, hex ItemType and value: what the loot rules read |
 | 23 | `does` | what the path does: `xp`, `item`, `flag`, `spell`, `skill`, `luminance`, `title`, `teleport`, `takes`, `stat`, `contract`, `enlightenment`, `type N` |
 | 24 | `unread` | conditions the client cannot check, `\|`-separated (`a random reply` among them) |
+| after `unread` | `clears` | only where there is one, the last column: creatures `wcid:count;...` the giver generates, killed shortly before a `use` |
 
 `quest_givers.csv`: `giver_wcid,giver,cell,x,y,z`, one row per placement: hex cell, x/y/z local to
 its landblock (`unlocks.csv`'s convention).

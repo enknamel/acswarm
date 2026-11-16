@@ -543,3 +543,38 @@ fn the_font_guardian_starts_the_hidden_crowns_event_once_the_four_valves_have() 
         "the Font Guardian stands, not put out by an event"
     );
 }
+
+#[test]
+fn the_aetheria_fields_are_used_with_the_aligned_stone_after_their_wisps_die() {
+    // A side field hears the stone used inside it once its four wisps' events are on.
+    let north = row(
+        "efulnorthmanafieldused",
+        Kind::Item,
+        "Upper Level North Aetheria Mana Field",
+    );
+    assert_eq!(
+        (north.hand, north.want.clone()),
+        (Handing::Use, Want::Item(42710))
+    );
+    assert_eq!(north.clears, [(42670, 4)]);
+    assert_eq!(
+        (north.repeat, north.stamps.as_slice()),
+        (Repeat::Once, &[north.id.to_string()][..])
+    );
+    assert_eq!(cells(north), [0x8904_033B]);
+    assert!(!north.has_unread() && north.needs.is_empty());
+    // The centre asks its floor's four and sets AetheriaBitfield (322); the floor below asks it.
+    let upper = row("efulcentermanafieldused", Kind::Item, "Aetheria Mana Field");
+    assert!(upper.clears.is_empty() && upper.stamps.contains(&"int322=1".to_string()));
+    assert_eq!(
+        (upper.needs.len(), upper.gives.as_slice()),
+        (4, &[(42645, 1)][..])
+    );
+    let middle = row("efmlcentermanafieldused", Kind::Item, "Aetheria Mana Field");
+    assert_eq!(stat_need(&middle.needs[0]), Some((322, 1)));
+    assert!(middle.stamps.contains(&"int322=3".to_string()));
+    assert_eq!(stat_need("efulnorthmanafieldused"), None);
+    assert!(stamped_by("int322=1").any(|r| r.id == upper.id));
+    // The stone itself is asked of Cypher the Apprentice.
+    assert!(sources_of(&Want::Item(42710)).any(|s| s.kind == Yield::Npc && s.wcid == 42716));
+}
