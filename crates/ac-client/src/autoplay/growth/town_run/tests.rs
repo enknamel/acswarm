@@ -52,6 +52,42 @@ fn a_town_run_between_journeys_is_not_taken_exploring_or_back_to_the_area() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_pursued_quest_leaves_the_area() {
+    // Blargerton, set off for Qin Xikit's Crown, was walked back to his area "test2" mid-journey.
+    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    let me = c.player.as_ref().unwrap().world_position();
+    let (x, y) = (me.x + 40.0, me.y);
+    let fight = &mut c.autoplay.config.fight;
+    fight.enabled = true;
+    fight.area = Some(crate::hunt::HuntArea {
+        name: "the field".into(),
+        shape: crate::hunt::Shape::Outline {
+            points: vec![[x, y], [x + 30.0, y], [x + 30.0, y + 30.0], [x, y + 30.0]],
+        },
+    });
+    let mut line = crate::autoplay::PursuitLine {
+        id: "qinxikitcomplete".into(),
+        title: "You've received the reward for the Qin Xikit Temple.".into(),
+        step: crate::autoplay::PursuitStep::Hunt {
+            landblock: 0x00F2,
+            creature: "Burun Ruuk Fiend".into(),
+            place: "dungeon 00F2".into(),
+            more: 1,
+        },
+        working: true,
+        via: None,
+    };
+    c.pursuit = vec![line.clone()];
+    let now = Instant::now();
+    assert!(!c.autoplay_keep_to_area(now), "walked back mid-quest");
+    // Passed over, it is not worked: back to the area.
+    line.working = false;
+    c.pursuit = vec![line];
+    assert!(c.autoplay_keep_to_area(now));
+}
+
+#[test]
 fn a_run_that_could_not_get_there_is_tried_again_once_its_wait_is_up() {
     // A run that really cannot reach its counter comes home with
     // nothing, so it is futile, and the counter is left alone for a

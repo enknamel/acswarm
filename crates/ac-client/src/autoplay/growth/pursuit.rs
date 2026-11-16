@@ -1064,7 +1064,7 @@ impl Client {
     }
 
     /// The working pursued quest, if one can go on.
-    pub(super) fn working_pursuit(&self) -> Option<&PursuitLine> {
+    pub(crate) fn working_pursuit(&self) -> Option<&PursuitLine> {
         self.pursuit.iter().find(|l| l.working)
     }
 

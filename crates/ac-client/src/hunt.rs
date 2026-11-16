@@ -246,7 +246,10 @@ impl Client {
         // has ended one, a walk back to the area would take the character
         // off its run, and the run's own step, ranked below this one, would
         // never see it again. Nor on another row's visit.
+        // A pursued quest's journeys leave it too, the player's word: back once it is done or
+        // passed over (a_pursued_quest_leaves_the_area).
         if self.autoplay.growth.town_run_under_way()
+            || self.working_pursuit().is_some()
             || self.is_muling()
             || (self.visiting().is_some() && !self.is_own_visit())
         {
