@@ -235,6 +235,9 @@ pub struct State {
     pursuit_paces: Vec<pursuit::pace::Ground>,
     /// Gems pursued quests buy, each the only way to its ground (see `pursuit::gem_way`).
     pursuit_gems: Vec<pursuit::GemWanted>,
+    /// Seconds on from a gem's exit to a goal, by the plan's inputs hashed, and when planned
+    /// (see `pursuit::gem_way`): planned afresh each board, they froze the window 15 s.
+    onward_memo: std::collections::HashMap<u64, (Option<f32>, std::time::Instant)>,
     /// The flag each pursued quest, by id, has first, the only way on (see `pursuit::flag_way`).
     pursuit_flags: std::collections::BTreeMap<String, String>,
     /// The event each pursued quest, by id, starts first: only its portal leads on (see

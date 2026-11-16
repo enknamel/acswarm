@@ -15,6 +15,9 @@ use crate::items::{NumKey, Op, Term};
 use crate::profile::{Ask, Buy, LootAction, Mine, Rule, QUESTS};
 use crate::Client;
 
+/// How long an onward plan from a gem's exit is kept (guess): the map does not change.
+const ONWARD_KEEP: std::time::Duration = std::time::Duration::from_secs(600);
+
 /// The gem `quest`'s pursuit has first, since only its exit leads on to the ground.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct GemWanted {
@@ -36,25 +39,21 @@ impl Client {
         quests: &[String],
     ) -> Option<GemWanted> {
         let here = self.my_position()?.truncate();
+        // The onward plans walk between buildings (`trip::shut_in`) before any journey is planned.
+        self.tell_building_cells();
         let level = self.world.stats.level.max(1) as u32;
         let goals: Vec<Place> = grounds.iter().map(|g| self.planning_place(g.1)).collect();
-        // Each way an item opens: the item, its name, where it lands, and the journey first.
-        let mut ways: Vec<(u32, String, Place, f32)> = ac_world::gems::all()
+        // Each way an item opens: the item, its name, where it lands, and the NPC it is handed to.
+        let mut ways: Vec<(u32, String, Place, Option<Place>)> = ac_world::gems::all()
             .iter()
             .map(|g| {
-                (
-                    g.wcid,
-                    g.name.clone(),
-                    Place {
-                        at: g.at,
-                        cell: g.cell,
-                    },
-                    0.0,
-                )
+                let exit = Place {
+                    at: g.at,
+                    cell: g.cell,
+                };
+                (g.wcid, g.name.clone(), exit, None)
             })
             .collect();
-        // A flag it asks too comes on the way (the Enchanted Dais's OnBrowerkQuest, the Watcher's):
-        // the journey to it may pass flags at a day each, and `flag_way` has them first.
         let all = ac_world::portals::npc_ways();
         let npcs = all
             .iter()
@@ -63,24 +62,22 @@ impl Client {
             let Some((item, name)) = w.item.zip(w.item.and_then(item_name)) else {
                 continue;
             };
+            let exit = Place {
+                at: w.to,
+                cell: w.to_cell,
+            };
             let npc = Place {
                 at: w.at,
                 cell: w.cell,
             };
-            if let Some(t) =
-                self.journey_plan_with(npc, quests, Some(super::flag_way::FLAG_SECONDS))
-            {
-                let exit = Place {
-                    at: w.to,
-                    cell: w.to_cell,
-                };
-                ways.push((item, name, exit, t.seconds));
-            }
+            ways.push((item, name, exit, Some(npc)));
         }
         // (hunted or fetched, seconds on from the exit), the item
         let mut best: Option<((bool, f32), GemWanted)> = None;
         let unix = crate::holdings::unix_now();
-        for (wcid, name, exit, first) in ways {
+        // The cheap checks and the onward plan come before the journey to an NPC: planned for
+        // every NPC way first, a quest board took 15 s and froze the window.
+        for (wcid, name, exit, npc) in ways {
             // One whose pickup stamp waits is not wanted: the board's obtain waits on it, which
             // dropped the want and had it wanted again every board (the Adjanite Gem, 72000 s).
             if self.carried_count(wcid) > 0 || self.quest_log.pickup_wait(wcid, unix).is_some() {
@@ -106,25 +103,28 @@ impl Client {
             };
             let on = goals
                 .iter()
-                .filter_map(|goal| {
-                    ac_world::trip::plan_with_ways(
-                        exit,
-                        *goal,
-                        level,
-                        quests,
-                        &[],
-                        &[],
-                        &[],
-                        &[],
-                        prefs,
-                        &onward,
-                    )
-                })
-                .map(|t| t.seconds)
+                .filter_map(|goal| self.onward_seconds(exit, *goal, quests, prefs, &onward))
                 .min_by(f32::total_cmp);
-            let Some(secs) = on.map(|s| s + first) else {
+            let Some(on) = on else {
                 continue;
             };
+            let bought_beats = best.as_ref().is_some_and(|(b, _)| !b.0 && b.1 <= on);
+            if bought_beats {
+                continue;
+            }
+            // A flag it asks too comes on the way (the Enchanted Dais's OnBrowerkQuest, the
+            // Watcher's): the journey to it may pass flags at a day each; `flag_way` has them first.
+            let first = match npc {
+                None => 0.0,
+                Some(npc) => {
+                    let flags = Some(super::flag_way::FLAG_SECONDS);
+                    match self.journey_plan_with(npc, quests, flags) {
+                        Some(t) => t.seconds,
+                        None => continue,
+                    }
+                }
+            };
+            let secs = on + first;
             // A shop reached buys it on a run; else it is hunted or fetched.
             let bought = sold.is_some_and(|shop| {
                 let counter = Place {
@@ -152,6 +152,51 @@ impl Client {
             best = Some((key, wanted));
         }
         best.map(|(_, g)| g)
+    }
+
+    /// Seconds from `exit` to `goal` by walking and `onward`, kept [`ONWARD_KEEP`] for the same
+    /// level, flags, preferences and NPC ways.
+    fn onward_seconds(
+        &mut self,
+        exit: Place,
+        goal: Place,
+        quests: &[String],
+        prefs: Prefs,
+        onward: &ac_world::trip::Ways,
+    ) -> Option<f32> {
+        use std::hash::{Hash, Hasher};
+        let level = self.world.stats.level.max(1) as u32;
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for p in [exit, goal] {
+            (p.cell, p.at.to_array().map(f32::to_bits)).hash(&mut h);
+        }
+        let npcs: Vec<u32> = onward.npcs.iter().map(|w| w.npc).collect();
+        (level, quests, format!("{prefs:?}"), npcs).hash(&mut h);
+        let key = h.finish();
+        let now = self.frame_at;
+        let memo = &mut self.autoplay.growth.onward_memo;
+        if let Some((secs, at)) = memo.get(&key) {
+            if now.saturating_duration_since(*at) < ONWARD_KEEP {
+                return *secs;
+            }
+        }
+        let secs = ac_world::trip::plan_with_ways(
+            exit,
+            goal,
+            level,
+            quests,
+            &[],
+            &[],
+            &[],
+            &[],
+            prefs,
+            onward,
+        )
+        .map(|t| t.seconds);
+        let memo = &mut self.autoplay.growth.onward_memo;
+        memo.retain(|_, (_, at)| now.saturating_duration_since(*at) < ONWARD_KEEP);
+        memo.insert(key, (secs, now));
+        secs
     }
 
     /// The weenie classes of the gems the pursuit wants, had or not.
