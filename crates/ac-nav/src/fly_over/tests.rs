@@ -204,3 +204,41 @@ fn a_flight_replanned_in_the_air_climbs_no_higher() {
     }
     assert_eq!(at.z, 24.0, "climbed");
 }
+
+#[test]
+fn an_acid_pool_is_never_stood_in_and_a_walk_across_it_is_flown() {
+    // Blargerton died 18 times standing in Matron Hive East's acid, 0x614601C3 (53, -122, -18):
+    // a pool 6.7 m across and 1.5 m deep (ACE Hotspot.cs:39-80), now a trap.
+    let o = ac_world::landblock_origin(0x6146_01C3);
+    let spot = Place {
+        at: o + Vec3::new(53.0, -122.0, -18.0),
+        cell: 0x6146_01C3,
+    };
+    assert!(is_on_trap(spot, 0.48), "stood in the acid");
+    let over = Place {
+        at: spot.at + Vec3::Z * 2.5,
+        ..spot
+    };
+    assert!(!is_on_trap(over, 0.48), "a flight 2.5 m up touches it");
+    let pool = ac_world::traps::in_landblock(0x6146_0000)
+        .find(|t| t.spells.contains("Acid") && t.reach() > 6.0)
+        .expect("an acid pool in the hive");
+    let (start, route) = through(pool);
+    let flown = over_traps(route, start, 0.48);
+    let crossing: Vec<&Waypoint> = flown
+        .waypoints
+        .iter()
+        .filter(|w| w.kind == EdgeKind::Fly)
+        .collect();
+    assert!(!crossing.is_empty(), "walked through the acid: {flown:?}");
+    // Crossed just over its 1.5 m depth, not a sphere's 7 m.
+    let high = crossing
+        .iter()
+        .map(|w| w.place.at.z - pool.at.z)
+        .fold(0.0, f32::max);
+    assert!((1.9..3.0).contains(&high), "{high}");
+    // A hotspot that hurts nobody is stood in: the mana fields are no traps.
+    assert!(ac_world::traps::all()
+        .iter()
+        .all(|t| !t.spells.contains("Mana Field")));
+}

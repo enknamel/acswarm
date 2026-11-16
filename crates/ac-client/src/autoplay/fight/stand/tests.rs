@@ -888,3 +888,34 @@ fn autoplay_and_the_body_keep_a_caster_in_its_corner_through_its_casts() {
         "between casts it moved {steps:?} m, cast from {off:?} m off the corner"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_character_in_acid_walks_out_of_it() {
+    // Blargerton died 18 times standing in Matron Hive East's acid, 0x614601C3 (53, -122, -18):
+    // nothing moved him out of it while he fought. The whole loop, rules and body, offline.
+    let mut c = crate::testkit::standing_in_the_field(
+        120,
+        0x6146_01C3,
+        glam::Vec3::new(53.0, -122.0, -18.0),
+    );
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.autoplay.config.enabled = true;
+    let r = c.player.as_ref().unwrap().capsule().radius;
+    let here = |c: &Client| Place {
+        at: c.my_position().unwrap(),
+        cell: c.player.as_ref().unwrap().cell,
+    };
+    assert!(ac_nav::fly_over::is_on_trap(here(&c), r), "not in the acid");
+    let trace = crate::walk_trial::play(&mut c, Instant::now(), 20.0);
+    assert!(
+        trace.iter().any(|f| f.step == Some("leave trap")),
+        "{:?}",
+        trace.last()
+    );
+    assert!(
+        !ac_nav::fly_over::is_on_trap(here(&c), r),
+        "still in the acid: {:?}",
+        trace.last()
+    );
+}

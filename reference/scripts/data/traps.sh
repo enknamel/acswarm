@@ -8,6 +8,11 @@
 # plate is linked to, so it needs this copy to fly over the ones that hurt.
 # Plates that open doors or call guardians are left out: they are walked on.
 #
+# Hurting hotspots too (acid pools, fire, caustic clouds): a HotSpot (WeenieType 13) that IsHot
+# (PropertyBool 55) damages whoever touches its shape on a timer (ACE Hotspot.cs:39-80, 164-200).
+# Only physical and elemental damage (DamageType bits 1-64) with Damage (int 44) above 0: mana
+# fields, fountains and the Aetheria Mana Fields hurt nobody and are stood in.
+#
 # Usage: reference/scripts/data/traps.sh > crates/ac-world/data/traps.csv
 set -e
 
@@ -22,10 +27,22 @@ join weenie_properties_d_i_d sp on sp.object_Id = t.weenie_Class_Id and sp.type 
 join spell sn on sn.id = sp.value
 join weenie_properties_d_i_d s on s.object_Id = p.weenie_Class_Id and s.type = 1
 left join weenie_properties_float sc on sc.object_Id = p.weenie_Class_Id and sc.type = 39
-group by p.guid, p.obj_Cell_Id, p.origin_X, p.origin_Y, p.origin_Z, s.value, sc.value;'
+group by p.guid, p.obj_Cell_Id, p.origin_X, p.origin_Y, p.origin_Z, s.value, sc.value
+union all
+select hex(h.obj_Cell_Id), round(h.origin_X,2), round(h.origin_Y,2), round(h.origin_Z,2),
+  hex(s.value), coalesce(sc.value, 1), concat(coalesce(n.value, "hotspot"), " (hotspot)")
+from landblock_instance h
+join weenie hw on hw.class_Id = h.weenie_Class_Id and hw.type = 13
+join weenie_properties_bool hot on hot.object_Id = hw.class_Id and hot.type = 55 and hot.value = 1
+join weenie_properties_int dt on dt.object_Id = hw.class_Id and dt.type = 45 and (dt.value & 127) <> 0
+join weenie_properties_int dm on dm.object_Id = hw.class_Id and dm.type = 44 and dm.value > 0
+join weenie_properties_d_i_d s on s.object_Id = hw.class_Id and s.type = 1
+left join weenie_properties_float sc on sc.object_Id = hw.class_Id and sc.type = 39
+left join weenie_properties_string n on n.object_Id = hw.class_Id and n.type = 1;'
 
 cat <<'HEADER'
-# Trap plates of Dereth: pressure plates whose linked object casts a spell on whoever trips one.
+# Trap plates of Dereth: pressure plates whose linked object casts a spell on whoever trips one,
+# and the hotspots that hurt whoever touches them ("(hotspot)" after their name).
 # cell,x,y,z,setup,scale,spells
 # Cells and setups are hex; x/y/z local to the cell's landblock; the setup's spheres times scale
 # are what the server's sweep must not touch. Regenerate with reference/scripts/data/traps.sh.

@@ -375,6 +375,14 @@ pub const STEPS: &[Step] = &[
         },
     },
     Step {
+        name: "leave trap",
+        layer: Layer::Reflex,
+        base: 175.0,
+        why: "standing in acid or fire, or on a trap plate, is walked out of before anything else is done",
+        worth: by_place,
+        run: claimed!(Client::autoplay_leave_trap),
+    },
+    Step {
         name: "recover",
         layer: Layer::Reflex,
         base: 170.0,

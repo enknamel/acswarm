@@ -72,11 +72,10 @@ fn near_trap(p: Place, radius: f32, floor: f32) -> bool {
     ac_world::traps::in_landblock(p.cell & 0xFFFF_0000)
         .into_iter()
         .any(|t| {
-            let (c, r) = t.sphere();
-            let reach = r + radius + TRAP_BERTH;
-            c.z + r >= floor
-                && c.z - r <= p.at.z + BODY_HEIGHT
-                && c.truncate().distance(p.at.truncate()) < reach
+            let reach = t.reach() + radius + TRAP_BERTH;
+            t.top() >= floor
+                && t.bottom() <= p.at.z + BODY_HEIGHT
+                && t.at.truncate().distance(p.at.truncate()) < reach
         })
 }
 
@@ -88,9 +87,9 @@ fn stretches_near(ends: &[(Vec3, u32)], traps: &[&Trap], radius: f32) -> Vec<Str
         let (a, b) = (leg[0].0, leg[1].0);
         let len = a.distance(b);
         for t in traps {
-            let (c, r) = t.sphere();
+            let (c, r) = (t.at, t.reach());
             let low = a.z.min(b.z) - BODY_HEIGHT;
-            if c.z - r > a.z.max(b.z) + BODY_HEIGHT || c.z + r < low {
+            if t.bottom() > a.z.max(b.z) + BODY_HEIGHT || t.top() < low {
                 continue;
             }
             let reach = r + radius + TRAP_BERTH;

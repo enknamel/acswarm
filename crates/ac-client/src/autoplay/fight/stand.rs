@@ -19,6 +19,8 @@ use crate::dodge::{How, WITHIN};
 use crate::{aim, Client, Goal, SAME_FLOOR};
 
 /// Directions round a spot a melee attacker may stand in, 45 degrees apart.
+/// How far round a hurting spot a way off it is looked for (metres, flat): past an acid pool's 6.7 m.
+const OFF_TRAP_LOOK: f32 = 12.0;
 const SIDES: usize = 8;
 /// Centre to centre (metres) a creature stands to swing: under two bodies' radii (0.48 m each)
 /// and ACE's `MaxMeleeRange` 0.75 m between cylinders (`Monster_Navigation.cs:28`, `:215`).
@@ -698,6 +700,8 @@ impl Client {
                 Some("nearer an attacker")
             } else if is_in_rings(&rings, p.at) || self.is_dud_spot(p.at) {
                 Some("a ring or a dud spot")
+            } else if ac_nav::fly_over::is_on_trap(p, cap.radius) {
+                Some("a trap or hurting ground")
             } else if !self.pathfinder.can_walk(here, p.at, cap) {
                 Some("no walk")
             } else if !self.throws_from(p.at, target, how) {
@@ -716,6 +720,41 @@ impl Client {
         }
         tracing::info!("stand: no step aside: {}", why.join(", "));
         None
+    }
+
+    /// Standing within a trap's reach (an acid pool, fire, a plate): walked to the nearest spot clear
+    /// of every one, a fight or none, the player's rule (a_character_in_acid_walks_out_of_it).
+    pub(crate) fn autoplay_leave_trap(&mut self, now: Instant) -> bool {
+        let Some((here, cap)) = self.player.as_ref().map(|p| {
+            let here = Place {
+                at: p.world_position(),
+                cell: p.cell,
+            };
+            (here, p.capsule())
+        }) else {
+            return false;
+        };
+        if self.is_aloft() || !ac_nav::fly_over::is_on_trap(here, cap.radius) {
+            return false;
+        }
+        // Spots on a trap are never standable (`routing::standable_near`): the nearest is off it.
+        let spots = self
+            .standable_near(here.at, OFF_TRAP_LOOK)
+            .unwrap_or_default();
+        let near = |p: &Place| p.at.distance(here.at);
+        let Some(spot) = spots.into_iter().min_by(|a, b| near(a).total_cmp(&near(b))) else {
+            return false;
+        };
+        let goal = Goal::At {
+            place: spot,
+            within: AT_STAND,
+        };
+        if matches!(self.go(self.step_owner(), goal, now), Did::Blocked(_)) {
+            return false;
+        }
+        self.autoplay
+            .say(Doing::Dodging, "stepping off hurting ground");
+        true
     }
 
     /// Whether the attack `how` thrown from feet at `from` gets to `target` (see `crate::aim`).

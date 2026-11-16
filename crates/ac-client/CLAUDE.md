@@ -28,38 +28,38 @@ One `Client` per game session: connection, `World`, body, the manual actions a U
 
 ## Steps
 
-`steps::STEPS` (`autoplay/steps.rs`). A goal with no scorer is worth its `base`, so a row may be
-added or dropped without re-scoring the rest. `weigh` takes goals only, most worth first, ties to
-the earlier row; reflexes run in table order, `base` unread. The fixed curves sit against those:
-`LOOT_AT_REST` (45) under `follow` (50); `WALK_TO_A_FIGHT` (40) ties `resume the journey`, second.
+`steps::STEPS` (`autoplay/steps.rs`): an unscored goal is worth its `base`; `weigh` takes goals,
+best first, ties to the earlier row; reflexes run in table order, `base` unread. `LOOT_AT_REST` (45)
+is under `follow` (50); `WALK_TO_A_FIGHT` (40) ties `resume the journey`, second.
 
 | # | step | layer | worth | runs |
 |---|---|---|---|---|
 | 1 | survive | reflex | - | `autoplay_survive` |
 | 2 | dodge | reflex | - | `autoplay_dodge` |
-| 3 | recover | reflex | - | `autoplay_recover` |
-| 4 | academy | reflex | - | `autoplay_academy` |
-| 5 | unlock | reflex | - | `autoplay_unlock` |
-| 6 | urgent buffs | reflex | - | `autoplay_buff` (urgent) |
-| 7 | vitals | reflex | - | `autoplay_vitals` |
-| 8 | loot | goal | `worth_looting` | `autoplay_loot` |
-| 9 | catch up | goal | 120 | `autoplay_follow` (urgent) |
-| 10 | team | goal | 110 | `autoplay_team` |
-| 11 | salvage | goal | 100 | `autoplay_salvage` |
-| 12 | give | goal | 98 | `autoplay_give` |
-| 13 | read scrolls | goal | 97 | `autoplay_read_scrolls` |
-| 14 | town run | goal | `worth_town_run` | `autoplay_town_run` |
-| 15 | mule | goal | `worth_muling` | `autoplay_mule` |
-| 16 | summon | goal | `worth_fighting` | `autoplay_summon` |
-| 17 | fight | goal | `worth_fighting` | `autoplay_fight` |
-| 18 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
-| 19 | buffs | goal | 60 | `autoplay_buff` |
-| 20 | follow | goal | 50 | `autoplay_follow` |
-| 21 | resume the journey | goal | 40 | `autoplay_resume_journey` |
-| 22 | explore | goal | 20 | `autoplay_explore` |
-| 23 | grow | goal | 10 | `autoplay_grow` |
+| 3 | leave trap | reflex | - | `autoplay_leave_trap` |
+| 4 | recover | reflex | - | `autoplay_recover` |
+| 5 | academy | reflex | - | `autoplay_academy` |
+| 6 | unlock | reflex | - | `autoplay_unlock` |
+| 7 | urgent buffs | reflex | - | `autoplay_buff` (urgent) |
+| 8 | vitals | reflex | - | `autoplay_vitals` |
+| 9 | loot | goal | `worth_looting` | `autoplay_loot` |
+| 10 | catch up | goal | 120 | `autoplay_follow` (urgent) |
+| 11 | team | goal | 110 | `autoplay_team` |
+| 12 | salvage | goal | 100 | `autoplay_salvage` |
+| 13 | give | goal | 98 | `autoplay_give` |
+| 14 | read scrolls | goal | 97 | `autoplay_read_scrolls` |
+| 15 | town run | goal | `worth_town_run` | `autoplay_town_run` |
+| 16 | mule | goal | `worth_muling` | `autoplay_mule` |
+| 17 | summon | goal | `worth_fighting` | `autoplay_summon` |
+| 18 | fight | goal | `worth_fighting` | `autoplay_fight` |
+| 19 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
+| 20 | buffs | goal | 60 | `autoplay_buff` |
+| 21 | follow | goal | 50 | `autoplay_follow` |
+| 22 | resume the journey | goal | 40 | `autoplay_resume_journey` |
+| 23 | explore | goal | 20 | `autoplay_explore` |
+| 24 | grow | goal | 10 | `autoplay_grow` |
 
-Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_mana_stones`, `autoplay_refill_essences`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
+Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_mana_stones`, `autoplay_reveal_aetheria`, `autoplay_refill_essences`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
 
 ## Systems
 
