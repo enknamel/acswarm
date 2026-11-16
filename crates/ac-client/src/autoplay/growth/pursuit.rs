@@ -524,19 +524,6 @@ fn stuck(why: String) -> PursuitStep {
     PursuitStep::Stuck { why }
 }
 
-/// The scroll `line`'s quest is done by reading, and the spell it teaches: a `learn:` row's.
-fn line_reads(line: &QuestLine) -> Option<(u32, String, u32)> {
-    let row = crate::quest_log::worked_rows(line).find(|r| r.hand == Handing::Read)?;
-    let Want::Item(wcid) = row.want else {
-        return None;
-    };
-    let name = row
-        .item
-        .as_ref()
-        .map_or_else(|| format!("item {wcid}"), |i| i.name.to_string());
-    Some((wcid, name, row.teaches()?))
-}
-
 /// A hunt's grounds, soonest first at the ground, and the creatures sought there.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Hunting {
@@ -555,7 +542,10 @@ impl Ask<'_> {
             QuestState::Off => stuck("switched off".to_string()),
             QuestState::Done => PursuitStep::Finished,
             QuestState::Waiting { until } => PursuitStep::Waiting { until: *until },
-            QuestState::Ready => match (line_reads(line), self.asking.hand_in_at(line, end)) {
+            QuestState::Ready => match (
+                item_goal::line_reads(line),
+                self.asking.hand_in_at(line, end),
+            ) {
                 (Some((wcid, name, spell)), _) => PursuitStep::Read { wcid, name, spell },
                 (None, Some((_, row, at))) => PursuitStep::HandIn { row, at },
                 // Kept: what a hand-in takes is carried, and `finish_kept` ends the pursuit.

@@ -5,6 +5,7 @@ use ac_world::quests::{Handing, Kind, Row, Want};
 
 use super::{stuck, Ask, Hunting, PursuitLine, PursuitStep};
 use crate::autoplay::Pursuit;
+use crate::quest_log::QuestLine;
 
 /// An item goal's way that fetches rather than hunts, ranked as this many seconds an item: a
 /// walk and a word, beaten only by a hunt faster than a minute an item.
@@ -117,4 +118,17 @@ fn step_item(step: &PursuitStep) -> Option<u32> {
 /// Item `wcid`'s name from the quest and shop data, else its class in words.
 pub(crate) fn goal_name(wcid: u32) -> String {
     ac_world::quest_chain::reward_name(wcid).map_or_else(|| format!("item {wcid}"), str::to_string)
+}
+
+/// The scroll `line`'s quest is done by reading, and the spell it teaches: a `learn:` row's.
+pub(super) fn line_reads(line: &QuestLine) -> Option<(u32, String, u32)> {
+    let row = crate::quest_log::worked_rows(line).find(|r| r.hand == Handing::Read)?;
+    let Want::Item(wcid) = row.want else {
+        return None;
+    };
+    let name = row
+        .item
+        .as_ref()
+        .map_or_else(|| format!("item {wcid}"), |i| i.name.to_string());
+    Some((wcid, name, row.teaches()?))
 }
