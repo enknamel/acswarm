@@ -26,6 +26,139 @@ pub(crate) struct AppraisalView {
     /// Spell names on the item.
     pub spells: Vec<String>,
     pub failed: bool,
+    /// The object appraised.
+    pub guid: u32,
+    /// Its inscription, when it may be written: inscribable, and carried or worn.
+    pub inscription: Option<String>,
+}
+
+/// Imbue bits (ImbuedEffectType.cs) and their names.
+const IMBUES: [(u32, &str); 17] = [
+    (0x1, "Critical Strike"),
+    (0x2, "Crippling Blow"),
+    (0x4, "Armor Rending"),
+    (0x8, "Slash Rending"),
+    (0x10, "Pierce Rending"),
+    (0x20, "Bludgeon Rending"),
+    (0x40, "Acid Rending"),
+    (0x80, "Cold Rending"),
+    (0x100, "Electric Rending"),
+    (0x200, "Fire Rending"),
+    (0x400, "Melee Defense"),
+    (0x800, "Missile Defense"),
+    (0x1000, "Magic Defense"),
+    (0x4000, "Nether Rending"),
+    (0x2000_0000, "Ignores some magic projectile damage"),
+    (0x4000_0000, "Always critical"),
+    (0x8000_0000, "Ignores all armor"),
+];
+
+/// Gear rating ints (PropertyInt.cs 370-389) and their names.
+const RATINGS: [(u32, &str); 14] = [
+    (370, "Damage"),
+    (371, "Damage resist"),
+    (372, "Crit"),
+    (373, "Crit resist"),
+    (374, "Crit damage"),
+    (375, "Crit damage resist"),
+    (376, "Healing boost"),
+    (377, "Nether resist"),
+    (378, "Life resist"),
+    (379, "Max health"),
+    (383, "PK damage"),
+    (384, "PK damage resist"),
+    (388, "Overpower"),
+    (389, "Overpower resist"),
+];
+
+/// `+5%` from an added fraction such as 0.05 (mana conversion).
+fn percent_added(f: f64) -> String {
+    format!("{:+}%", (f * 100.0).round() as i64)
+}
+
+/// The item stats past damage and armor: imbues, defenses, caster and crit mods, cleaving,
+/// slayer (`creature_type` names it), ratings and item level, each only when appraised.
+fn item_extras(
+    a: &Appraisal,
+    creature_type: &dyn Fn(u32) -> String,
+    lines: &mut Vec<(String, String)>,
+) {
+    let mut push = |k: &str, v: String| lines.push((k.into(), v));
+    let imbued = [179, 303, 304, 305, 306]
+        .iter()
+        .filter_map(|k| a.int(*k))
+        .fold(0u32, |b, v| b | v as u32);
+    let imbues: Vec<&str> = IMBUES
+        .iter()
+        .filter(|(b, _)| imbued & b != 0)
+        .map(|(_, n)| *n)
+        .collect();
+    if !imbues.is_empty() {
+        push("Imbued", imbues.join(", "));
+    }
+    let bonus = |k: u32| a.float(k).filter(|m| (m - 1.0).abs() > 1e-6);
+    if let Some(m) = bonus(149) {
+        push("Missile defense bonus", percent_bonus(m));
+    }
+    if let Some(m) = bonus(150) {
+        push("Magic defense bonus", percent_bonus(m));
+    }
+    if let Some(f) = a.float(144).filter(|f| f.abs() > 1e-6) {
+        push("Mana conversion", percent_added(f));
+    }
+    if let Some(m) = bonus(152) {
+        push("Elemental damage", percent_bonus(m));
+    }
+    if let Some(w) = a.weapon.as_ref().filter(|w| w.max_velocity > 0.0) {
+        if (w.damage_mod - 1.0).abs() > 1e-6 {
+            push("Damage modifier", percent_bonus(w.damage_mod));
+        }
+    }
+    if let Some(f) = a.float(147) {
+        push("Critical chance", format!("{:.0}%", f * 100.0));
+    }
+    if let Some(m) = a.float(136) {
+        push("Critical damage", format!("x{m:.2}"));
+    }
+    if let Some(f) = a.float(155) {
+        push(
+            "Armor cleaving",
+            format!("ignores {:.0}% of armor", f * 100.0),
+        );
+    }
+    if let (Some(m), Some(t)) = (a.float(157), a.int(263)) {
+        let kind = damage_type_name(t as u32);
+        push("Resistance cleaving", format!("{kind} x{m:.2}"));
+    }
+    if let Some(f) = a.float(159) {
+        push("Absorbs magic damage", format!("{:.0}%", f * 100.0));
+    }
+    if let Some(n) = a.int(292).filter(|n| *n > 0) {
+        push("Cleave", format!("{n} targets"));
+    }
+    if let Some(t) = a.int(166).filter(|t| *t > 0) {
+        let name = creature_type(t as u32).replace('_', " ");
+        push("Slayer", format!("{name} Slayer"));
+    }
+    let ratings: Vec<String> = RATINGS
+        .iter()
+        .filter_map(|(k, n)| Some((n, a.int(*k).filter(|v| *v != 0)?)))
+        .map(|(n, v)| format!("{n} {v}"))
+        .collect();
+    if !ratings.is_empty() {
+        push("Ratings", ratings.join(", "));
+    }
+    if let Some(max) = a.int(319).filter(|m| *m > 0) {
+        let xp = a.int64s.iter().find(|(k, _)| *k == 4).map(|(_, x)| *x);
+        let xp = xp.map(|x| format!(", {x} XP")).unwrap_or_default();
+        push("Item level", format!("max {max}{xp}"));
+    }
+    if let Some(m) = bonus(100) {
+        push("Healing bonus", percent_bonus(m));
+    }
+    if let Some(s) = a.float(167).filter(|s| *s > 0.0) {
+        push("Cooldown", format!("{s:.0} s"));
+    }
 }
 
 /// The damage type bits as words.
@@ -58,7 +191,7 @@ pub(crate) fn percent_bonus(mult: f64) -> String {
     format!("{pct:+}%")
 }
 
-/// Build the lines from an appraisal; `skill_name`/`spell_name` resolve
+/// Build the lines from an appraisal; `skill_name`, `spell_name` and `creature_type` resolve
 /// ids through the DAT tables.
 pub(crate) fn build(
     name: &str,
@@ -66,6 +199,7 @@ pub(crate) fn build(
     material_name: &dyn Fn(u32) -> &'static str,
     skill_name: &dyn Fn(u32) -> String,
     spell_name: &dyn Fn(u32) -> String,
+    creature_type: &dyn Fn(u32) -> String,
 ) -> AppraisalView {
     let mut lines: Vec<(String, String)> = Vec::new();
     let mut texts = Vec::new();
@@ -178,6 +312,7 @@ pub(crate) fn build(
                 lines.push(("Range".into(), format!("{:.0} m", w.max_velocity_estimated)));
             }
         }
+        item_extras(a, creature_type, &mut lines);
         if let Some(s) = a.int(56) {
             lines.push(("Shield".into(), s.to_string()));
         }
@@ -242,6 +377,8 @@ pub(crate) fn build(
         texts,
         spells: a.spells.iter().map(|s| spell_name(*s)).collect(),
         failed: !a.success,
+        guid: a.guid,
+        inscription: None,
     }
 }
 
@@ -251,7 +388,16 @@ pub(crate) fn view(c: &Client) -> Option<AppraisalView> {
     let name = c.world.name_or_hex(guid);
     let skills = c.assets.skill_table().ok();
     let spells = c.assets.spell_table().ok();
-    Some(build(
+    let creatures = c.assets.creature_types().ok();
+    let me = c.world.player_guid;
+    let held = c.world.is_carried(guid)
+        || c.world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| o.wielder.is_some() && o.wielder == me);
+    let inscription =
+        (held && a.bool(22).unwrap_or(false)).then(|| a.string(7).unwrap_or("").to_string());
+    let mut v = build(
         &name,
         a,
         &ac_world::material::name,
@@ -267,12 +413,29 @@ pub(crate) fn view(c: &Client) -> Option<AppraisalView> {
                 .and_then(|t| t.get(id).map(|s| s.name.clone()))
                 .unwrap_or_else(|| format!("spell {id}"))
         },
-    ))
+        &|id| {
+            creatures
+                .as_ref()
+                .and_then(|t| t.get(id).map(str::to_string))
+                .unwrap_or_else(|| format!("creature type {id}"))
+        },
+    );
+    v.inscription = inscription;
+    Some(v)
 }
 
-/// Returns true when the window was closed (its title bar's close
-/// button, or Escape).
-pub(crate) fn draw(egui: &egui::Context, v: &AppraisalView) -> bool {
+/// What the window was asked this frame.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Drawn {
+    /// Its title bar's close button, or Escape.
+    pub closed: bool,
+    /// Write was pressed: inscribe the draft.
+    pub write: bool,
+}
+
+/// Draw the window; `draft` is the inscription being written, shown when `v` may be inscribed.
+pub(crate) fn draw(egui: &egui::Context, v: &AppraisalView, draft: &mut String) -> Drawn {
+    let mut drawn = Drawn::default();
     let w = egui.viewport_rect().width();
     window(
         "appraisal",
@@ -317,8 +480,18 @@ pub(crate) fn draw(egui: &egui::Context, v: &AppraisalView) -> bool {
                     }
                 }
             });
+        if v.inscription.is_some() {
+            ui.horizontal(|ui| {
+                caption(ui, "Inscription");
+                ui.add(egui::TextEdit::singleline(draft).desired_width(280.0));
+                if ui.button("Write").clicked() {
+                    drawn.write = true;
+                }
+            });
+        }
     });
-    super::closed("appraisal")
+    drawn.closed = super::closed("appraisal");
+    drawn
 }
 
 #[derive(Default)]
@@ -326,6 +499,8 @@ pub(crate) struct AppraisalPanel {
     source: Source<AppraisalView>,
     /// Open (its key toggles it). Starts closed.
     pub show: bool,
+    /// The inscription being written, and the object it is for.
+    draft: (u32, String),
 }
 
 impl AppraisalPanel {
@@ -348,8 +523,11 @@ impl AppraisalPanel {
                 texts: vec!["A well-made dagger.".into()],
                 spells: vec!["Blood Drinker III".into(), "Swift Killer III".into()],
                 failed: false,
+                guid: 1,
+                inscription: Some(String::new()),
             }),
             show: true,
+            draft: (1, String::new()),
         }
     }
 }
@@ -374,7 +552,16 @@ impl Plugin for AppraisalPanel {
             }
         };
         let Some(v) = v else { return };
-        if draw(egui, &v) || super::closed("appraisal") {
+        if self.draft.0 != v.guid {
+            self.draft = (v.guid, v.inscription.clone().unwrap_or_default());
+        }
+        let drawn = draw(egui, &v, &mut self.draft.1);
+        if drawn.write {
+            if let (Source::Live, Some(c)) = (&self.source, cx.try_client()) {
+                c.inscribe(v.guid, &self.draft.1);
+            }
+        }
+        if drawn.closed || super::closed("appraisal") {
             self.show = false;
         }
     }
@@ -401,6 +588,59 @@ impl Plugin for AppraisalPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imbues_defenses_caster_mods_and_ratings_are_shown() {
+        let a = Appraisal {
+            guid: 1,
+            success: true,
+            ints: vec![
+                (179, 0x4 | 0x400),
+                (292, 2),
+                (370, 2),
+                (372, 1),
+                (319, 50),
+                (166, 24),
+            ],
+            floats: vec![
+                (144, 0.05),
+                (149, 1.1),
+                (150, 1.08),
+                (152, 1.04),
+                (147, 0.15),
+            ],
+            int64s: vec![(4, 1000)],
+            ..Default::default()
+        };
+        let v = build(
+            "Wand",
+            &a,
+            &ac_world::material::name,
+            &|id| format!("skill {id}"),
+            &|id| format!("spell {id}"),
+            &|id| format!("type{id}_name"),
+        );
+        let line = |k: &str| {
+            v.lines
+                .iter()
+                .find(|(l, _)| l == k)
+                .map(|(_, v)| v.as_str())
+        };
+        assert_eq!(line("Imbued"), Some("Armor Rending, Melee Defense"));
+        assert_eq!(line("Mana conversion"), Some("+5%"));
+        assert_eq!(line("Missile defense bonus"), Some("+10%"));
+        assert_eq!(line("Magic defense bonus"), Some("+8%"));
+        assert_eq!(line("Elemental damage"), Some("+4%"));
+        assert_eq!(line("Critical chance"), Some("15%"));
+        assert_eq!(line("Cleave"), Some("2 targets"));
+        assert_eq!(line("Ratings"), Some("Damage 2, Crit 1"));
+        assert_eq!(line("Item level"), Some("max 50, 1000 XP"));
+        assert_eq!(line("Slayer"), Some("type24 name Slayer"));
+        assert_eq!(
+            v.inscription, None,
+            "offered only once the client says it is held"
+        );
+    }
 
     #[test]
     fn weapon_lines() {
@@ -438,6 +678,7 @@ mod tests {
             &ac_world::material::name,
             &|id| format!("skill {id}"),
             &|id| format!("spell {id}"),
+            &|id| format!("type{id}_name"),
         );
         let get = |k: &str| v.lines.iter().find(|(a, _)| a == k).map(|(_, b)| b.clone());
         assert_eq!(get("Workmanship").as_deref(), Some("5 (Iron)"));

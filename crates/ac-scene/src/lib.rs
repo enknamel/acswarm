@@ -111,6 +111,7 @@ pub struct Assets {
     chargen: RefCell<Option<Rc<CharGen>>>,
     skill_table: RefCell<Option<Rc<SkillTable>>>,
     character_titles: RefCell<Option<Rc<ac_formats::enum_mapper::EnumMapper>>>,
+    creature_types: RefCell<Option<Rc<ac_formats::enum_mapper::EnumMapper>>>,
     spell_table: RefCell<Option<Rc<SpellTable>>>,
     spell_components: RefCell<Option<Rc<SpellComponentTable>>>,
     spell_component_ids: RefCell<Option<Rc<DualDidMapper>>>,
@@ -187,6 +188,7 @@ impl Assets {
             chargen: RefCell::new(None),
             skill_table: RefCell::new(None),
             character_titles: RefCell::new(None),
+            creature_types: RefCell::new(None),
             spell_table: RefCell::new(None),
             spell_components: RefCell::new(None),
             spell_component_ids: RefCell::new(None),
@@ -363,15 +365,28 @@ impl Assets {
     /// The character title names (EnumMapper 0x22000041).
     pub fn character_titles(&self) -> Result<Rc<ac_formats::enum_mapper::EnumMapper>> {
         use ac_formats::enum_mapper::EnumMapper;
-        if let Some(t) = self.character_titles.borrow().as_ref() {
+        self.enum_mapper(&self.character_titles, EnumMapper::CHARACTER_TITLES)
+    }
+
+    /// The creature type names (EnumMapper 0x2200000E).
+    pub fn creature_types(&self) -> Result<Rc<ac_formats::enum_mapper::EnumMapper>> {
+        use ac_formats::enum_mapper::EnumMapper;
+        self.enum_mapper(&self.creature_types, EnumMapper::CREATURE_TYPES)
+    }
+
+    /// EnumMapper `id`, read once into `memo`.
+    fn enum_mapper(
+        &self,
+        memo: &RefCell<Option<Rc<ac_formats::enum_mapper::EnumMapper>>>,
+        id: u32,
+    ) -> Result<Rc<ac_formats::enum_mapper::EnumMapper>> {
+        use ac_formats::enum_mapper::EnumMapper;
+        if let Some(t) = memo.borrow().as_ref() {
             return Ok(t.clone());
         }
-        let bytes = self.portal.read(EnumMapper::CHARACTER_TITLES)?;
-        let t = Rc::new(EnumMapper::parse(&bytes).map_err(|source| Error::Format {
-            id: EnumMapper::CHARACTER_TITLES,
-            source,
-        })?);
-        *self.character_titles.borrow_mut() = Some(t.clone());
+        let bytes = self.portal.read(id)?;
+        let t = Rc::new(EnumMapper::parse(&bytes).map_err(|source| Error::Format { id, source })?);
+        *memo.borrow_mut() = Some(t.clone());
         Ok(t)
     }
 

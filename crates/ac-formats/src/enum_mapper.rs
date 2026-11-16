@@ -19,6 +19,8 @@ pub struct EnumMapper {
 impl EnumMapper {
     /// The character titles.
     pub const CHARACTER_TITLES: u32 = 0x2200_0041;
+    /// The creature types (`Paradox_Olthoi`), as an item's slayer names them.
+    pub const CREATURE_TYPES: u32 = 0x2200_000E;
 
     pub fn parse(bytes: &[u8]) -> Result<Self> {
         let mut r = Reader::new(bytes);

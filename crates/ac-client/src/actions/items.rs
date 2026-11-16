@@ -229,6 +229,17 @@ impl Client {
         );
     }
 
+    /// Write `text` on a carried or worn item (SetInscription 0x00BF: guid, String16L), then
+    /// appraise it again to show it. The server takes it only on an inscribable item nobody else
+    /// inscribed (Player_Inventory.cs:3654-3690).
+    pub fn inscribe(&mut self, guid: u32, text: &str) {
+        let mut w = ac_net::wire::Writer::new();
+        w.u32(guid).string16(text);
+        self.session
+            .send_action(ac_net::messages::action::SET_INSCRIPTION, &w.finish());
+        self.appraise(guid);
+    }
+
     pub fn tick_loot(&mut self, now: Instant) {
         use ac_net::messages::action;
         let me = self.world.player_guid.unwrap_or(0);
