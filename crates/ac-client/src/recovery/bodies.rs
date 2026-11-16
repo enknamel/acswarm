@@ -92,3 +92,26 @@ impl Client {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn bodies_written_by_hand_are_read_back() {
+        let mut c = crate::testkit::offline_client();
+        c.profiles = std::sync::Arc::new(crate::testkit::shelf("bodies-load", Vec::new()));
+        c.world.stats.name = "Blargerton".into();
+        c.config.host = "play.example:9000".into();
+        let path = c.bodies_path().expect("a path");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let rots = super::unix_now() + 3600;
+        let text = format!(
+            "[{{\"at\": [18679.213, 13323.724, -18.0], \"cell\": 1631977962, \"rots\": {rots}}}]"
+        );
+        std::fs::write(&path, text).unwrap();
+        c.load_bodies();
+        assert_eq!(c.autoplay.recovery.bodies.len(), 1, "{path:?}");
+        c.save_bodies();
+        let back: Vec<super::Body> = ac_store::read_json(&path).unwrap().unwrap();
+        assert_eq!(back.len(), 1);
+    }
+}

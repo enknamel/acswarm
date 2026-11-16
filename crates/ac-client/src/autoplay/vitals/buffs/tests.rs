@@ -528,3 +528,25 @@ fn a_journey_waits_for_a_buff_that_is_down() {
     c.autoplay.config.enabled = true;
     assert!(c.held_for_buffs(now + BUFFED_TO_LEAVE).is_none());
 }
+
+#[test]
+fn nothing_sets_off_before_the_server_clock_tells_what_is_up() {
+    // Blargerton's rebuff after login ended in 18 ms: with no server clock yet nothing read as
+    // due, and he ran three portals before his banes went up.
+    let now = Instant::now();
+    let mut c = crate::testkit::offline_client();
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.buffs.spells = vec!["Strength Self I".into()];
+    assert!(!c.has_buff_clock());
+    assert!(c.buff_down(now).is_some());
+    let held = c.held_for_buffs(now);
+    assert!(
+        matches!(held, Some(crate::did::Did::Waiting(_))),
+        "{held:?}"
+    );
+    // Nothing wanted: nothing to wait for.
+    c.autoplay.config.buffs.spells.clear();
+    c.autoplay.config.buffs.auto = false;
+    assert!(c.has_buff_clock());
+    assert!(c.held_for_buffs(now).is_none());
+}

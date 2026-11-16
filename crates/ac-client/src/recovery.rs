@@ -594,6 +594,16 @@ impl Recovery {
     }
 }
 
+/// The portal into the dungeon a body lies in, when the character stands outside that dungeon:
+/// none for a body on the surface or in the dungeon it is in, which the walk itself reaches.
+fn way_into(death: Place, cell: u32, at: Vec3) -> Option<&'static ac_world::portals::Portal> {
+    let indoors = death.cell & 0xFFFF >= 0x0100;
+    if !indoors || death.cell >> 16 == cell >> 16 {
+        return None;
+    }
+    crate::hunt::entrance(death.cell, at.truncate())
+}
+
 impl Client {
     /// Health at zero with a sheet to say so: the server has us dead
     /// and refuses everything until we stand at the lifestone.
@@ -795,6 +805,19 @@ impl Client {
                 if self.combat {
                     self.toggle_combat();
                 }
+                // Into a dungeon by its way in, as the hunt goes (`hunt::entrance`): the journey
+                // planner plans to no dungeon cell (a_body_in_another_dungeon_is_gone_back_for_by_its_portal).
+                let here = self
+                    .player
+                    .as_ref()
+                    .map(|pl| (pl.cell, pl.world_position()));
+                if let Some(portal) = here.and_then(|(cell, at)| way_into(death, cell, at)) {
+                    if self.visiting().is_none() && !self.visit_portal(portal) {
+                        tracing::info!("recovery: no way to {}", portal.name);
+                        self.autoplay.recovery.no_way();
+                    }
+                    return true;
+                }
                 let goal = self.way_back(death);
                 if let Did::Blocked(why) = self.go(self.step_owner(), goal, now) {
                     tracing::info!("recovery: no way back to the death spot: {}", why.what);
@@ -887,6 +910,9 @@ impl Client {
     /// the same as being done.
     fn autoplay_buffs_settled(&self, now: Instant) -> bool {
         let cfg = &self.autoplay.config.buffs;
+        if !self.has_buff_clock() {
+            return false;
+        }
         match self.due_buff(cfg.top_up_within, now) {
             None => true,
             Some((spell, ..)) => {
@@ -1488,5 +1514,31 @@ mod tests {
     fn labels_read() {
         assert_eq!(Phase::Returning.label(), "going back for the corpse");
         assert_eq!(Phase::default(), Phase::None);
+    }
+
+    #[test]
+    fn a_body_in_another_dungeon_is_gone_back_for_by_its_portal() {
+        // Blargerton's 18 bodies in Matron Hive East were asked of the journey planner from
+        // 0x2F43, which plans to no dungeon cell: its "no way" let all 18 go at once.
+        let body = Place {
+            at: Vec3::new(18679.2, 13323.7, -18.0),
+            cell: 0x6146_01EA,
+        };
+        let outside = Vec3::new(9085.0, 12945.0, 1.0);
+        let portal = super::way_into(body, 0x2F43_0014, outside).expect("a way in");
+        assert_eq!(portal.to_cell >> 16, 0x6146, "{}", portal.name);
+        let inside = Vec3::new(18764.0, 13257.0, 0.0);
+        assert!(
+            super::way_into(body, 0x6146_036E, inside).is_none(),
+            "already in it"
+        );
+        let field = Place {
+            at: Vec3::new(9000.0, 12900.0, 0.0),
+            cell: 0x2F43_0014,
+        };
+        assert!(
+            super::way_into(field, 0xCC41_003A, outside).is_none(),
+            "on the surface"
+        );
     }
 }

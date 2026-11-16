@@ -61,7 +61,7 @@ pub fn init(saved: Option<&str>) {
 const FILE_FILTER: &str = "warn,acswarm=info,ac_plugin::sessions=info,ac_client::session=info,\
                            ac_client::session::chat=warn,ac_client::autoplay=info,\
                            ac_client::refused=info,ac_client::travel=info,ac_client::actions=info,\
-                           ac_client::dodge=info";
+                           ac_client::dodge=info,ac_client::recovery=info";
 
 /// Log files kept in the folder, this process's included.
 const KEEP_FILES: usize = 10;

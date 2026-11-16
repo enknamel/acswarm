@@ -662,6 +662,9 @@ impl Client {
     /// A wanted buff down (under `never_below`) that could go up here, by name: no journey sets off
     /// without it, the player's rule. A wand left on the corpse with none carried is no bar.
     pub(crate) fn buff_down(&self, now: Instant) -> Option<String> {
+        if !self.has_buff_clock() {
+            return Some("every buff (the server's clock not in yet)".into());
+        }
         let within = self.autoplay.config.buffs.never_below;
         let (spell, _, _, name, _) = self.due_buff(within, now)?;
         let no_caster = matches!(self.can_cast(spell), crate::magic::CastCheck::NoCaster);
@@ -670,6 +673,14 @@ impl Client {
             .inventory()
             .any(|o| o.item_type & ac_world::item_type::CASTER != 0);
         (!no_caster || carries_one).then_some(name)
+    }
+
+    /// Whether what is up can be told from what is not: a buff not up counts as due only against
+    /// the server's clock (`buff_times`), which arrives a few seconds after login.
+    pub(crate) fn has_buff_clock(&self) -> bool {
+        let cfg = &self.autoplay.config.buffs;
+        let wants_any = (cfg.auto && !self.wanted_buffs().is_empty()) || !cfg.spells.is_empty();
+        !wants_any || self.session.server_time().is_some()
     }
 
     /// A journey about to set off held while a buff is down: the urgent pass, a reflex ahead of
