@@ -506,3 +506,25 @@ fn in_a_fight_the_urgent_window_pulls_the_queue_in_too() {
         "in a fight the queue is left to lapse"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_waits_for_a_buff_that_is_down() {
+    // The player's rule: nothing sets off with a buff down that could go up; the urgent pass, a
+    // reflex ahead of every row, puts it back while the journey waits.
+    let now = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_with_a_buff_due(now);
+    c.autoplay.config.enabled = true;
+    let held = c.held_for_buffs(now);
+    assert!(
+        matches!(held, Some(crate::did::Did::Waiting(_))),
+        "{held:?}"
+    );
+    assert!(tick(&mut c, now), "the urgent pass puts it back meanwhile");
+    // A journey the player sets off by hand is theirs.
+    c.autoplay.config.enabled = false;
+    assert!(c.held_for_buffs(now).is_none());
+    // One that never takes holds the journey only so long.
+    c.autoplay.config.enabled = true;
+    assert!(c.held_for_buffs(now + BUFFED_TO_LEAVE).is_none());
+}

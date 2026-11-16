@@ -56,6 +56,9 @@ fn widened(base: f32, lefts: &[f32]) -> f32 {
     base + queued as f32 * CAST_EACH
 }
 
+/// Longest a journey waits for a buff that is down, seconds: one that never takes must not hold it forever.
+const BUFFED_TO_LEAVE: Duration = Duration::from_secs(300);
+
 /// How often each buff pass, urgent and top-up, and the rearm work out what is due.
 pub(crate) const BUFF_CHECK_EVERY: Duration = Duration::from_millis(1000);
 
@@ -654,6 +657,41 @@ impl Client {
                 .note(format!("cannot buff: {name}, {why}"), now);
             return;
         }
+    }
+
+    /// A wanted buff down (under `never_below`) that could go up here, by name: no journey sets off
+    /// without it, the player's rule. A wand left on the corpse with none carried is no bar.
+    pub(crate) fn buff_down(&self, now: Instant) -> Option<String> {
+        let within = self.autoplay.config.buffs.never_below;
+        let (spell, _, _, name, _) = self.due_buff(within, now)?;
+        let no_caster = matches!(self.can_cast(spell), crate::magic::CastCheck::NoCaster);
+        let carries_one = self
+            .world
+            .inventory()
+            .any(|o| o.item_type & ac_world::item_type::CASTER != 0);
+        (!no_caster || carries_one).then_some(name)
+    }
+
+    /// A journey about to set off held while a buff is down: the urgent pass, a reflex ahead of
+    /// every row, puts it back meanwhile (a_journey_waits_for_a_buff_that_is_down).
+    pub(crate) fn held_for_buffs(&mut self, now: Instant) -> Option<crate::did::Did> {
+        if !self.autoplay.config.enabled {
+            return None;
+        }
+        let Some(name) = self.buff_down(now) else {
+            self.autoplay.buffing_to_leave = None;
+            return None;
+        };
+        let since = *self.autoplay.buffing_to_leave.get_or_insert(now);
+        if now.duration_since(since) >= BUFFED_TO_LEAVE {
+            tracing::warn!(
+                "buff: {name} would not go up in {BUFFED_TO_LEAVE:?}; setting off without it"
+            );
+            return None;
+        }
+        let why = format!("putting {name} up before setting off");
+        self.autoplay.say(Doing::Buffing, why.clone());
+        Some(crate::did::Did::waiting(why))
     }
 
     /// The buff with the least time left of those under `within`

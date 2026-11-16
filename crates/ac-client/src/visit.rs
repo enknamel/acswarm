@@ -397,7 +397,11 @@ impl Client {
                     place,
                     within: REACH,
                 };
-                match self.set_off(v.owner, goal, now) {
+                let did = match self.held_for_buffs(now) {
+                    Some(held) => held,
+                    None => self.set_off(v.owner, goal, now),
+                };
+                match did {
                     Did::Blocked(why) => {
                         tracing::warn!("visit: no way to {} from here: {}", v.label, why.what);
                         self.let_go_of(&v);

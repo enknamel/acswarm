@@ -290,6 +290,9 @@ impl Client {
                 place,
                 within: goal.within(),
             };
+            if let Some(held) = self.held_for_buffs(now) {
+                return held;
+            }
             let mut did = self.set_off(owner, far, now);
             if matches!(did, Did::Blocked(_)) {
                 did = self.fly_journey(owner, far, now);

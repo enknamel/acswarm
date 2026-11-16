@@ -19,6 +19,9 @@ impl Client {
         if let Some(why) = ends.and_then(|e| self.kept_refusal(owner, goal, e, true)) {
             return Did::blocked(why);
         }
+        if let Some(held) = self.held_for_buffs(now) {
+            return held;
+        }
         let mut did = self.set_off(owner, goal, now);
         if matches!(did, Did::Blocked(_)) && self.is_flight_goal(goal) {
             did = self.fly_journey(owner, goal, now);

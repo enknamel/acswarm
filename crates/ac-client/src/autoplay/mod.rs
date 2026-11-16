@@ -253,6 +253,8 @@ pub struct Autoplay {
     urgent_buffs_checked: Option<Instant>,
     /// The same for the top-up pass: each keeps its own clock (see `BUFF_CHECK_EVERY`).
     top_ups_checked: Option<Instant>,
+    /// Since when a journey has waited for a buff that is down (see `Client::held_for_buffs`).
+    pub(crate) buffing_to_leave: Option<Instant>,
     /// The last `Client::spells_cast` answer: when, for how big a spellbook, and the spells.
     pub(crate) spells_cast_memo: std::cell::RefCell<Option<(Instant, usize, Vec<u32>)>>,
     /// The weapon put down to cast an urgent buff mid-fight, to be taken
