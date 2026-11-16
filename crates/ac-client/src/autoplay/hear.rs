@@ -161,6 +161,38 @@ impl Client {
         }
     }
 
+    /// A spell failed to affect the creature `name` (`Refusal::Affect`): its kind is immune to all
+    /// but projectiles (Player_Magic.cs:1109), so no debuff is counted on it or cast at one again.
+    pub(crate) fn hear_magic_immune(&mut self, name: &str) {
+        let st = &self.autoplay;
+        let target = [
+            st.debuff_sent,
+            st.yield_sent,
+            st.casting_at,
+            self.attack_target,
+        ]
+        .into_iter()
+        .flatten()
+        .find(|g| self.world.objects.get(g).is_some_and(|o| o.name == name));
+        let Some(g) = target else {
+            return;
+        };
+        let wcid = self.world.objects.get(&g).map_or(0, |o| o.weenie_class_id);
+        let st = &mut self.autoplay;
+        if wcid != 0 && !st.magic_immune.contains(&wcid) {
+            st.magic_immune.push(wcid);
+            tracing::info!(
+                "autoplay: {name} ({wcid}) takes no debuff; none cast at its kind again"
+            );
+        }
+        st.vulned.retain(|(t, _)| *t != g);
+        st.yielded.retain(|(t, _)| *t != g);
+        st.imperiled.retain(|t| *t != g);
+        st.debuff_sent = st.debuff_sent.filter(|t| *t != g);
+        st.yield_sent = st.yield_sent.filter(|t| *t != g);
+        *st.kill_kept.borrow_mut() = None;
+    }
+
     /// The debuff last sent did not go on (`why`): cast again when it is still worth it.
     pub(crate) fn rearm_debuff(&mut self, why: &str) {
         if let Some(g) = self.autoplay.yield_sent.take() {

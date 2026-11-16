@@ -398,7 +398,7 @@ impl Client {
             .and_then(|(_, cast)| *cast);
         let fight = Softened {
             on,
-            may_vuln: !self.softened_by_anyone(guid),
+            may_vuln: !self.softened_by_anyone(guid) && !self.is_magic_immune(guid),
             yielded: self.autoplay.yielded_by(guid),
         };
         let known = self.creature_known(guid);

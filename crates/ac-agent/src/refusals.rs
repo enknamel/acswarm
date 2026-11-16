@@ -26,6 +26,8 @@ pub enum Refusal<'a> {
     Attack { name: &'a str },
     /// It would not cast `spell` at `target`: not a thing that spell can be cast on.
     Cast { spell: &'a str, target: &'a str },
+    /// `spell` reached `target` and did nothing: a creature immune to all but projectiles.
+    Affect { target: &'a str, spell: &'a str },
     /// It would not use `item` from where it is: it has to be wielded, or carried, first.
     Use { item: &'a str, why: UseRefusal },
     /// It would not use `item` on `target`: not a thing it works on.
@@ -268,6 +270,15 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
         .and_then(|s| s.split_once(" cannot be cast on "))
     {
         return Some(Refusal::Cast { spell, target });
+    }
+    // WorldObjects/Player_Magic.cs:1110 (NonProjectileMagicImmune), WorldObject_Weapon.cs:990;
+    // WorldObject_Magic.cs:2136/2173 (a bane or loather with no shield or weapon to land on)
+    //   $"You fail to affect {targetCreature.Name} with {spell.Name}"
+    if let Some((target, spell)) = text
+        .strip_prefix("You fail to affect ")
+        .and_then(|s| s.rsplit_once(" with "))
+    {
+        return Some(Refusal::Affect { target, spell });
     }
 
     // WorldObjects/Player_Use.cs:73
@@ -576,6 +587,8 @@ pub fn answer(refusal: &Refusal) -> Answer {
         Refusal::Attack { .. } => Answer::Again(ATTACK_AGAIN),
         // A spell that cannot be cast on a thing never can be.
         Refusal::Cast { .. } => Answer::Never,
+        // The creature's own flag: no spell but a projectile ever takes hold on its kind.
+        Refusal::Affect { .. } => Answer::Never,
         // Wielding or picking up is the caller's to do first; asking again from here gets the same answer.
         Refusal::Use { .. } | Refusal::UseWith { .. } => Answer::Never,
         // Nothing at the counter changes what it will not buy or has no room to pay for: the trip goes
@@ -745,6 +758,13 @@ mod tests {
             Some(Refusal::Cast {
                 spell: "Flame Bolt I",
                 target: "Ulgrim the Unpleasant"
+            })
+        );
+        assert_eq!(
+            refused("You fail to affect Olthoi Slayer with Tusker's Gift"),
+            Some(Refusal::Affect {
+                target: "Olthoi Slayer",
+                spell: "Tusker's Gift"
             })
         );
     }

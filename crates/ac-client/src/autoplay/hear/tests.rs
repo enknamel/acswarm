@@ -139,3 +139,29 @@ fn a_vulnerability_the_server_turned_down_is_cast_again() {
     c.hear_cast_refused(0x1D, std::time::Instant::now());
     assert!(c.autoplay.is_vulned(0x8000_0103));
 }
+
+#[test]
+fn a_kind_a_debuff_failed_to_affect_is_never_debuffed_again() {
+    // Blargerton's Tusker's Gift came back "You fail to affect Olthoi Slayer with Tusker's Gift"
+    // (NonProjectileMagicImmune, Player_Magic.cs:1109) once per Slayer, each counted as on.
+    let mut c = crate::testkit::offline_client();
+    let slayer = |guid| ac_world::WorldObject {
+        weenie_class_id: 35146,
+        ..crate::testkit::creature(guid, "Olthoi Slayer")
+    };
+    c.world.objects.insert(0x8000_0103, slayer(0x8000_0103));
+    c.world.objects.insert(0x8000_0104, slayer(0x8000_0104));
+    let other = crate::testkit::creature(0x8000_0105, "Olthoi Slasher");
+    c.world.objects.insert(other.guid, other);
+    assert!(!c.is_magic_immune(0x8000_0103));
+    c.autoplay.mark_vulned(0x8000_0103, None);
+    c.autoplay.debuff_sent = Some(0x8000_0103);
+    c.hear_refusal(
+        "You fail to affect Olthoi Slayer with Tusker's Gift",
+        Instant::now(),
+    );
+    assert!(!c.autoplay.is_vulned(0x8000_0103), "not counted as on");
+    assert!(c.is_magic_immune(0x8000_0103));
+    assert!(c.is_magic_immune(0x8000_0104), "every one of its kind");
+    assert!(!c.is_magic_immune(0x8000_0105), "another kind is not");
+}

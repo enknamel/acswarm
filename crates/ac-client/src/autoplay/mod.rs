@@ -224,6 +224,8 @@ pub struct Autoplay {
     yield_sent: Option<u32>,
     /// Targets a team debuff of neither kind above went on (an imperil), by guid.
     imperiled: Vec<u32>,
+    /// Kinds of creature (wcid) no debuff takes hold on: the server said it failed to affect one.
+    pub(crate) magic_immune: Vec<u32>,
     /// When each debuff above is due again: (target, its spell, when), [`fight::soften::RENEW_BEFORE`] ahead of its end.
     debuff_due: Vec<(u32, u32, Instant)>,
     /// The fight's fastest kill of its target and when it was worked out (`Client::best_kill`).

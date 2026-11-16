@@ -46,6 +46,12 @@ impl Client {
             // once, rather than when the stall clock runs out (see
             // `autoplay::Client::hear_attack_refusal`).
             Refusal::Attack { name } => self.hear_attack_refusal(name, now),
+            // A debuff that did nothing: that kind of creature is not debuffed again (see
+            // `autoplay::Client::hear_magic_immune`).
+            Refusal::Affect { target, .. } => {
+                tracing::info!("the server refused ({refusal:?}): {text}");
+                self.hear_magic_immune(target);
+            }
             // An essence turned away: for good, or for the creature
             // still out (see `summoning::Client::hear_summoning`).
             Refusal::Summon { why } => self.hear_summoning(why, text, now),
