@@ -616,6 +616,12 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
         run: Client::autoplay_mana_stones,
     },
     Housekeeping {
+        name: "reveal aetheria",
+        // The Aetheria Mana Stone on each Coalesced Aetheria carried, between fights: one use and a
+        // clap, so it waits for no goal's turn.
+        run: Client::autoplay_reveal_aetheria,
+    },
+    Housekeeping {
         name: "refill summoning essences",
         // One use on the spot between fights, as a pour is: as a goal it waited behind every
         // fight and walk, and the empty essence sat in the pack.
