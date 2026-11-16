@@ -193,7 +193,7 @@ impl PursuitStep {
             }
             PursuitStep::AskFor { source, at } => {
                 let place = ac_world::quest_chain::place_name(at.cell);
-                format!("ask {} for it in {place}", source.name)
+                events::ask_words(source, &place)
             }
             PursuitStep::GiveTo { source, at, item } => {
                 let given = source.keys.iter().find(|k| k.0 == *item);
@@ -401,6 +401,9 @@ pub(crate) struct Ask<'a> {
     /// The flag each quest, by id, is had for first: no journey reaches its ground but past a
     /// portal asking it. Gone once held.
     pub(crate) flag_ways: &'a BTreeMap<String, String>,
+    /// The event each quest, by id, starts first: no journey reaches its ground but through a
+    /// portal only that event puts out (`event_way`). Gone once taken for on.
+    pub(crate) event_ways: &'a BTreeMap<String, String>,
     /// The camp-made portal each quest, by id, hunts first (`portal_way`): not standing in view.
     pub(crate) portal_ways: &'a BTreeMap<String, (u32, String)>,
     /// The landblock the character stands in, by its cell (a dungeon's rooms run past its square).
@@ -644,6 +647,9 @@ impl Ask<'_> {
             matches!(step.0, PursuitStep::Hunt { landblock, .. } if Some(landblock) == self.here);
         if let (Some(flag), false) = (self.flag_ways.get(id), there) {
             return self.flag_step_by(flag, 0, true);
+        }
+        if let Some(got) = self.event_step(id).filter(|_| !there) {
+            return got;
         }
         if let (Some((gem, name)), false) = (self.ways.get(id), there) {
             return self.obtain(&[Want::Item(*gem)], 1, name, 0);
@@ -934,6 +940,7 @@ impl Client {
         now: Instant,
     ) {
         self.see_events(now);
+        self.forget_unseen_portals(now);
         let st = &mut self.autoplay.growth;
         st.pursuit_held
             .retain(|_, (_, at)| now.duration_since(*at) < PURSUIT_RETRY);
@@ -945,6 +952,7 @@ impl Client {
             st.pursuit_paces.clear();
             st.pursuit_gems.clear();
             st.pursuit_flags.clear();
+            st.pursuit_events.clear();
             st.pursuit_portals.clear();
             st.pursuit_sought.clear();
             st.pursuit_droppers.clear();
@@ -963,6 +971,7 @@ impl Client {
         st.pursuit_flags
             .retain(|_, f| !held_flags.iter().any(|h| h.eq_ignore_ascii_case(f)));
         let flag_ways = st.pursuit_flags.clone();
+        let event_ways = self.event_ways(now);
         let st = &self.autoplay.growth;
         // A gem carried is the way already: the planner takes it.
         let ways: BTreeMap<String, (u32, String)> = st
@@ -1029,6 +1038,7 @@ impl Client {
             ways: &ways,
             gem_grounds: &gem_grounds,
             flag_ways: &flag_ways,
+            event_ways: &event_ways,
             portal_ways: &portal_ways,
             here: self.player.as_ref().map(|p| p.cell >> 16),
             bound: self.autoplay.growth.bound_landblock(),

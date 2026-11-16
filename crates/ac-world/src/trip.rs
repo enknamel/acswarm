@@ -577,8 +577,9 @@ pub fn plan_with_ways(
     for p in portals::all() {
         has_portal.insert(p.from_cell & 0xFFFF_0000);
     }
-    // An NPC's way is one on too: Qin Xikit's temple has no portal, only its Guardian's sending.
-    for n in &ways.npcs {
+    // An NPC's way is one on too, usable now or not: Qin Xikit's temple has no portal, only its
+    // Guardian's sending, and 0x00F2 only the Enchanted Dais, handed the Crown it holds.
+    for n in portals::npc_ways().iter().chain(&ways.npcs) {
         has_portal.insert(n.cell & 0xFFFF_0000);
     }
     let flags_held = |p: &&Portal| level == 0 || p.usable_by(level, quests_done);

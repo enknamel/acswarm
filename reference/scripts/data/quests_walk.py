@@ -220,7 +220,10 @@ class Data:
             self.link_portal[(int(obj), int(t))] = (int(portal), int(cell, 16), x, y, z,
                                                     int(lo), int(hi), quest)
         self.event_name = {}
+        self.start_needs = defaultdict(set)
         self.starts, self.summons, self.stamps = event_starts(self)
+        # The events a generator portal waits on (event_portal_rows): their starters are written.
+        self.portal_events = set()
         # Who sends each signal as it dies (lower case: a set's key matches it whatever its case,
         # EmoteManager.cs:1526), the landblocks each placed object stands in, and what hears it.
         self.death_signals = defaultdict(set)
@@ -806,12 +809,18 @@ def event_starts(data):
             kind = kinds.get(s["cat"])
             if kind is None or (kind == "give" and not s["wcid"]):
                 continue
-            for _, effects in walk(data, s):
+            for branches, effects in walk(data, s):
                 for a in effects:
                     if a["type"] == START_EVENT and a["msg"]:
                         data.event_name.setdefault(a["msg"].lower(), a["msg"])
                         item = s["wcid"] if kind == "give" else 0
                         starts[a["msg"].lower()].add((kind, obj, item))
+                        # The events a use asks running on its way there (the Font Guardian's
+                        # four heat events, each a Sealed Valve's): started first.
+                        if kind == "use":
+                            asks = {b[2]["msg"].lower() for b in branches
+                                    if b[0] == INQ_EVENT and b[1] is True and b[2]["msg"]}
+                            data.start_needs[(a["msg"].lower(), obj)] |= asks
                     elif (a["type"] == CAST_INSTANT and kind == "kill"
                           and a["spell"] in data.summon_link):
                         did = 31 if data.summon_link[a["spell"]] <= 1 else 48
@@ -1340,7 +1349,8 @@ def build(data, never):
     wants = sorted({r[5] for r in rows_out if r[1] in ("kill", "item")}
                    | {str(w) for w in learnt} | {str(w) for w in data.gems}
                    | {"flag:" + f for f in data.stamps}
-                   | {"flag:" + f for f in data.portal_stamps})
+                   | {"flag:" + f for f in data.portal_stamps}
+                   | {"event:" + e for e in data.portal_events})
     # And the spell components no shop sells: what an item goal is set for (Chorizite).
     rewards = reward_items(rows_out)
     wants = sorted(set(wants) | {str(c) for c in data.components - data.sold})
@@ -1410,6 +1420,12 @@ def build(data, never):
                         todo.append((str(item), depth + 1))
                 elif kind == "kill" and data.spawns.get(obj):
                     src.append((want, "kill", obj, 1.0, ""))
+                elif kind == "use" and (data.placed.get(obj) or data.ground_places(obj)):
+                    src.append((want, "start", obj, 1.0, ""))
+                    for ev in sorted(data.start_needs.get((want[6:], obj), ())):
+                        if "event:" + ev not in seen and depth < EVENT_DEPTH:
+                            seen.add("event:" + ev)
+                            todo.append(("event:" + ev, depth + 1))
             # Or by a watcher that hears `count` deaths: of what signals it as it dies, where the
             # watcher stands (a signal is heard nearby only: Landblock.cs:985-999).
             for watcher, signal, count in sorted(data.signal_starts.get(want[6:], ())):
@@ -1444,7 +1460,10 @@ def build(data, never):
     def gate(r):
         return data.gate_of(r[2])[1] if r[1] in ("drop", "kill", "npc", "give") else None
 
-    src = kept_uses(src, wants, data.sold | rewards, gate)
+    def needs(r):
+        return data.start_needs.get((r[0][6:], r[2]), ()) if r[1] == "start" else ()
+
+    src = kept_uses(src, wants, data.sold | rewards, gate, needs)
     had = {r[0] for r in src} | {str(w) for w in data.sold}
     rows_out = rows_out + learn_rows(data, learnt, had)
     rows_out.sort(key=lambda r: (r[0], kind_order[r[1]], int(r[3]), int(r[7])))
@@ -1453,8 +1472,10 @@ def build(data, never):
         at, blocks, count = "", [], 1
         if kind == "combine":
             where = ""
-        elif kind in ("npc", "floor", "container", "use", "give", "portal", "revealed"):
-            if kind == "npc":
+        elif kind in ("npc", "start", "floor", "container", "use", "give", "portal", "revealed"):
+            if kind == "start":
+                spots = data.placed.get(c) or sorted(set(data.ground_places(c)))
+            elif kind == "npc":
                 spots = data.placed.get(c) or sorted(set(data.made_on_ground(c)))
             elif kind == "give" and data.placed.get(c):
                 spots = data.placed.get(c, [])
@@ -1481,6 +1502,8 @@ def build(data, never):
         spawn = "%g" % round(share, 4) if share > 0 else ""
         rates = ""
         ev = gate((want, kind, c))
+        if kind == "start":
+            ev = ";".join(sorted(data.start_needs.get((want[6:], c), ()))) or None
         if kind in ("drop", "kill"):
             # One an event gates, as it comes once the event is started.
             spawning = data.spawning_on if ev else data.spawning
@@ -1662,9 +1685,10 @@ def reward_items(rows_out):
     return out
 
 
-def kept_uses(src, wants, sold, gate=lambda r: None):
+def kept_uses(src, wants, sold, gate=lambda r: None, needs=lambda r: ()):
     """`src` less each use whose items used on it have no source, and less the rows of an item
-    then wanted by nothing kept; an event a kept row's creature needs (`gate`) is wanted."""
+    then wanted by nothing kept; an event a kept row's creature needs (`gate`), or a kept start's
+    use asks running (`needs`), is wanted."""
     while True:
         had = {r[0] for r in src} | {str(w) for w in sold}
         items = lambda r: [k.split("=", 1)[0] for k in r[4].split(";")]
@@ -1673,6 +1697,7 @@ def kept_uses(src, wants, sold, gate=lambda r: None):
                 or (r[1] == "combine" and all(k in had for k in items(r)))]
         asked = set(wants) | {k.split("=", 1)[0] for r in keep for k in r[4].split(";") if k}
         asked |= {"event:" + g for g in map(gate, keep) if g}
+        asked |= {"event:" + n for r in keep for n in needs(r)}
         keep = [r for r in keep if r[0] in asked]
         if len(keep) == len(src):
             return keep
@@ -1769,6 +1794,8 @@ def main():
                 data.recalls[int(c[0])] = c[1]
     with open(os.path.join(out_dir, "gems.csv"), encoding="utf-8") as f:
         data.gems = sorted({int(r.split(",")[0]) for r in f if r[:1].isdigit()})
+    events_out = event_portal_rows(data, dump)
+    data.portal_events = {r[-1] for r in events_out}
     rows_out, _, _, _ = build(data, None)
     stamped = {f for r in rows_out for f in r[15].split(";") if f}
     asked = {qname(a["msg"]) for s in data.sets.values() for a in s["acts"]
@@ -1810,6 +1837,9 @@ def main():
               newline="") as f:
         f.write(SPAWNED_HEADER)
         write_rows(f, spawned_portal_rows(data, dump))
+    with open(os.path.join(out_dir, "event_portals.csv"), "w", encoding="utf-8", newline="") as f:
+        f.write(EVENT_PORTALS_HEADER)
+        write_rows(f, events_out)
     with open(os.path.join(out_dir, "npc_ways.csv"), "w", encoding="utf-8", newline="") as f:
         f.write(NPC_WAYS_HEADER)
         write_rows(f, ways)
@@ -1825,6 +1855,21 @@ def main():
     print("quests: %d rows, %d giver placements; %s; out: %s" % (
         len(rows_out), len(givers_out), ", ".join("%s %d" % (k, len(v)) for k, v in sorted(by_kind.items())),
         dict(sorted(reasons.items()))), file=sys.stderr)
+
+
+def event_portal_rows(data, dump):
+    """Each portal a generator puts out only while an Off event runs, where something's use starts
+    it: where it comes, where it leads, its level band and flag, and the event (Qin Xikit's Hidden
+    Crown, the only way into 0x00F2, while the Font Guardian's EventFontBrowerkStopgap runs)."""
+    out = []
+    for w, c, x, y, z, lo, hi, q in rows(dump, "genportals"):
+        ev = data.gate_of(int(w))[1]
+        if not ev or not any(k == "use" for k, _, _ in data.starts.get(ev, ())):
+            continue
+        for cell, px, py, pz in sorted(set(data.made_on_ground(int(w)))):
+            out.append((w, data.name.get(int(w), ""), "%08X" % cell, px, py, pz,
+                        "%08X" % int(c, 16), x, y, z, lo, hi, q, ev))
+    return out
 
 
 def spawned_portal_rows(data, dump):
@@ -1942,11 +1987,12 @@ SOURCES_HEADER = """\
 # or heard by a watcher there, or stamps the flag), give (an NPC handed its keys starts the
 # event), portal (going through it stamps the flag), revealed (as portal, made by a generator
 # once something reveals it: the Colosseum's, arenas.csv), npc (a placed NPC, or an object a generator
-# puts out, whose talk gives the item), floor (made on the ground by a
+# puts out, whose talk gives the item), start (an object whose use starts the event, once the
+# events in its event column run), floor (made on the ground by a
 # generator; wcid is the item's own), container (a chest that holds it, chance per fill), use
 # (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried
 # item a recipe makes it on; nowhere to go). landblocks: hex landblock:spawn entries;... (for
-# an npc, give, portal, revealed, floor, container or use, hex cell:1 per placement, with at the matching local
+# an npc, start, give, portal, revealed, floor, container or use, hex cell:1 per placement, with at the matching local
 # "x y z";...; for a drop or kill the encounter table alone spawns, each landblock's busiest
 # encounter corner, "x y 0";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a give, the item handed; for a
 # use, the items used on it; for a combine, the item used then the one used on;
@@ -1957,10 +2003,20 @@ SOURCES_HEADER = """\
 # generators make an hour while everything they make is killed, and when killing it alone leaves
 # its slots held, the others an hour that clearing kills; from a seeded simulation of ACE's
 # generators, with its event on when it has one. event: the Off event (EventManager.cs) whose
-# generator alone puts the creature or NPC out: it comes only once that event is started.
+# generator alone puts the creature or NPC out: it comes only once that event is started; for a
+# start, the events its use asks running first, ;-separated.
 # respawn: for a floor item, seconds its generator takes to put it back once taken (profile delay
 # and a regeneration interval); blank when unknown. count: for a kill a watcher hears, the deaths
 # it must hear before it starts the event (only written when more than 1).
+# Regenerate with reference/scripts/data/quests.sh.
+"""
+
+EVENT_PORTALS_HEADER = """\
+# Portals a generator puts out only while an Off server event runs (EventManager.cs), started by
+# a use: event:NAME's start rows in quest_sources.csv (Qin Xikit's Hidden Crown, the way into 0x00F2).
+# wcid,name,cell,x,y,z,to_cell,to_x,to_y,to_z,min_level,max_level,quest,event
+# cell, x/y/z: where it comes (its generator's spot), local to the landblock; to: where it leads;
+# the portal's own level band and flag (0, blank: none); event: lower case.
 # Regenerate with reference/scripts/data/quests.sh.
 """
 

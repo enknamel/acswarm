@@ -356,6 +356,54 @@ pub fn spawned_of(wcid: u32) -> Option<&'static Spawned> {
     spawned().get(*by.get(&wcid)?)
 }
 
+/// A portal a generator puts out only while an Off server event runs, which a use starts
+/// (`data/event_portals.csv`): Qin Xikit's Hidden Crown, the only way into 0x00F2, while the Font
+/// Guardian's EventFontBrowerkStopgap runs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EventPortal {
+    pub wcid: u32,
+    /// As its generator puts it: where it leads, its level band and its flag.
+    pub way: Portal,
+    /// The event (lower case): `event:NAME`'s start sources in `crate::quests`.
+    pub event: String,
+}
+
+const EVENT_PORTALS: &str = include_str!("../data/event_portals.csv");
+
+/// Every portal an event's generator puts out, parsed on first use.
+pub fn event_portals() -> &'static [EventPortal] {
+    static PARSED: OnceLock<Vec<EventPortal>> = OnceLock::new();
+    PARSED.get_or_init(|| {
+        let row = |line: &str| {
+            let f: Vec<&str> = line.split(',').collect();
+            let num = |i: usize| f.get(i)?.parse::<f32>().ok();
+            let cell = u32::from_str_radix(f.get(2)?, 16).ok()?;
+            let to_cell = u32::from_str_radix(f.get(6)?, 16).ok()?;
+            let way = Portal {
+                name: crate::data_name(f.get(1)?),
+                from_cell: cell,
+                from: crate::landblock_origin(cell) + Vec3::new(num(3)?, num(4)?, num(5)?),
+                to_cell,
+                to: crate::landblock_origin(to_cell) + Vec3::new(num(7)?, num(8)?, num(9)?),
+                min_level: f.get(10)?.parse().ok()?,
+                max_level: f.get(11)?.parse().ok()?,
+                quest: f.get(12)?.to_string(),
+                usable: 0,
+                bitmask: UNRESTRICTED,
+            };
+            Some(EventPortal {
+                wcid: f.first()?.parse().ok()?,
+                way,
+                event: f.get(13)?.to_string(),
+            })
+        };
+        let lines = EVENT_PORTALS
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty());
+        lines.filter_map(row).collect()
+    })
+}
+
 const SUMMONED: &str = include_str!("../data/summoned_portals.csv");
 
 /// Every portal a creature's death opens, parsed on first use.

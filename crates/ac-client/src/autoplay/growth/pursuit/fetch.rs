@@ -86,6 +86,9 @@ pub(crate) enum Act {
     Use,
     /// A carried item handed to the NPC, which starts an event (GiveObjectRequest).
     Give,
+    /// The object used, which starts an event: its use ends in a UseDone, else is taken as gone
+    /// out once [`ANSWER_WAIT`] passes (a Sealed Valve answers only in a broadcast).
+    Start,
 }
 
 /// How an act was answered.
@@ -135,6 +138,21 @@ impl Ask<'_> {
                     }
                     continue;
                 }
+                // A start whose use asks events running: those started first, in order.
+                let unmet: Vec<&'static str> = s
+                    .needs
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|e| !(self.event_on)(e))
+                    .collect();
+                if !unmet.is_empty() {
+                    for e in unmet {
+                        if !events.contains(&e) {
+                            events.push(e);
+                        }
+                    }
+                    continue;
+                }
                 // A combine is made where the character stands: no place of its own.
                 let here = Place {
                     at: me.unwrap_or_default(),
@@ -160,7 +178,7 @@ impl Ask<'_> {
                         name: s.name.clone(),
                         at,
                     },
-                    Yield::Npc => PursuitStep::AskFor { source: s, at },
+                    Yield::Npc | Yield::Start => PursuitStep::AskFor { source: s, at },
                     Yield::Give => match s.keys.iter().map(|k| k.0).find(carried) {
                         Some(item) => PursuitStep::GiveTo {
                             source: s,
@@ -268,6 +286,8 @@ fn fetch_key(step: &PursuitStep) -> Option<(u32, u32)> {
         | PursuitStep::AskFor { source: s, .. }
         | PursuitStep::Combine { source: s, .. } => match s.want {
             Want::Item(w) => Some((w, s.wcid)),
+            // An event a use starts: keyed as `is_source_dropped` keys it, by no item.
+            Want::Event(_) if s.kind == Yield::Start => Some((0, s.wcid)),
             _ => None,
         },
         _ => None,
@@ -339,7 +359,7 @@ impl Client {
                             Act::Take => format!("{label}: would not come up"),
                             Act::Talk => format!("{label}: gave nothing"),
                             Act::Give => format!("{label}: would not take it"),
-                            Act::Use => format!("{label}: no answer to the use"),
+                            Act::Use | Act::Start => format!("{label}: no answer to the use"),
                             _ => format!("{label}: no answer to the key"),
                         };
                         self.drop_source(key, why, now);
@@ -355,6 +375,14 @@ impl Client {
                     }
                     Heard::Done if f.act == Act::Give => {
                         if let PursuitStep::GiveTo { source, .. } = line.step {
+                            self.note_given(source, now);
+                        }
+                        self.autoplay.growth.fetching = None;
+                        self.quest_board_at = None;
+                        return Some(true);
+                    }
+                    Heard::Done if f.act == Act::Start => {
+                        if let PursuitStep::AskFor { source, .. } = line.step {
                             self.note_given(source, now);
                         }
                         self.autoplay.growth.fetching = None;
@@ -424,6 +452,14 @@ impl Client {
                 self.quest_board_at = None;
                 return Some(false);
             }
+            if let Some(e) = self.event_way(&place, &quests, now) {
+                let why = format!("for {}: the {e} event first, to reach {label}", line.title);
+                tracing::info!("pursuit: {}: {why}", line.id);
+                self.autoplay.note(why, now);
+                self.autoplay.growth.want_event(&line.id, e);
+                self.quest_board_at = None;
+                return Some(false);
+            }
             if self.want_portal_way((&line.id, &line.title), &label, &place, &quests, now) {
                 return Some(false);
             }
@@ -461,10 +497,11 @@ impl Client {
     /// Whether the packs have a slot for what an act at the source brings: one with none would
     /// see the item go nowhere, so the quest is passed over until something has gone.
     fn has_room_for(&mut self, line: &PursuitLine, now: Instant) -> bool {
-        let brings = matches!(
-            line.step,
-            PursuitStep::PickUp { .. } | PursuitStep::AskFor { .. } | PursuitStep::OpenChest { .. }
-        );
+        let brings = match line.step {
+            PursuitStep::AskFor { source, .. } => source.kind != Yield::Start,
+            PursuitStep::PickUp { .. } | PursuitStep::OpenChest { .. } => true,
+            _ => false,
+        };
         if !brings || self.room_anywhere() > 0 {
             return true;
         }
@@ -486,9 +523,13 @@ impl Client {
                 self.take(guid);
                 Some(Act::Take)
             }
-            PursuitStep::AskFor { .. } => {
+            PursuitStep::AskFor { source, .. } => {
                 self.interact(guid);
-                Some(Act::Talk)
+                Some(if source.kind == Yield::Start {
+                    Act::Start
+                } else {
+                    Act::Talk
+                })
             }
             PursuitStep::GiveTo { item, .. } => {
                 let held = self
@@ -629,6 +670,15 @@ impl Client {
                 _ => Heard::Waiting,
             },
             // The item leaves the pack once the NPC takes it; a refusal hands it back.
+            Act::Start => match self.use_done.filter(|(_, at)| *at >= f.at) {
+                Some((err, _)) if err != 0 && err != YOURE_TOO_BUSY => {
+                    let said = crate::weenie_errors::text(err).unwrap_or("refused");
+                    Heard::Refused(said.to_string())
+                }
+                Some(_) => Heard::Done,
+                None if waited => Heard::Done,
+                None => Heard::Waiting,
+            },
             Act::Give if self.carried_count(f.with) == 0 => Heard::Done,
             Act::Give if waited => Heard::Again,
             Act::Give => Heard::Waiting,

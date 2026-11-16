@@ -17,7 +17,7 @@ use crate::Client;
 
 /// A portal past a flag not held, reckoned in seconds: a day, more than any journey's walking,
 /// so the way past the fewest flags is found (VirindiIsland's, not a shorter one past two).
-const FLAG_SECONDS: f32 = 86_400.0;
+pub(super) const FLAG_SECONDS: f32 = 86_400.0;
 
 /// Each creature whose death stamps flags on its killer, and those flags.
 fn stamped_by_kill() -> &'static BTreeMap<u32, Vec<String>> {
@@ -70,8 +70,10 @@ impl Client {
             let Step::Portal { mouth, exit, .. } = s else {
                 return None;
             };
+            let shut = ac_world::portals::event_portals().iter().map(|e| &e.way);
             ac_world::portals::all()
                 .iter()
+                .chain(shut)
                 .filter(|p| p.from_cell == mouth.cell && p.to_cell == exit.cell)
                 .find(|p| !p.quest.is_empty() && !held(&p.quest))
                 .map(|p| p.quest.clone())
@@ -196,5 +198,10 @@ impl State {
     /// Have `quest`'s pursuit get `flag` first, in place of any flag it wanted before.
     pub(super) fn want_flag(&mut self, quest: &str, flag: String) {
         self.pursuit_flags.insert(quest.to_string(), flag);
+    }
+
+    /// Have quest `quest` start `event` first: only a portal it puts out leads on.
+    pub(super) fn want_event(&mut self, quest: &str, event: String) {
+        self.pursuit_events.insert(quest.to_string(), event);
     }
 }

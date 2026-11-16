@@ -1,0 +1,18 @@
+# Portals a generator puts out only while an Off server event runs (EventManager.cs), started by
+# a use: event:NAME's start rows in quest_sources.csv (Qin Xikit's Hidden Crown, the way into 0x00F2).
+# wcid,name,cell,x,y,z,to_cell,to_x,to_y,to_z,min_level,max_level,quest,event
+# cell, x/y/z: where it comes (its generator's spot), local to the landblock; to: where it leads;
+# the portal's own level band and flag (0, blank: none); event: lower case.
+# Regenerate with reference/scripts/data/quests.sh.
+24165,Trial of the Vagabond,5F450136,90,-240,0,5F45010F,30,-180,0,0,0,,eventportaloswaldb
+24166,Trial of the Vagabond,5F450134,80,-260,0,5F450118,60,-180,0,0,0,,eventportaloswaldc
+24167,Trial of the Vagabond,5F45011A,60,-250,0,5F450135,90,-180,0,0,0,,eventportaloswaldd
+24168,Trial of the Vagabond,5F450137,90,-250,0,5F450138,120,-180,0,0,0,,eventportaloswalde
+24169,Trial of the Vagabond,5F450119,60,-240,0,5F450139,150,-180,0,0,0,,eventportaloswaldf
+29788,Qin Xikit's Hidden Crown,EF0D0109,56.08,36.27,165.01,00F20151,10,-120,0,0,0,OnBrowerkQuest,eventfontbrowerkstopgap
+35847,Laboratory,1A730124,70.27,85.6,202.34,00A201DC,80.03,-105.99,0,0,0,,monouga150portalgenevent
+38369,Temple Door,3A110015,71,108,32,00DE01E5,109.32,-79.16,6.01,180,0,CanEnterSclavusTempleDoor,lordtesttempledooreast
+38369,Temple Door,3A110025,97,108,32,00DE01E5,109.32,-79.16,6.01,180,0,CanEnterSclavusTempleDoor,lordtesttempledooreast
+87167,Hidden Treasury,56520117,80.07,-104.14,-102,5652010F,80,-20,-102,0,0,,haltdericostritualevent
+87346,Laboratory,1A73019D,101.24,30.96,202.4,00A001DC,80.03,-105.99,0,0,0,,monouga80portalgenevent
+87350,Laboratory,1A7301A7,113.34,44.31,202.4,00A101DC,80.03,-105.99,0,0,0,,monouga120portalgenevent

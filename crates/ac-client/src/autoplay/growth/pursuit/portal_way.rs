@@ -168,7 +168,7 @@ impl Client {
             .growth
             .pursuit_portals
             .iter()
-            .filter(|p| !self.is_portal_in_view(p.wcid))
+            .filter(|p| !self.is_class_in_view(p.wcid))
             .map(|p| (p.quest.clone(), (p.wcid, p.name.clone())))
             .collect()
     }
@@ -180,15 +180,7 @@ impl Client {
         let wanted = &self.autoplay.growth.pursuit_portals;
         hunted
             .filter(|w| wanted.iter().any(|p| p.wcid == **w))
-            .any(|w| self.is_portal_in_view(*w))
-    }
-
-    /// Whether a portal of class `wcid` stands in view.
-    fn is_portal_in_view(&self, wcid: u32) -> bool {
-        let objects = self.world.objects.values();
-        objects
-            .filter(|o| o.weenie_class_id == wcid)
-            .any(|o| o.position.is_some())
+            .any(|w| self.is_class_in_view(*w))
     }
 }
 

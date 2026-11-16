@@ -53,9 +53,12 @@ impl Client {
                 )
             })
             .collect();
-        let npcs = ac_world::portals::npc_ways()
+        // A flag it asks too comes on the way (the Enchanted Dais's OnBrowerkQuest, the Watcher's):
+        // the journey to it may pass flags at a day each, and `flag_way` has them first.
+        let all = ac_world::portals::npc_ways();
+        let npcs = all
             .iter()
-            .filter(|w| w.usable_by(level, quests) && !self.is_npc_way_refused(w.npc));
+            .filter(|w| w.usable_by(level, &w.needs) && !self.is_npc_way_refused(w.npc));
         for w in npcs.collect::<Vec<_>>() {
             let Some((item, name)) = w.item.zip(w.item.and_then(item_name)) else {
                 continue;
@@ -64,7 +67,9 @@ impl Client {
                 at: w.at,
                 cell: w.cell,
             };
-            if let Some(t) = self.journey_plan(npc, quests) {
+            if let Some(t) =
+                self.journey_plan_with(npc, quests, Some(super::flag_way::FLAG_SECONDS))
+            {
                 let exit = Place {
                     at: w.to,
                     cell: w.to_cell,
@@ -88,10 +93,21 @@ impl Client {
                 continue;
             }
             let prefs: Prefs = self.travel_prefs().in_dungeon(exit.is_indoors());
+            // On from the exit by the NPC ways needing nothing carried: past Qin Xikit's Island
+            // only Browerk's Portal Device and the temple's Guardian lead on.
+            let onward = ac_world::trip::Ways {
+                portals: Vec::new(),
+                npcs: all
+                    .iter()
+                    .filter(|w| w.item.is_none() && w.usable_by(level, quests))
+                    .filter(|w| !self.is_npc_way_refused(w.npc))
+                    .cloned()
+                    .collect(),
+            };
             let on = goals
                 .iter()
                 .filter_map(|goal| {
-                    ac_world::trip::plan_with_recalls_and_gems(
+                    ac_world::trip::plan_with_ways(
                         exit,
                         *goal,
                         level,
@@ -101,6 +117,7 @@ impl Client {
                         &[],
                         &[],
                         prefs,
+                        &onward,
                     )
                 })
                 .map(|t| t.seconds)

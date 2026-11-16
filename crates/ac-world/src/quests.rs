@@ -257,6 +257,9 @@ pub enum Yield {
     /// As [`Yield::Portal`], made only once something reveals it (a Colosseum room's waves passed:
     /// `crate::arenas`); where its generator puts it.
     Revealed,
+    /// An object whose use starts the event once the events in `needs` run (a Sealed Valve; the
+    /// Font Guardian, its four heat events running).
+    Start,
 }
 
 impl Yield {
@@ -303,6 +306,8 @@ pub struct Source {
     /// The server event (lower case) whose generator alone puts the creature or NPC out: it comes
     /// only once that event is started, and its rates are those it then has.
     pub event: Option<String>,
+    /// For a [`Yield::Start`], the events (lower case) its use asks running: started first.
+    pub needs: Vec<String>,
     /// For a floor item, seconds its generator takes to put it back once taken.
     pub respawn: Option<f32>,
 }
@@ -603,6 +608,7 @@ fn parse_source(line: &str) -> Option<Source> {
         "give" => Yield::Give,
         "portal" => Yield::Portal,
         "revealed" => Yield::Revealed,
+        "start" => Yield::Start,
         _ => return None,
     };
     let landblocks = pairs(f[6], 16)?;
@@ -623,7 +629,18 @@ fn parse_source(line: &str) -> Option<Source> {
         rates: parse_rates(f.get(10).copied().unwrap_or(""), landblocks.len())?,
         landblocks,
         keys: parse_keys(keys)?,
-        event: f.get(11).filter(|e| !e.is_empty()).map(|e| e.to_string()),
+        event: f
+            .get(11)
+            .filter(|e| !e.is_empty() && kind != Yield::Start)
+            .map(|e| e.to_string()),
+        needs: match (kind, f.get(11)) {
+            (Yield::Start, Some(e)) => e
+                .split(';')
+                .filter(|n| !n.is_empty())
+                .map(String::from)
+                .collect(),
+            _ => Vec::new(),
+        },
         respawn: f.get(12).and_then(|r| r.parse().ok()),
     })
 }
@@ -658,6 +675,7 @@ fn vendor_sources(parsed: &[Source]) -> Vec<Source> {
                 keys: Vec::new(),
                 rates: Vec::new(),
                 event: None,
+                needs: Vec::new(),
                 respawn: None,
             });
         }

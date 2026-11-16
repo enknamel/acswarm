@@ -7,11 +7,12 @@
 # or heard by a watcher there, or stamps the flag), give (an NPC handed its keys starts the
 # event), portal (going through it stamps the flag), revealed (as portal, made by a generator
 # once something reveals it: the Colosseum's, arenas.csv), npc (a placed NPC, or an object a generator
-# puts out, whose talk gives the item), floor (made on the ground by a
+# puts out, whose talk gives the item), start (an object whose use starts the event, once the
+# events in its event column run), floor (made on the ground by a
 # generator; wcid is the item's own), container (a chest that holds it, chance per fill), use
 # (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried
 # item a recipe makes it on; nowhere to go). landblocks: hex landblock:spawn entries;... (for
-# an npc, give, portal, revealed, floor, container or use, hex cell:1 per placement, with at the matching local
+# an npc, start, give, portal, revealed, floor, container or use, hex cell:1 per placement, with at the matching local
 # "x y z";...; for a drop or kill the encounter table alone spawns, each landblock's busiest
 # encounter corner, "x y 0";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a give, the item handed; for a
 # use, the items used on it; for a combine, the item used then the one used on;
@@ -22,7 +23,8 @@
 # generators make an hour while everything they make is killed, and when killing it alone leaves
 # its slots held, the others an hour that clearing kills; from a seeded simulation of ACE's
 # generators, with its event on when it has one. event: the Off event (EventManager.cs) whose
-# generator alone puts the creature or NPC out: it comes only once that event is started.
+# generator alone puts the creature or NPC out: it comes only once that event is started; for a
+# start, the events its use asks running first, ;-separated.
 # respawn: for a floor item, seconds its generator takes to put it back once taken (profile delay
 # and a regeneration interval); blank when unknown. count: for a kill a watcher hears, the deaths
 # it must hear before it starts the event (only written when more than 1).
@@ -9170,6 +9172,19 @@ deathcapthrunguskillcount,kill,28673,Deathcap Thrungus,50,1,77:6;D2:36,,,1,6:45;
 desertcactuskillcount,kill,52290,Desert Cactus,1,1,8764:6;8765:8;8766:9;8864:5;8866:7;8964:6;8965:5;8966:6,,,0.038,1.25:8:427;1.29:7.5:402;1.34:8:427;1.22:8:427;1.28:8:427;1.25:8:427;1.22:8:427;1.2:8:410,,
 diremattekarkillcount,kill,9400,Dire Mattekar,40,1,2D5A:2;6248:1;A112:2,,,1,2:20;1:15;2:30,,
 ebongromniekills,kill,11526,Ebon Gromnie,80,1,36:17;1E6:19;3A7:1,,,1,17:204;19:285;1:15,,
+event:eventfontbrowerkstopgap,start,29730,Font Guardian,171,1,EF0D0000:1,60 33.2 173.8,,,,eventheatfont1;eventheatfont2;eventheatfont3;eventheatfont4,
+event:eventportaloswaldb,start,24164,Trial of the Vagabond,0,1,5F450131:1,80 -230 0,,,,,
+event:eventportaloswaldc,start,24165,Trial of the Vagabond,0,1,5F450136:1,90 -240 0,,,,,
+event:eventportaloswaldd,start,24166,Trial of the Vagabond,0,1,5F450134:1,80 -260 0,,,,,
+event:eventportaloswalde,start,24167,Trial of the Vagabond,0,1,5F45011A:1,60 -250 0,,,,,
+event:eventportaloswaldf,start,24168,Trial of the Vagabond,0,1,5F450137:1,90 -250 0,,,,,
+event:haltdericostritualevent,start,87186,Bloody Breastplate,0,1,56520109:1,67.33 -118.01 -102,,,,,
+event:lordtesttempledooreast,start,38342,Coral Hollow,0,1,3B110015:1,58 106.65 10.35,,,,,
+event:lordtesttempledooreast,start,38343,Coral Hollow,0,1,3B110015:1,57.48 108 10.35,,,,,
+event:lordtesttempledooreast,start,38344,Coral Hollow,0,1,3B110015:1,58 109.5 10.35,,,,,
+event:monouga120portalgenevent,start,35762,Bell,0,1,1A7302F4:1,116.06 35.15 232.4,,,,monouga120fphugegenevent,
+event:monouga150portalgenevent,start,35763,Bell,0,1,1A7302B2:1,61.95 89.13 232.4,,,,monouga150fpgiantgenevent,
+event:monouga80portalgenevent,start,35761,Bell,0,1,1A7302E1:1,109.63 28.82 232.4,,,,monouga80fplargegenevent,
 flag:accessboss18,revealed,34534,Return to the Hall of Champions,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -16 0;30 -16 0;30 -16 0;30 -16 0;30 -16 0,,,,,
 flag:accessboss3,revealed,34518,Arena 3,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1456 0;30 -1456 0;30 -1456 0;30 -1456 0;30 -1456 0,,,,,
 flag:accessboss5,revealed,34520,Arena 5,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1276 0;30 -1276 0;30 -1276 0;30 -1276 0;30 -1276 0,,,,,
@@ -10699,6 +10714,7 @@ event:dires3swarmc,kill,11035,Olthoi Noble,90,1,3AA0:2;3B9F:1;3BA0:3;3BA1:4;3BA2
 22043,combine,22038,Skeletal Torso with Arms,0,1,,,22031=Skeletal Leg;22038=Skeletal Torso with Arms,,,,
 22044,combine,22040,Undead Torso with Arms,0,1,,,22032=Undead Leg;22040=Undead Torso with Arms,,,,
 22096,combine,22095,Mu-miyah Torso with Arms,0,1,,,22029=Mu-miyah Leg;22095=Mu-miyah Torso with Arms,,,,
+event:mowenfight,start,22656,Arena of the Tusker Hero,0,1,5F44019D:1,130 -47.42 0,,,,,
 7827,combine,7826,Roasted Beans,0,1,,,7823=Heavy Grinder;7826=Roasted Beans,,,,
 22771,combine,7837,Ice Cream,0,1,,,22773=Nanner Halves;7837=Ice Cream,,,,
 22774,combine,22578,Bunch of Nanners,0,1,,,4757=Carving Knife;22578=Bunch of Nanners,,,,
@@ -11158,6 +11174,7 @@ event:thunderchickenbossstart,kill,35498,Chick,7,1,AF:1,,,1,8:0,,,18
 event:thunderchickenbossstart,kill,35499,Chicken,8,1,AF:1,,,1,10:0,,,18
 34859,combine,34855,Tiriun Mushroom Cap,0,1,,,4767=Skewer;34855=Tiriun Mushroom Cap,,,,
 34863,combine,34856,Tiriun Mushroom Stalk,0,1,,,5795=Hot Sauce;34856=Tiriun Mushroom Stalk,,,,
+event:gycoloinprogress,start,35507,Shade of Parieth,80,1,0095010B:1,20 -9.45 0.06,,,,,
 35403,npc,72230,Lady Tairla Mhoire,300,1,482E0013:1,57.57 53.77 10.06,,,,ladymhoirewin,
 37589,drop,37455,Forge Golem,135,1,EA:1,,,1,1:7.5,,
 38885,npc,72253,Ranger Lord Grymar Mhoire,300,1,472C0013:1,59.27 69.77 7.12,,,,lordgrymarwin,
@@ -11169,6 +11186,7 @@ event:claudebusy1,give,36114,Keh Fire,0,1,1CC2002A:1,133.79 38.86 20,36067=Atuak
 71039,combine,71038,Uncapped Magical Scepter,0,1,,,36547=Hardened Blue Crystal;71038=Uncapped Magical Scepter,,,,
 event:knorrquiddityasheronrewardevent,kill,36756,Cleaner,220,1,D6:1,,,1,0:0,virindiportalfiveevent,
 event:eruptportbossgen,kill,7373,Tenkarrdun Hellfire,100,1,B9F0:1,,,1,1:10,erupttenkarrdunbossgen,
+event:dryreachalert,start,6848,Dansha-Ki,21,1,DB74010A:1,110.65 41.6 12.01,,,,,
 39014,drop,39013,Blighted Pallid Moarsman,20,1,13B2:1,,,1,1:7.5,,
 39012,drop,39011,Blighted Grimy Moarsman,135,1,4AF3:1,,,1,1:7.5,,
 39018,drop,39017,Blighted Rank Moarsman,40,1,E733:1,,,1,1:7.5,,
@@ -11413,9 +11431,19 @@ event:erupttenkarrdunbossgen,give,7405,Smithing Golem,49,1,01160158:1,60.05 -160
 23196,combine,3672,Iron Heart,0,1,,,9295=Intricate Carving Tool;3672=Iron Heart,,,,
 23197,combine,7338,Diamond Heart,0,1,,,9295=Intricate Carving Tool;7338=Diamond Heart,,,,
 9343,combine,8308,Quicksilver Pea,0,1,,,4747=Alembic;8308=Quicksilver Pea,,,,
+event:eventheatfont1,start,29696,Sealed Valve,171,1,01D10100:1,25.61 -50 -78,,,,,
+event:eventheatfont2,start,29697,Sealed Valve,171,1,01760100:1,25.61 -50 -78,,,,,
+event:eventheatfont3,start,29698,Sealed Valve,171,1,01750100:1,25.61 -50 -78,,,,,
+event:eventheatfont4,start,29699,Sealed Valve,171,1,01980100:1,25.61 -50 -78,,,,,
+event:monouga120fphugegenevent,start,35762,Bell,0,1,1A7302F4:1,116.06 35.15 232.4,,,,,
+event:monouga150fpgiantgenevent,start,35763,Bell,0,1,1A7302B2:1,61.95 89.13 232.4,,,,,
+event:monouga80fplargegenevent,start,35761,Bell,0,1,1A7302E1:1,109.63 28.82 232.4,,,,,
 event:blindkeeperdead,kill,38349,Blind Keeper,200,1,DE:1,,,1,1:10,,
 event:hivequeendynamic,kill,72427,Olthoi Hive Queen,300,1,586B:1,,,1,1:12,hivequeenstatic,
+event:handaugrunversusblood,start,42228,Operations Specialist,200,1,8A030182:1,79.94 -207.8 0,,,,,
+event:webaugrunversushand,start,42237,Operations Specialist,200,1,8A0302A2:1,350.08 -217.82 0,,,,,
 event:hiveevisceratorsprayer,give,11201,Aun Aanaua,183,1,1ABE0000:1,180.66 13.28 148.01,51157=Tuning Fork,,,menhirdrummernw,
+event:hoshinoguards,start,72500,Large Enchanted Mnemosyne,0,1,654D04D8:1,94.45 -104.42 0,,,,,
 41,floor,41,Scalemail Breastplate,0,1,01C70126:1,53.12 -28.45 0,,,,,1350
 46,drop,1362,Trusted Tusker,15,0.2,1D7:1,,,1,1:15,,
 46,drop,1628,Tusker Slave,80,0.1,103:19;104:19;105:19;140:6;1A6:8;39C:1;322D:1;594C:5;5B4A:75;5C44:40;5C4A:36,,,1,19:66.5;19:66.5;19:66.5;6:21;8:28;1:10;1:4;5:60;75:750;40:480;36:360,,
@@ -11655,6 +11683,7 @@ event:dires3swarmb,kill,11053,Olthoi Soldier,79,1,3AA0:2;3B9F:1;3BA0:3;3BA1:4;3B
 29226,combine,23326,Elaborate Dried Rations,0,1,,,5781=Cinnamon;23326=Elaborate Dried Rations,,,,
 34861,combine,34857,Tiriun Mushroom Spores,0,1,,,4759=Cooking Pot;34857=Tiriun Mushroom Spores,,,,
 24887,combine,7605,Coral Heart,0,1,,,9295=Intricate Carving Tool;7605=Coral Heart,,,,
+event:rbpalmfortevent,start,41838,Fort Commander,200,1,3E0A002C:1,128.3 78.36 0,,,,,
 34855,drop,28674,Enoki Thrungus,100,0.1,65:34;78:6;D2:30;D3:66;18E:30,,,1,34:340;6:45;29.02:206.5:386;56.55:433:344;30:450,,
 34855,drop,31021,Puffball Thrungus,210,0.1,29:25,,,1,25:250,,
 34855,drop,31022,Jelly Thrungus,210,0.1,29:46,,,1,46:460,,

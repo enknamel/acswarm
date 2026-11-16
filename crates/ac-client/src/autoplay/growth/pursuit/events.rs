@@ -15,6 +15,11 @@ use crate::Client;
 /// A hunted creature an event gates is waited for this many times its spawn wait by the data's
 /// rate before the event is taken for over (guess).
 const WAITS: f32 = 2.0;
+/// An event portal not in view this near its generator's spot (metres) is not there (guess: in
+/// view from 25 m at the least).
+const PORTAL_SEEN_NEAR: f32 = 15.0;
+/// What its starter's use is given to put an event's portal out before it is taken for shut (guess).
+const PORTAL_COMES: Duration = Duration::from_secs(20);
 
 /// Each weenie class only an event puts out, and that event: seeing one says it is on.
 fn gated() -> &'static BTreeMap<u32, String> {
@@ -39,6 +44,16 @@ fn started_by_kill() -> &'static BTreeMap<u32, Vec<String>> {
         }
         m
     })
+}
+
+/// An NPC asked for an item, or an object used to start an event, `place` in words.
+pub(super) fn ask_words(source: &Source, place: &str) -> String {
+    match (&source.want, source.kind) {
+        (Want::Event(e), Yield::Start) => {
+            format!("use the {} in {place} to start {e}", source.name)
+        }
+        _ => format!("ask {} for it in {place}", source.name),
+    }
 }
 
 /// How long event `e` is taken for on with nothing of it seen: [`WAITS`] times the spawn wait of
@@ -127,10 +142,84 @@ impl Client {
         }
     }
 
+    /// The event to start first for a journey to one of `grounds`: one past the fewest flags goes
+    /// through a portal only that event puts out, not taken for on (Qin Xikit's Hidden Crown).
+    pub(super) fn event_way(
+        &mut self,
+        grounds: &[(u32, ac_world::Place)],
+        quests: &[String],
+        now: Instant,
+    ) -> Option<String> {
+        let trip = grounds
+            .iter()
+            .filter_map(|g| {
+                self.journey_plan_with(g.1, quests, Some(super::flag_way::FLAG_SECONDS))
+            })
+            .min_by(|a, b| a.seconds.total_cmp(&b.seconds))?;
+        let shut = trip.steps.iter().find_map(|s| {
+            let ac_world::trip::Step::Portal { mouth, exit, .. } = s else {
+                return None;
+            };
+            ac_world::portals::event_portals()
+                .iter()
+                .find(|e| e.way.from_cell == mouth.cell && e.way.to_cell == exit.cell)
+        })?;
+        (!self.is_event_on(&shut.event, now)).then(|| shut.event.clone())
+    }
+
+    /// An event portal taken for out but not standing where its generator puts it, once its
+    /// starter has had [`PORTAL_COMES`]: over, and so are the events its starter's use asked,
+    /// which are started again (the heat events, put out by the Font Browerk Stopgap).
+    pub(super) fn forget_unseen_portals(&mut self, now: Instant) {
+        let Some(me) = self.my_position() else {
+            return;
+        };
+        let shut: Vec<&'static ac_world::portals::EventPortal> = ac_world::portals::event_portals()
+            .iter()
+            .filter(|e| {
+                let since = self.autoplay.growth.events_on.since(&e.event);
+                since.is_some_and(|t| now.saturating_duration_since(t) >= PORTAL_COMES)
+            })
+            .filter(|e| me.distance(e.way.from) < PORTAL_SEEN_NEAR)
+            .filter(|e| !self.is_class_in_view(e.wcid))
+            .collect();
+        for e in shut {
+            self.forget_event(&e.event);
+            let want = Want::Event(e.event.clone());
+            let asked: Vec<String> = ac_world::quests::sources_of(&want)
+                .flat_map(|s| s.needs.iter().cloned())
+                .collect();
+            for n in asked {
+                self.forget_event(&n);
+            }
+        }
+    }
+
+    /// The events pursued quests start first, by id, less those taken for on: the rest kept.
+    pub(super) fn event_ways(&mut self, now: Instant) -> BTreeMap<String, String> {
+        let mut events = std::mem::take(&mut self.autoplay.growth.pursuit_events);
+        events.retain(|_, e| !self.is_event_on(e, now));
+        self.autoplay.growth.pursuit_events = events.clone();
+        events
+    }
+
     /// The event the give `s` starts, handed its item.
     pub(super) fn note_given(&mut self, s: &Source, now: Instant) {
         if let Want::Event(e) = &s.want {
             self.note_event(e, now);
         }
+    }
+}
+
+impl super::Ask<'_> {
+    /// Quest `id`'s step when only a portal an event puts out leads on and the event is not taken
+    /// for on: the event obtained, its starters used ([`Client::event_way`]).
+    pub(super) fn event_step(
+        &self,
+        id: &str,
+    ) -> Option<(super::PursuitStep, Option<super::Hunting>)> {
+        let e = self.event_ways.get(id).filter(|e| !(self.event_on)(e))?;
+        let name = format!("the {e} event");
+        Some(self.obtain(&[Want::Event(e.clone())], 1, &name, 0))
     }
 }

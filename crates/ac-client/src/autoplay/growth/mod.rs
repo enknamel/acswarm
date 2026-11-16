@@ -237,6 +237,9 @@ pub struct State {
     pursuit_gems: Vec<pursuit::GemWanted>,
     /// The flag each pursued quest, by id, has first, the only way on (see `pursuit::flag_way`).
     pursuit_flags: std::collections::BTreeMap<String, String>,
+    /// The event each pursued quest, by id, starts first: only its portal leads on (see
+    /// `pursuit::event_way`).
+    pursuit_events: std::collections::BTreeMap<String, String>,
     /// Camp-made portals pursued quests hunt, each the only way on (see `pursuit::portal_way`).
     pursuit_portals: Vec<pursuit::PortalWanted>,
     /// Whether the working pursuit's ground was reached by a journey from the landblock stood in,

@@ -67,6 +67,7 @@ fn dropper(want: Want, wcid: u32, name: &str, level: u32) -> &'static Source {
         keys: Vec::new(),
         rates: Vec::new(),
         event: None,
+        needs: Vec::new(),
         respawn: None,
     })
 }
@@ -215,6 +216,7 @@ fn work_in(
         ways: &BTreeMap::new(),
         gem_grounds: &Default::default(),
         flag_ways: &BTreeMap::new(),
+        event_ways: &BTreeMap::new(),
         portal_ways: &BTreeMap::new(),
         here: None,
         bound: None,
@@ -812,6 +814,7 @@ fn necklace_from(kind: Yield, wcid: u32, name: &str, at: Place) -> Source {
         keys: Vec::new(),
         rates: Vec::new(),
         event: None,
+        needs: Vec::new(),
         respawn: None,
     }
 }
@@ -1537,6 +1540,7 @@ fn vortex(at: Place) -> PursuitStep {
         keys: vec![(8903, "Focusing Stone".into())],
         rates: Vec::new(),
         event: None,
+        needs: Vec::new(),
         respawn: None,
     };
     PursuitStep::UseOn {
@@ -3994,6 +3998,7 @@ fn a_flag_a_standing_portal_stamps_is_had_by_going_through_it() {
         ways: &BTreeMap::new(),
         gem_grounds: &Default::default(),
         flag_ways: &BTreeMap::new(),
+        event_ways: &BTreeMap::new(),
         portal_ways: &BTreeMap::new(),
         here: None,
         bound: None,
@@ -4918,6 +4923,7 @@ fn the_browerk_flag_is_had_from_the_watcher_a_generator_puts_out() {
         ways: &BTreeMap::new(),
         gem_grounds: &Default::default(),
         flag_ways: &BTreeMap::new(),
+        event_ways: &BTreeMap::new(),
         portal_ways: &BTreeMap::new(),
         here: None,
         bound: None,
@@ -4927,4 +4933,131 @@ fn the_browerk_flag_is_had_from_the_watcher_a_generator_puts_out() {
     };
     let step = ask.flag_step_by("OnBrowerkQuest", 0, true).0;
     assert!(format!("{step:?}").contains("29731"), "{step:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_water_skins_have_qin_xikits_crown_wanted_first() {
+    // "no way to Empty Water Skin": past the Enchanted Dais (the Crown handed it), reached through
+    // the Hidden Crown portal, and on by Browerk's Portal Device and the temple's Guardian.
+    let mut c = mage_pursuing("give:29607:29606", "chained-quests");
+    c.world.stats.level = 111;
+    let skins = Place {
+        at: ac_world::landblock_origin(0x0160_0000) + glam::Vec3::new(16.52, -113.22, -11.9),
+        cell: 0x0160_0120,
+    };
+    let gem = c.gem_way(&[(0x0160, skins)], &[]);
+    assert_eq!(gem.map(|g| g.wcid), Some(29591), "Qin Xikit's Crown");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_crown_has_the_browerk_flag_then_the_font_event_first() {
+    // The Ensorcelled Dais stands in 0x00F2, reached only by Qin Xikit's Hidden Crown, which asks
+    // OnBrowerkQuest and stands only while the Font Guardian's event runs.
+    let mut c = mage_pursuing("give:29607:29606", "chained-quests");
+    c.world.stats.level = 111;
+    let crown = ac_world::quests::sources_of(&Want::Item(29591))
+        .find(|s| s.wcid == 29712)
+        .expect("the Ensorcelled Dais gives it");
+    let dais = [(0x00F2, crown.places[0])];
+    // From Holtburg with no recall, the Portalling Device on the way asks RoadsJournal.
+    let roads = ["RoadsJournal".to_string()];
+    assert_eq!(c.flag_way(&dais, &roads).as_deref(), Some("OnBrowerkQuest"));
+    let held = ["RoadsJournal".to_string(), "OnBrowerkQuest".to_string()];
+    let now = Instant::now();
+    assert_eq!(
+        c.event_way(&dais, &held, now).as_deref(),
+        Some("eventfontbrowerkstopgap")
+    );
+    // Started: the journey goes through the portal where its generator puts it.
+    c.note_event("eventfontbrowerkstopgap", now);
+    assert_eq!(c.event_way(&dais, &held, now), None);
+    c.travel.quests_done = held.to_vec();
+    assert!(c.journey_plan(crown.places[0], &held).is_some());
+}
+
+#[test]
+fn the_font_event_has_each_valve_used_then_the_font_guardian() {
+    let mut f = facts(111, &[]);
+    f.held.push("OnBrowerkQuest".into());
+    let on: std::cell::RefCell<Vec<&str>> = Default::default();
+    let event_on = |e: &str| on.borrow().contains(&e);
+    let step = |on: &dyn Fn(&str) -> bool| {
+        let carried = |_| 0;
+        let asking = Asking {
+            level: f.level,
+            held: &f.held,
+            carried: &carried,
+            refused: &|_, _| false,
+            away: &|_| 0.0,
+        };
+        let held = BTreeMap::new();
+        let arena = arena::ArenaView::default();
+        let ask = Ask {
+            facts: &f,
+            asking: &asking,
+            tried: &|_: &Unlock| false,
+            held: &held,
+            led: None,
+            chains: &ChainData,
+            dropped: &|_| false,
+            unlocked: &|_| false,
+            ways: &BTreeMap::new(),
+            gem_grounds: &Default::default(),
+            flag_ways: &BTreeMap::new(),
+            event_ways: &BTreeMap::new(),
+            portal_ways: &BTreeMap::new(),
+            here: None,
+            bound: None,
+            kill_secs: &|_| Some(20.0),
+            event_on: on,
+            arena: &arena,
+        };
+        let want = Want::Event("eventfontbrowerkstopgap".into());
+        match ask.obtain(&[want], 1, "the font event", 0).0 {
+            PursuitStep::AskFor { source, .. } => (source.wcid, source.kind),
+            other => panic!("{other:?}"),
+        }
+    };
+    let valves = [
+        ("eventheatfont1", 29696),
+        ("eventheatfont2", 29697),
+        ("eventheatfont3", 29698),
+        ("eventheatfont4", 29699),
+    ];
+    for (e, valve) in valves {
+        assert_eq!(step(&event_on), (valve, Yield::Start), "{e}");
+        on.borrow_mut().push(e);
+    }
+    assert_eq!(step(&event_on), (29730, Yield::Start), "the Font Guardian");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_sealed_valve_is_used_and_its_event_taken_for_on() {
+    let want = Want::Event("eventheatfont1".into());
+    let source = ac_world::quests::sources_of(&want)
+        .find(|s| s.kind == Yield::Start)
+        .expect("a Sealed Valve starts it");
+    let (mut c, line) = fetching(|at| PursuitStep::AskFor { source, at });
+    let PursuitStep::AskFor { at, .. } = line.step else {
+        unreachable!()
+    };
+    lying(&mut c, REPAIR_GOLEM, source.wcid, "Sealed Valve", at);
+    let now = Instant::now();
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    let f = c
+        .autoplay
+        .growth
+        .fetching
+        .clone()
+        .expect("waiting on the use");
+    assert_eq!((f.act, f.guid), (fetch::Act::Start, REPAIR_GOLEM));
+    assert!(!c.is_event_on("eventheatfont1", now));
+    let soon = now + Duration::from_millis(300);
+    c.use_done = Some((0, soon));
+    assert_eq!(c.grow_fetch(&line, soon), Some(true));
+    assert!(c.is_event_on("eventheatfont1", soon));
+    assert_eq!(c.autoplay.growth.fetching, None);
 }

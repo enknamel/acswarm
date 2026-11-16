@@ -719,7 +719,15 @@ impl Client {
         let far = ac_world::trip::Prefs::far();
         let from = ac_world::Place { at: me, cell };
         let goal = self.planning_place(goal);
-        let ways = self.standing_ways();
+        let mut ways = self.standing_ways();
+        // As if open, a portal only an event puts out: what to start first (`event_way`).
+        if flag_seconds.is_some() {
+            let shut = ac_world::portals::event_portals()
+                .iter()
+                .filter(|e| !ways.portals.iter().any(|p| p.to_cell == e.way.to_cell));
+            ways.portals
+                .extend(shut.map(|e| e.way.clone()).collect::<Vec<_>>());
+        }
         let plan = |p| {
             ac_world::trip::plan_with_ways(
                 from,

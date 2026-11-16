@@ -19,9 +19,20 @@ impl Client {
         if trip::building_cells_known() || self.travel_terrain().is_none() {
             return;
         }
+        // And where an NPC way or an event portal stands, leads, or is used first: Browerk's
+        // Portal Device stands indoors on Qin Xikit's Island, 660 m from the gate's exit.
+        let npcs = ac_world::portals::npc_ways().iter().flat_map(|w| {
+            let first = w.first.iter().map(|f| f.1.cell);
+            [w.cell, w.to_cell].into_iter().chain(first)
+        });
+        let events = ac_world::portals::event_portals()
+            .iter()
+            .flat_map(|e| [e.way.from_cell, e.way.to_cell]);
         let indoor: std::collections::BTreeSet<u32> = ac_world::portals::all()
             .iter()
             .flat_map(|p| [p.from_cell, p.to_cell])
+            .chain(npcs)
+            .chain(events)
             .filter(|c| c & 0xFFFF >= 0x100)
             .collect();
         let buildings = indoor
@@ -102,11 +113,30 @@ impl Client {
         let portals = self.world.objects.values().filter_map(|o| {
             let (cell, mouth) = (o.position?.cell, o.world_pos()?);
             let class = o.weenie_class_id;
+            if let Some(e) = ac_world::portals::event_portals()
+                .iter()
+                .find(|e| e.wcid == class)
+            {
+                return Some(ac_world::portals::Portal {
+                    from_cell: cell,
+                    from: mouth,
+                    ..e.way.clone()
+                });
+            }
             match summoned.iter().find(|s| s.wcid == class) {
                 Some(s) => Some(s.standing_at(cell, mouth)),
                 None => Some(ac_world::portals::spawned_of(class)?.standing_at(cell, mouth)),
             }
         });
+        // One whose event this character started stands where its generator puts it, out of
+        // view yet: the journey goes there (`forget_unseen_portals` lets a closed one go).
+        let now = std::time::Instant::now();
+        let opened: Vec<ac_world::portals::Portal> = ac_world::portals::event_portals()
+            .iter()
+            .filter(|e| self.is_event_on(&e.event, now) && !self.is_class_in_view(e.wcid))
+            .map(|e| e.way.clone())
+            .collect();
+        let portals = portals.chain(opened);
         let level = self.world.stats.level.max(1) as u32;
         let quests = &self.travel.quests_done;
         let npcs = ac_world::portals::npc_ways()
@@ -117,6 +147,14 @@ impl Client {
             portals: portals.collect(),
             npcs: npcs.cloned().collect(),
         }
+    }
+
+    /// Whether an object of class `wcid` stands in view (a portal a camp or an event put out).
+    pub(crate) fn is_class_in_view(&self, wcid: u32) -> bool {
+        let objects = self.world.objects.values();
+        objects
+            .filter(|o| o.weenie_class_id == wcid)
+            .any(|o| o.position.is_some())
     }
 
     /// What the trip planner may use, as one number: level, quest flags, the gems carried and

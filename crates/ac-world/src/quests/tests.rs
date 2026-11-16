@@ -510,3 +510,36 @@ fn an_item_a_spawned_objects_use_gives_has_that_object_for_its_source() {
     assert_eq!(rubble.event.as_deref(), Some("tombrubbleevent"));
     assert!(!rubble.places.is_empty());
 }
+
+#[test]
+fn the_font_guardian_starts_the_hidden_crowns_event_once_the_four_valves_have() {
+    let crown = crate::portals::event_portals()
+        .iter()
+        .find(|e| e.wcid == 29788)
+        .expect("Qin Xikit's Hidden Crown");
+    assert_eq!(
+        (
+            crown.way.to_cell >> 16,
+            crown.way.quest.as_str(),
+            crown.event.as_str()
+        ),
+        (0x00F2, "OnBrowerkQuest", "eventfontbrowerkstopgap")
+    );
+    let want = Want::Event(crown.event.clone());
+    let guardian = sources_of(&want).find(|s| s.kind == Yield::Start);
+    let guardian = guardian.expect("the Font Guardian starts it");
+    assert_eq!(guardian.wcid, 29730);
+    assert_eq!(
+        guardian.needs,
+        [
+            "eventheatfont1",
+            "eventheatfont2",
+            "eventheatfont3",
+            "eventheatfont4"
+        ]
+    );
+    assert_eq!(
+        guardian.event, None,
+        "the Font Guardian stands, not put out by an event"
+    );
+}
