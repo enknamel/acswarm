@@ -29,7 +29,8 @@ impl Client {
                 | object_desc_flags::CORPSE)
             != 0
             || o.item_type & item_type::CREATURE != 0;
-        let carried = me.is_some() && (o.container == me || o.wielder == me);
+        // In a side pack too: its container is the pack, not the character.
+        let carried = me.is_some() && (self.world.is_carried(guid) || o.wielder == me);
         let name = o.name.clone();
         let attackable = o.object_desc_flags & object_desc_flags::ATTACKABLE != 0
             && o.object_desc_flags & object_desc_flags::PLAYER == 0
