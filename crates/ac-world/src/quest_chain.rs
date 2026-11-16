@@ -193,8 +193,8 @@ fn surface_blocks() -> &'static BTreeSet<u32> {
     })
 }
 
-/// Whether `place` is in a dungeon nothing leads into: no portal, camp or summoned portal, gem,
-/// recall or NPC lands in its landblock (Master Yado's 0x018A, a developer's room).
+/// Whether `place` is in a dungeon nothing leads into: no portal, camp, event or summoned portal,
+/// gem, recall or NPC lands in its landblock (Master Yado's 0x018A, a developer's room).
 pub fn is_sealed(place: &Place) -> bool {
     let block = block_of(place.cell);
     if !place.is_indoors() || is_surface(block) || !ways_in(block).is_empty() {
@@ -208,7 +208,11 @@ pub fn is_sealed(place: &Place) -> bool {
         .iter()
         .any(|p| lands(p.way.to_cell));
     let npcs = crate::portals::npc_ways().iter().any(|n| lands(n.to_cell));
-    !(gems || recalls || summoned || spawned || npcs)
+    // Qin Xikit's Hidden Crown into 0x00F2, while the Font Guardian's event runs.
+    let events = crate::portals::event_portals()
+        .iter()
+        .any(|e| lands(e.way.to_cell));
+    !(gems || recalls || summoned || spawned || npcs || events)
 }
 
 fn is_surface(landblock: u32) -> bool {

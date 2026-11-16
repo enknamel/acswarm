@@ -5061,3 +5061,37 @@ fn a_sealed_valve_is_used_and_its_event_taken_for_on() {
     assert!(c.is_event_on("eventheatfont1", soon));
     assert_eq!(c.autoplay.growth.fetching, None);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_blood_puzzle_works_back_through_the_crown_the_flags_and_the_font_event() {
+    // Passed over with "Qin Xikit's Crown comes from Ensorcelled Dais: autoplay cannot fetch it
+    // yet": 0x00F2 was taken for sealed, its one way in the Hidden Crown an event puts out.
+    let mut c = mage_pursuing("bloodpuzzlecompleted", "chained-quests");
+    c.world.stats.level = 111;
+    let now = Instant::now();
+    let mut said = Vec::new();
+    for held in [
+        vec![],
+        vec!["RoadsJournal"],
+        vec!["RoadsJournal", "OnBrowerkQuest"],
+    ] {
+        c.travel.quests_done = held.iter().map(|h| h.to_string()).collect();
+        for _ in 0..2 {
+            said.push(again(&mut c, now).words(0));
+            let line = c.pursuit[0].clone();
+            c.grow_fetch(&line, now);
+        }
+    }
+    assert_eq!(
+        said,
+        [
+            "pick up Empty Water Skin in dungeon 0160",
+            "ask Ensorcelled Dais for it in dungeon 00F2",
+            "ask Ensorcelled Dais for it in dungeon 00F2",
+            "hand it in to Watcher of the Dead",
+            "ask Ensorcelled Dais for it in dungeon 00F2",
+            "use the Sealed Valve in Balmy Font to start eventheatfont1",
+        ]
+    );
+}
