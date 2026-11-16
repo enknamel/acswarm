@@ -145,3 +145,29 @@ fn whatever_the_server_has_no_such_object_of_is_forgotten() {
         "one the server has stays"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_pickup_while_flying_lands_first() {
+    // Blargerton hovered 0.7 m over the Empty Water Skin with flying left on: the server's walk to
+    // it never arrived and all three pickups were cancelled (0x36).
+    let mut c = crate::testkit::standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    let skin = ac_world::WorldObject {
+        guid: 0x8000_0101,
+        name: "Empty Water Skin".into(),
+        position: Some(ac_world::Position::new_flat(
+            0xA9B4_0019,
+            glam::Vec3::new(85.0, 7.1, 94.0),
+        )),
+        ..Default::default()
+    };
+    c.world.objects.insert(skin.guid, skin);
+    c.player.as_mut().unwrap().noclip = true;
+    assert!(c.pick_up(0x8000_0101));
+    assert!(!c.noclip(), "still flying");
+    // Double-clicked by hand, the same.
+    c.player.as_mut().unwrap().noclip = true;
+    c.interact(0x8000_0101);
+    assert!(!c.noclip(), "still flying");
+}

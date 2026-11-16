@@ -166,6 +166,14 @@ impl Client {
         true
     }
 
+    /// Down from flying before a pickup, whoever turned it on: hovering, the server's walk to the
+    /// item never arrives and the pickup is cancelled, 0x36 (a_pickup_while_flying_lands_first).
+    pub(crate) fn land_to_pick_up(&mut self, name: &str) {
+        if self.noclip() && self.set_noclip(false) {
+            tracing::info!("landing to pick up {name}");
+        }
+    }
+
     /// Pick a loose item up into the pack (PutItemInContainer, naming
     /// the pack with room: the main pack while it has a slot, else the
     /// roomiest side pack, since the server puts a thing into the pack
@@ -184,7 +192,9 @@ impl Client {
         if stuck || o.position.is_none() || o.container.is_some() || o.wielder.is_some() {
             return false;
         }
-        tracing::info!("pick up {} ({guid:#010x})", o.name);
+        let name = o.name.clone();
+        self.land_to_pick_up(&name);
+        tracing::info!("pick up {name} ({guid:#010x})");
         self.last_used = Some(guid);
         // The same choice a take makes, less the pour (see
         // `Client::where_to_pick_up`). With no room anywhere the main

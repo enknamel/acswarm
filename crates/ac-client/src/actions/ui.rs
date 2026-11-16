@@ -90,6 +90,7 @@ impl Client {
             // Double-click on a loose item picks it up, as retail did; the
             // "use selected" key (`use_object`) reads or activates it in
             // place instead.
+            self.land_to_pick_up(&name);
             tracing::info!("pick up {name} ({guid:#010x})");
             self.last_used = Some(guid);
             w.u32(guid).u32(me.unwrap_or(0)).u32(0);
