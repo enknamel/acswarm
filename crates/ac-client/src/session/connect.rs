@@ -146,6 +146,7 @@ impl Client {
             ledger_loaded: false,
             log_off_sent: None,
             logged_off: false,
+            quit_after_log_off: false,
             require_components: false,
             attack_target: None,
             attack_pending: false,

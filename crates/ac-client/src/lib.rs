@@ -310,6 +310,8 @@ pub struct Client {
     /// has said it has (see [`Client::log_off`]).
     log_off_sent: Option<Instant>,
     logged_off: bool,
+    /// Disconnect, never to come back, once the server has logged the character off (the death limit).
+    quit_after_log_off: bool,
     /// Refuse to cast when components of the current formula are missing
     /// (`CastCheck::MissingComponents`). Off by default: the server
     /// decides whether components are required (`require_spell_comps`),

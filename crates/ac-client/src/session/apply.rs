@@ -41,6 +41,8 @@ impl Client {
         // Not on the way out: the thing this is defending against is a
         // client that does not get a way out.
         self.save_ledger();
+        self.save_bodies();
+        self.tick_death_quit(now);
     }
 
     /// Read back what this character kept between sessions, once its name is known: the ledger,
@@ -52,6 +54,7 @@ impl Client {
         self.load_quest_flags();
         self.load_quest_log();
         self.load_proven_tier();
+        self.load_bodies();
     }
 
     /// Pump the network, apply the server's messages, run the gameplay

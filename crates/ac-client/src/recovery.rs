@@ -1,8 +1,8 @@
 //! Coming back from a death (at the lifestone, buffs purged, vitae, gear on the corpse): first
 //! after "survive", it waits out the respawn, rebuffs, walks to the corpse, empties it, rewields
 //! and hands back. [`Recovery`] decides from a [`View`], one [`Action`] a tick, no client state.
-//! Given up: a corpse not reached in `Survive::corpse_minutes`, or one that killed again. Vitae
-//! (worn off by experience) is not waited out: past `Survive::vitae_above`, see [`Client::shy_of`].
+//! Given up: a corpse not reached in `Survive::corpse_minutes`, or one that killed again. Every
+//! body is kept ([`Body`], saved) and gone back for in turn till it rots; too many deaths log off.
 
 use std::time::{Duration, Instant};
 
@@ -13,6 +13,9 @@ use crate::body::server_walk::reached;
 use crate::did::Did;
 use crate::{Client, Goal};
 use ac_world::Place;
+use serde::{Deserialize, Serialize};
+
+mod bodies;
 
 /// A lifestone further than this from the death spot means the
 /// teleport has happened.
@@ -44,6 +47,34 @@ const WIELD_EVERY: Duration = Duration::from_millis(1000);
 /// The server's word that nothing was dropped counts for a death within
 /// this long of it.
 const RETAINED_FOR: Duration = Duration::from_secs(30);
+/// Our corpses within this of a body's spot, metres on the flat, are that spot's (deaths pile up).
+const ONE_SPOT: f32 = 30.0;
+
+/// A body of ours left in the world, gone back for until emptied, given up or rotted.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Body {
+    /// Where it fell, world metres.
+    pub at: [f32; 3],
+    /// The cell it fell in.
+    pub cell: u32,
+    /// Unix seconds it rots: max(1 h, level x 5 min) after the death (`Corpse.cs:110`).
+    pub rots: u64,
+}
+
+impl Body {
+    pub fn place(&self) -> Place {
+        Place {
+            at: Vec3::from(self.at),
+            cell: self.cell,
+        }
+    }
+
+    /// Whether it lies at `spot`: the same landblock, within [`ONE_SPOT`] on the flat.
+    fn is_at(&self, spot: Place) -> bool {
+        let p = self.place();
+        p.cell >> 16 == spot.cell >> 16 && p.at.truncate().distance(spot.at.truncate()) <= ONE_SPOT
+    }
+}
 
 /// Where the recovery has got to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -93,6 +124,14 @@ pub struct View {
     pub traveling: bool,
     /// The slot follows the recovery's own walk (`Client::go`): it is asked for again each tick.
     pub walking: bool,
+    /// Unix seconds now, for the bodies' rot.
+    pub wall: u64,
+    /// Seconds a body of ours lasts before ACE rots it.
+    pub rot_secs: u64,
+    /// A buff is down that could go up here: nobody sets off without it.
+    pub unbuffed: bool,
+    /// Log off at this many deaths within this long; `None` for no limit.
+    pub death_limit: Option<(u32, Duration)>,
     /// The container open right now, if any.
     pub open: Option<u32>,
     /// The loot rules have our corpse in hand, opening or emptying it.
@@ -133,6 +172,8 @@ pub enum Action {
     Wield(u32),
     /// Done: hand back to the rules, resuming this journey if any.
     Finish { trip: Option<Goal> },
+    /// Too many deaths in too short a time: log the character off where it landed.
+    LogOff { deaths: u32 },
 }
 
 /// The recovery in progress.
@@ -168,6 +209,12 @@ pub struct Recovery {
     abandoned: bool,
     /// When the server said nothing was dropped (see [`Recovery::heard`]).
     retained_at: Option<Instant>,
+    /// Every body of ours still to go back for, oldest first.
+    pub bodies: Vec<Body>,
+    /// The bodies changed since last written out.
+    pub bodies_changed: bool,
+    /// When each recent death fell, for the death limit.
+    deaths_at: Vec<Instant>,
 }
 
 impl Default for Recovery {
@@ -188,6 +235,9 @@ impl Default for Recovery {
             last_wield: None,
             abandoned: false,
             retained_at: None,
+            bodies: Vec::new(),
+            bodies_changed: false,
+            deaths_at: Vec::new(),
         }
     }
 }
@@ -276,15 +326,75 @@ impl Recovery {
         self.buffs_done = false;
         self.last_open = None;
         self.started = None;
+        self.bodies.push(Body {
+            at: v.place.at.into(),
+            cell: v.place.cell,
+            rots: v.wall + v.rot_secs,
+        });
+        self.bodies_changed = true;
+        self.deaths_at.push(v.now);
         self.go(Phase::Dead, v.now);
     }
 
-    fn finish(&mut self, now: Instant) -> Action {
+    /// Deaths within the limit's window that reach its count, if a limit is set.
+    fn is_over_death_limit(&mut self, v: &View) -> Option<u32> {
+        let (most, within) = v.death_limit?;
+        self.deaths_at
+            .retain(|t| v.now.duration_since(*t) <= within);
+        let n = self.deaths_at.len() as u32;
+        (most > 0 && n >= most).then_some(n)
+    }
+
+    /// Let go of the bodies at the spot gone back for: emptied, gone, or out of reach.
+    fn forget_bodies_here(&mut self) {
+        let Some(spot) = self.death else {
+            return;
+        };
+        let before = self.bodies.len();
+        self.bodies.retain(|b| !b.is_at(spot));
+        if self.bodies.len() != before {
+            self.bodies_changed = true;
+        }
+    }
+
+    /// The next body to go back for once alive and not recovering: the nearest not rotted.
+    fn next_body(&mut self, v: &View) -> Option<Place> {
+        let before = self.bodies.len();
+        self.bodies.retain(|b| b.rots > v.wall);
+        if self.bodies.len() != before {
+            self.bodies_changed = true;
+        }
+        let here = v.place;
+        self.bodies.iter().map(Body::place).min_by(|a, b| {
+            let d = |p: &Place| {
+                let other = u32::from(p.cell >> 16 != here.cell >> 16);
+                (other, p.at.distance(here.at))
+            };
+            let (ka, kb) = (d(a), d(b));
+            ka.0.cmp(&kb.0).then(ka.1.total_cmp(&kb.1))
+        })
+    }
+
+    /// Done with this spot, its bodies let go of when `here_done`; the rest are kept for later.
+    fn finish_spot(&mut self, now: Instant, here_done: bool) -> Action {
+        if here_done {
+            self.forget_bodies_here();
+        }
         let trip = self.trip.take();
+        let bodies = std::mem::take(&mut self.bodies);
+        let deaths_at = std::mem::take(&mut self.deaths_at);
+        let changed = self.bodies_changed;
         *self = Recovery::default();
+        self.bodies = bodies;
+        self.deaths_at = deaths_at;
+        self.bodies_changed = changed;
         self.since = now;
-        tracing::info!("recovery: done");
+        tracing::info!("recovery: done ({} body(ies) still out)", self.bodies.len());
         Action::Finish { trip }
+    }
+
+    fn finish(&mut self, now: Instant) -> Action {
+        self.finish_spot(now, true)
     }
 
     /// Decide what to do this tick.
@@ -299,10 +409,28 @@ impl Recovery {
             && self.retained(now)
         {
             tracing::info!("recovery: nothing was dropped; no corpse to go back for");
-            return self.finish(now);
+            // ACE leaves no corpse for a death that dropped nothing (Player_Death.cs:409).
+            self.bodies.pop();
+            self.bodies_changed = true;
+            return self.finish_spot(now, false);
         }
         match self.phase {
-            Phase::None => Action::Nothing,
+            Phase::None => {
+                if v.dead || !v.recover {
+                    return Action::Nothing;
+                }
+                let Some(body) = self.next_body(v) else {
+                    return Action::Nothing;
+                };
+                tracing::info!("recovery: a body still out at {body:?}; going back for it");
+                self.death = Some(body);
+                self.trip = v.trip;
+                self.wielded.clear();
+                self.abandoned = false;
+                self.buffs_done = false;
+                self.go(Phase::Rebuff, now);
+                Action::Buff
+            }
             Phase::Dead => {
                 if v.dead {
                     self.alive_since = None;
@@ -322,7 +450,13 @@ impl Recovery {
                 if now.duration_since(self.since) < LANDED_SETTLE {
                     return Action::Wait;
                 }
-                if !v.recover || self.abandoned || self.death.is_none() {
+                if let Some(deaths) = self.is_over_death_limit(v) {
+                    return Action::LogOff { deaths };
+                }
+                if !v.recover {
+                    return self.finish_spot(now, false);
+                }
+                if self.abandoned || self.death.is_none() {
                     return self.finish(now);
                 }
                 self.buffs_done = false;
@@ -330,7 +464,11 @@ impl Recovery {
                 Action::Buff
             }
             Phase::Rebuff => {
-                if self.buffs_done || now.duration_since(self.since) >= REBUFF_CAP {
+                // Never off with a buff down that could go up, the player's rule; the long cap is
+                // for one that never takes (never_left_with_a_buff_down).
+                let capped = now.duration_since(self.since) >= REBUFF_CAP;
+                let buffed = !v.unbuffed || now.duration_since(self.since) >= REBUFF_CAP * 3;
+                if (self.buffs_done || capped) && buffed {
                     self.started = Some(now);
                     self.go(Phase::Returning, now);
                     return self.step_returning(v);
@@ -485,8 +623,8 @@ impl Client {
         killer.is_some_and(|k| k.eq_ignore_ascii_case(&o.name))
     }
 
-    /// Our own corpse in view, nearest the death spot: its guid and how
-    /// far off it is from where we stand, height and all (a floor below is not beside us).
+    /// Our own corpse in view, nearest the death spot and within [`ONE_SPOT`] of it, not yet emptied:
+    /// its guid and how far off it is from where we stand, height and all (a floor below is not beside us).
     fn own_corpse(&self, me: Vec3, spot: Option<Vec2>) -> Option<(u32, f32)> {
         let name = self.world.stats.name.to_lowercase();
         if name.is_empty() {
@@ -498,11 +636,12 @@ impl Client {
             .values()
             .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
             .filter(|o| o.name.to_lowercase() == want)
+            .filter(|o| !self.autoplay.looted.contains(&o.guid))
             .filter_map(|o| {
                 let p = o.world_pos()?;
                 let xy = Vec2::new(p.x, p.y);
                 let from_spot = spot.map_or(0.0, |s| s.distance(xy));
-                Some((from_spot, o.guid, p.distance(me)))
+                (from_spot <= ONE_SPOT).then_some((from_spot, o.guid, p.distance(me)))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, g, d)| (g, d))
@@ -561,6 +700,13 @@ impl Client {
             fighting,
             recover: cfg.recover_corpse,
             limit: Duration::from_secs_f32(cfg.corpse_minutes.max(0.0) * 60.0),
+            wall: bodies::unix_now(),
+            rot_secs: bodies::rot_secs(self.world.stats.level),
+            unbuffed: self.buff_down(now).is_some(),
+            death_limit: (cfg.death_limit > 0).then(|| {
+                let mins = cfg.death_limit_minutes.max(0.0);
+                (cfg.death_limit, Duration::from_secs_f32(mins * 60.0))
+            }),
         })
     }
 
@@ -639,6 +785,11 @@ impl Client {
                 true
             }
             Action::Travel(death) => {
+                // A buff gone down on the way goes back up first: this reflex runs ahead of
+                // the urgent pass, which would otherwise never get the tick.
+                if self.buff_down(now).is_some() && self.autoplay_buff(now, true) {
+                    return true;
+                }
                 let s = status(self);
                 self.autoplay.say(Doing::Recovering, s);
                 if self.combat {
@@ -691,6 +842,10 @@ impl Client {
                 self.autoplay
                     .say(Doing::Recovering, format!("wielding {name} again"));
                 self.wield_guid(guid);
+                true
+            }
+            Action::LogOff { deaths } => {
+                self.log_off_for_deaths(deaths, now);
                 true
             }
             Action::Finish { trip } => {
@@ -782,6 +937,10 @@ mod tests {
             fighting: Some("Drudge Slinker".into()),
             recover: true,
             limit: Duration::from_secs(600),
+            wall: 1_000_000,
+            rot_secs: 36_000,
+            unbuffed: false,
+            death_limit: None,
         }
     }
 
@@ -1213,6 +1372,116 @@ mod tests {
             c.tick_player(crate::player::Input::default(), dt, now);
         }
         panic!("never opened: {}", c.autoplay.status);
+    }
+
+    #[test]
+    fn every_body_is_gone_back_for_in_turn() {
+        // Killed at the spot, then again far off on the way back: both bodies are kept, the
+        // newer gone back for first, then the older.
+        let t0 = Instant::now();
+        let mut r = Recovery::default();
+        let mut v = die_and_land(&mut r, t0);
+        r.step(&v);
+        r.buffs_done();
+        v.dead = true;
+        v.place = Place::on_map(Vec2::new(3000.0, 3000.0));
+        v.now = after(t0, 20.0);
+        r.step(&v);
+        assert_eq!(r.bodies.len(), 2);
+        v.dead = false;
+        v.place = Place::on_map(Vec2::new(1400.0, 1300.0));
+        v.now = after(t0, 25.0);
+        r.step(&v);
+        v.now = after(t0, 30.0);
+        r.step(&v);
+        r.buffs_done();
+        v.now = after(t0, 31.0);
+        let far = Place::on_map(Vec2::new(3000.0, 3000.0));
+        assert_eq!(r.step(&v), Action::Travel(far));
+        // There, nothing in view: that spot is done with, the other still out.
+        v.place = far;
+        v.now = after(t0, 40.0);
+        r.step(&v);
+        v.now = after(t0, 60.0);
+        assert!(matches!(r.step(&v), Action::Finish { .. }));
+        assert_eq!(r.bodies.len(), 1);
+        assert!(r.bodies_changed, "written out");
+        // Straight on to the older one, buffs first.
+        v.now = after(t0, 61.0);
+        assert_eq!(r.step(&v), Action::Buff);
+        r.buffs_done();
+        v.now = after(t0, 62.0);
+        let first = Place::on_map(Vec2::new(1000.0, 1000.0));
+        assert_eq!(r.step(&v), Action::Travel(first));
+    }
+
+    #[test]
+    fn a_rotted_body_is_not_gone_back_for() {
+        let t0 = Instant::now();
+        let mut r = Recovery::default();
+        let v = view(t0);
+        r.bodies.push(Body {
+            at: [1000.0, 1000.0, 0.0],
+            cell: 0,
+            rots: v.wall,
+        });
+        assert_eq!(r.step(&v), Action::Nothing);
+        assert!(r.bodies.is_empty());
+    }
+
+    #[test]
+    fn a_death_that_dropped_nothing_leaves_no_body() {
+        let t0 = Instant::now();
+        let mut r = Recovery::default();
+        let v = die_and_land(&mut r, t0);
+        r.heard(
+            "You have retained all your items. You do not need to recover your corpse!",
+            t0,
+        );
+        assert!(matches!(r.step(&v), Action::Finish { .. }));
+        assert!(r.bodies.is_empty());
+    }
+
+    #[test]
+    fn the_death_limit_logs_off_at_the_lifestone() {
+        let t0 = Instant::now();
+        let mut r = Recovery::default();
+        let mut v = view(t0);
+        v.death_limit = Some((3, Duration::from_secs(3600)));
+        for n in 0..3u32 {
+            let at = after(t0, n as f32 * 100.0);
+            v.dead = true;
+            v.place = Place::on_map(Vec2::new(1000.0, 1000.0));
+            v.now = at;
+            r.step(&v);
+            v.dead = false;
+            v.place = Place::on_map(Vec2::new(1400.0, 1300.0));
+            v.now = at + Duration::from_secs(5);
+            r.step(&v);
+            v.now = at + Duration::from_secs(9);
+            let act = r.step(&v);
+            if n < 2 {
+                assert_eq!(act, Action::Buff, "death {}", n + 1);
+            } else {
+                assert_eq!(act, Action::LogOff { deaths: 3 });
+            }
+        }
+        assert_eq!(r.bodies.len(), 3, "kept for next time");
+    }
+
+    #[test]
+    fn never_left_with_a_buff_down() {
+        let t0 = Instant::now();
+        let mut r = Recovery::default();
+        let mut v = die_and_land(&mut r, t0);
+        v.unbuffed = true;
+        r.step(&v);
+        r.buffs_done();
+        v.now = after(t0, 9.0) + REBUFF_CAP;
+        assert_eq!(r.step(&v), Action::Buff, "a buff still down");
+        v.unbuffed = false;
+        v.now += Duration::from_secs(1);
+        assert!(matches!(r.step(&v), Action::Travel(_)));
     }
 
     #[test]

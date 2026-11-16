@@ -102,7 +102,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | visits | `visit_landmark`, `tick_visit`, `visit_person` | `visit.rs` | `Client.visits` | visit | visit | visit |
 | dungeon explore | `autoplay_explore`, `spot_in_room`, `past_the_door` | `explore.rs`, `crates/ac-nav/src/explore.rs` | `Autoplay.room_bound`, `Autoplay.rooms_seen` | explore | explore | explore |
 | dodge | `autoplay_dodge`, `autoplay_approach`, `sidestep`, `threat` | `dodge.rs`, `aim.rs`, `doorway.rs` | `Client.dodge`, `Client.dodge_to` | dodge | dodge | dodge |
-| recovery | `autoplay_recover`, `recovery_view`, `is_dead` | `recovery.rs` | `Autoplay.recovery` | recovery:: | recovery | recovery |
+| recovery | `autoplay_recover`, `recovery_view`, `is_dead`, `load_bodies`, `log_off_for_deaths` | `recovery.rs`, `recovery/bodies.rs` | `Autoplay.recovery` (`Recovery.bodies`) | recovery:: | recovery | recovery |
 | academy | `autoplay_academy` | `academy.rs`, `tests/academy_route.rs` | `Autoplay.academy`, `Autoplay.academy_corpse`, `Autoplay.academy_armed` | academy | academy | academy |
 | summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `autoplay_refill_essences`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |

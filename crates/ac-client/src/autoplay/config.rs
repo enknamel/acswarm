@@ -30,6 +30,10 @@ pub struct Survive {
     /// Step out of the way of spells flying at us instead of standing
     /// in them (see `crate::dodge`).
     pub dodge: bool,
+    /// Log off at this many deaths within `death_limit_minutes`, back at the lifestone; 0 for no limit.
+    pub death_limit: u32,
+    /// The window the death limit counts in, minutes.
+    pub death_limit_minutes: f32,
 }
 
 impl Default for Survive {
@@ -44,6 +48,8 @@ impl Default for Survive {
             vitae_wait: true,
             vitae_above: 0.25,
             dodge: true,
+            death_limit: 3,
+            death_limit_minutes: 60.0,
         }
     }
 }
