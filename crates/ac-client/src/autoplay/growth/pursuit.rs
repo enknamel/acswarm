@@ -21,6 +21,7 @@ use crate::Client;
 pub(crate) mod arena;
 mod events;
 mod fetch;
+mod field;
 mod flag_way;
 mod gem_way;
 mod item_goal;
@@ -31,6 +32,7 @@ mod section;
 mod step_words;
 mod sweep;
 pub(crate) use fetch::Fetching;
+pub(crate) use field::Using;
 pub(crate) use gem_way::GemWanted;
 pub(crate) use portal_way::PortalWanted;
 
@@ -104,6 +106,8 @@ pub enum PursuitStep {
     },
     /// Hand in to `row`'s giver at `at`.
     HandIn { row: &'static Row, at: Place },
+    /// Stand in `row`'s giver, an object at `at`, its `clears` dead, and use the item (`field`).
+    UseHere { row: &'static Row, at: Place },
     /// Walk to the portal `name` (weenie class `wcid`) at `at` and go through it: that stamps
     /// `flag` (its Portal emote set, Portal.cs:287).
     GoThrough {
@@ -436,6 +440,10 @@ impl Ask<'_> {
     /// One board line's step towards `end`, and its grounds when it is a hunt.
     fn step_of(&self, line: &QuestLine, end: &QuestEnd) -> (PursuitStep, Option<Hunting>) {
         let level = self.facts.level;
+        let ready = line.state == QuestState::Ready;
+        if let Some(used) = ready.then(|| self.use_step(line)).flatten() {
+            return used;
+        }
         let step = match &line.state {
             QuestState::Off => stuck("switched off".to_string()),
             QuestState::Done => PursuitStep::Finished,
@@ -1333,6 +1341,7 @@ impl Client {
             | PursuitStep::AskFor { .. }
             | PursuitStep::GiveTo { .. }
             | PursuitStep::Combine { .. } => self.grow_fetch(&line, now),
+            PursuitStep::UseHere { .. } => self.grow_field(&line, now),
             PursuitStep::GoThrough { .. } | PursuitStep::Arena { .. } => {
                 self.grow_arena(&line, now)
             }

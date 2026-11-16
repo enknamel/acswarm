@@ -402,6 +402,10 @@ pub(crate) fn step_words(step: &PursuitStep, now: u64, place: &dyn Fn(u32) -> St
         PursuitStep::HandIn { row, at } => {
             format!("handing it in to {} at {}", row.giver, place(at.cell))
         }
+        PursuitStep::UseHere { row, at } => {
+            let item = row.item.as_ref().map_or("it", |i| i.name);
+            format!("using {item} in {} at {}", row.giver, place(at.cell))
+        }
         PursuitStep::Read { name, .. } => format!("reading {name}"),
         PursuitStep::GoThrough { name, at, flag, .. } => {
             format!(

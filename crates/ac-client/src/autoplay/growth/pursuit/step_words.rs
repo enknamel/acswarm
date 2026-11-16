@@ -1,7 +1,7 @@
 //! What a pursued quest's step is about: the landblock a fetch works in, whether autoplay can act
 //! on it now, and the step in words.
 
-use super::{events, PursuitStep};
+use super::{events, field, PursuitStep};
 
 impl PursuitStep {
     /// The landblock of the thing this step fetches from where it lies: an item, chest or NPC.
@@ -11,7 +11,8 @@ impl PursuitStep {
             | PursuitStep::OpenChest { at, .. }
             | PursuitStep::UseOn { at, .. }
             | PursuitStep::AskFor { at, .. }
-            | PursuitStep::GiveTo { at, .. } => Some(at.cell >> 16),
+            | PursuitStep::GiveTo { at, .. }
+            | PursuitStep::UseHere { at, .. } => Some(at.cell >> 16),
             _ => None,
         }
     }
@@ -31,6 +32,7 @@ impl PursuitStep {
                 | PursuitStep::GiveTo { .. }
                 | PursuitStep::Combine { .. }
                 | PursuitStep::HandIn { .. }
+                | PursuitStep::UseHere { .. }
                 | PursuitStep::Read { .. }
                 | PursuitStep::GoThrough { .. }
                 | PursuitStep::Arena { .. }
@@ -90,6 +92,7 @@ impl PursuitStep {
                 )
             }
             PursuitStep::HandIn { row, .. } => format!("hand it in to {}", row.giver),
+            PursuitStep::UseHere { row, .. } => field::use_words(row),
             PursuitStep::GoThrough { name, at, flag, .. } => {
                 let place = ac_world::quest_chain::place_name(at.cell);
                 format!("go through {name} in {place} for the {flag} flag")

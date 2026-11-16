@@ -5167,3 +5167,149 @@ fn the_sarcophagus_past_the_temple_is_worked_towards() {
         step.words(0)
     );
 }
+
+const ALIGNED_STONE: u32 = 42710;
+const SHIVERING_WISP: u32 = 42670;
+
+#[test]
+fn the_aetheria_upper_centre_asks_cypher_for_the_stone_then_works_its_four_sides_first() {
+    let centre = "efulcentermanafieldused";
+    let mut f = facts(100, &[(centre, false)]);
+    let p = work(&f, &ChainData, None);
+    let ids: Vec<&str> = p.lines.iter().map(|l| l.id.as_str()).collect();
+    assert_eq!(ids.last(), Some(&centre), "{p:?}");
+    assert_eq!(ids.len(), 5, "the four sides first: {ids:?}");
+    // No stone: Cypher the Apprentice hands one out on a use.
+    assert!(
+        matches!(&p.lines[0].step, PursuitStep::AskFor { source, .. } if source.wcid == 42716),
+        "{p:?}"
+    );
+    // The stone carried: the first side is stood in, its wisps preferred by the fight.
+    f.carried.insert(ALIGNED_STONE, 1);
+    let p = work(&f, &ChainData, None);
+    let first = &p.lines[0];
+    assert!(
+        first.working && first.via.as_deref() == Some(centre),
+        "{p:?}"
+    );
+    assert!(
+        matches!(first.step, PursuitStep::UseHere { row, .. } if row.id == first.id),
+        "{p:?}"
+    );
+    assert_eq!(p.sought, [SHIVERING_WISP]);
+    assert!(first
+        .step
+        .words(NOW)
+        .starts_with("kill 4 Shivering Crystalline Wisp, then use"));
+    // Its four sides held: the centre is next, nothing to kill there.
+    for side in ["north", "south", "east", "west"] {
+        f.held.push(format!("eful{side}manafieldused"));
+    }
+    let p = work(&f, &ChainData, None);
+    let working: Vec<_> = steps(&p).into_iter().filter(|s| s.2).collect();
+    assert!(
+        matches!(working[..], [(id, PursuitStep::UseHere { .. }, true)] if id == centre),
+        "{p:?}"
+    );
+    assert!(p.sought.is_empty());
+}
+
+#[test]
+fn the_aetheria_middle_centre_chains_through_the_upper_floor_by_the_bitfield() {
+    let middle = "efmlcentermanafieldused";
+    let mut f = facts(160, &[(middle, false)]);
+    f.carried.insert(ALIGNED_STONE, 1);
+    let p = work(&f, &ChainData, None);
+    let ids: Vec<&str> = p.lines.iter().map(|l| l.id.as_str()).collect();
+    // The floor above comes first: its centre sets AetheriaBitfield to the 1 this one asks.
+    let upper = ids.iter().position(|i| *i == "efulcentermanafieldused");
+    let side = ids.iter().position(|i| *i == "efmlnorthmanafieldused");
+    assert!(
+        upper.is_some_and(|u| side.is_some_and(|s| u < s)),
+        "{ids:?}"
+    );
+    assert_eq!(
+        p.lines.iter().find(|l| l.working).map(|l| l.id.as_str()),
+        Some(ids[0])
+    );
+    assert!(ids[0].starts_with("eful"), "{ids:?}");
+    // The bitfield at 1: the upper floor is not worked first any more.
+    f.ints.insert(322, 1);
+    let p = work(&f, &ChainData, None);
+    assert!(p.lines.iter().all(|l| !l.id.starts_with("eful")), "{p:?}");
+}
+
+/// Standing in the upper north field with the stone carried, its step working.
+fn in_the_north_field() -> (Client, PursuitLine) {
+    let row = ac_world::quests::rows_of("efulnorthmanafieldused")
+        .next()
+        .unwrap();
+    let at = row.places[0];
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 100);
+    crate::testkit::with_a_pack(&mut c, 50);
+    crate::testkit::stand(&mut c, at.cell, at.at - ac_world::landblock_origin(at.cell));
+    carrying(&mut c, STONE, ALIGNED_STONE, "Aligned Mana Stone");
+    let line = PursuitLine {
+        id: row.id.into(),
+        title: row.title.into(),
+        step: PursuitStep::UseHere { row, at },
+        working: true,
+        via: None,
+    };
+    c.pursuit = vec![line.clone()];
+    (c, line)
+}
+
+#[test]
+fn in_a_field_its_wisps_are_left_to_the_fight_then_the_stone_is_used_and_the_log_asked() {
+    let (mut c, line) = in_the_north_field();
+    let PursuitStep::UseHere { at, .. } = line.step else {
+        unreachable!()
+    };
+    const WISP: u32 = 0x7AB0_2000;
+    let wisp = ac_world::WorldObject {
+        weenie_class_id: SHIVERING_WISP,
+        position: crate::testkit::placed(at.cell, at.at + Vec3::new(2.0, 0.0, 0.0)),
+        ..crate::testkit::creature(WISP, "Shivering Crystalline Wisp")
+    };
+    c.world.objects.insert(WISP, wisp);
+    let now = Instant::now();
+    assert_eq!(c.grow_field(&line, now), Some(true));
+    assert_eq!(c.last_used, None, "used with a wisp alive");
+    assert!(
+        c.autoplay.status.contains("1 to kill"),
+        "{}",
+        c.autoplay.status
+    );
+    // The wisp dead: a look round first, then the stone is used where the body stands.
+    c.world.objects.remove(&WISP);
+    assert_eq!(c.grow_field(&line, now), Some(true));
+    assert_eq!(c.last_used, None, "used before a look round");
+    let t1 = now + Duration::from_secs(2);
+    assert_eq!(c.grow_field(&line, t1), Some(true));
+    assert_eq!(c.last_used, Some(STONE));
+    // Its answer is the server's quest log, asked once the field's emotes have run.
+    c.last_used = None;
+    c.server_quests_due = false;
+    assert_eq!(c.grow_field(&line, t1 + Duration::from_secs(1)), Some(true));
+    assert!(!c.server_quests_due && c.last_used.is_none());
+    assert_eq!(c.grow_field(&line, t1 + Duration::from_secs(3)), Some(true));
+    assert!(c.server_quests_due, "the quest log is asked");
+}
+
+#[test]
+fn a_field_silent_to_the_stone_is_used_again_then_passed_over() {
+    let (mut c, line) = in_the_north_field();
+    let mut t = Instant::now();
+    c.grow_field(&line, t);
+    for tries in 1..=3 {
+        t += Duration::from_secs(12);
+        c.last_used = None;
+        assert_eq!(c.grow_field(&line, t), Some(true), "try {tries}");
+        assert_eq!(c.last_used, Some(STONE), "try {tries}");
+    }
+    t += Duration::from_secs(12);
+    assert_eq!(c.grow_field(&line, t), Some(false));
+    assert!(c.autoplay.growth.pursuit_held.contains_key(&line.id));
+    assert_eq!(c.autoplay.growth.using, None);
+}

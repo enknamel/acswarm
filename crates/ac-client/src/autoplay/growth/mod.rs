@@ -304,6 +304,8 @@ pub struct State {
     pub(crate) floor_left: Vec<u32>,
     /// The sought creature a journey was set off to (`Client::chase_in_sight`), by guid.
     pub(crate) chased: Option<u32>,
+    /// The pursued field stood in, for a stone used in it, and the uses sent (`pursuit::field`).
+    pub(crate) using: Option<pursuit::Using>,
 }
 
 /// A few names, and how many more there are. A caster short of every
