@@ -2477,6 +2477,87 @@ mod tests {
     }
 
     #[test]
+    fn an_epic_off_weapons_and_a_list_of_classes_left_out_decide_as_written() {
+        let profile = Profile {
+            name: "epics".into(),
+            rules: vec![
+                rule(
+                    "no trophies",
+                    LootAction::Skip,
+                    vec![Ask::Search("wcid=1001|1002".into())],
+                ),
+                rule(
+                    "epic gear",
+                    LootAction::Keep,
+                    vec![Ask::Search("tier:epic not type:weapon".into())],
+                ),
+                rule(
+                    "other classes",
+                    LootAction::Sell,
+                    vec![Ask::Search("wcid!=1003|1004".into())],
+                ),
+            ],
+            ..Default::default()
+        };
+        let me = me(50, &[]);
+        let epic = |name: &str, kind: u32, wcid: u32| ItemStats {
+            wcid,
+            appraised: true,
+            spells: vec!["Epic Strength".into()],
+            ..item(name, kind, 500)
+        };
+        let keep = Verdict::Decided(LootAction::Keep, "epic gear".into());
+        let sell = Verdict::Decided(LootAction::Sell, "other classes".into());
+        let ring = epic("Ring", item_type::JEWELRY, 1003);
+        assert_eq!(profile.judge_test(&ring, &me, "Aldric", 0), keep);
+        // A melee weapon is a weapon by kind; anything else appraised with damage is one too.
+        let sword = epic("Sword", item_type::MELEE_WEAPON, 1003);
+        assert_eq!(profile.judge_test(&sword, &me, "Aldric", 0), Verdict::None);
+        let darts = ItemStats {
+            damage_high: 30,
+            ..epic("Darts", item_type::MISSILE_WEAPON, 1003)
+        };
+        assert_eq!(profile.judge_test(&darts, &me, "Aldric", 0), Verdict::None);
+        // A wand's appraisal carries no weapon profile (ACE AppraiseInfo.cs:675): not `type:weapon`.
+        let wand = epic("Wand", item_type::CASTER, 1003);
+        assert_eq!(profile.judge_test(&wand, &me, "Aldric", 0), keep);
+        // A list ahead of the epic rule, and the `!=` list after it.
+        let trophy = epic("Trophy", item_type::JEWELRY, 1002);
+        assert_eq!(
+            profile.judge_test(&trophy, &me, "Aldric", 0),
+            Verdict::Decided(LootAction::Skip, "no trophies".into())
+        );
+        let plain = |wcid: u32| ItemStats {
+            wcid,
+            appraised: true,
+            ..item("Plain Sword", item_type::MELEE_WEAPON, 50)
+        };
+        assert_eq!(profile.judge_test(&plain(1005), &me, "Aldric", 0), sell);
+        assert_eq!(
+            profile.judge_test(&plain(1004), &me, "Aldric", 0),
+            Verdict::None
+        );
+    }
+
+    #[test]
+    fn a_comparison_saved_before_not_equal_loads_and_not_equal_reads_back() {
+        let text = r#"{"name":"r","action":"keep","all":[{"Item":{"Num":["Value","Ge",100.0]}}]}"#;
+        let old: Rule = serde_json::from_str(text).expect("an old rule loads");
+        assert_eq!(
+            old.all,
+            vec![Ask::Item(Term::Num(NumKey::Value, Op::Ge, 100.0))]
+        );
+        let ne = rule(
+            "r",
+            LootAction::Keep,
+            vec![Ask::Item(Term::Num(NumKey::Class, Op::Ne, 37353.0))],
+        );
+        let saved = serde_json::to_string(&ne).unwrap();
+        assert!(saved.contains(r#""Ne""#), "{saved}");
+        assert_eq!(serde_json::from_str::<Rule>(&saved).unwrap(), ne);
+    }
+
+    #[test]
     fn a_profile_saved_before_quests_loads_and_one_with_the_rule_reads_back() {
         let text = r#"{"name":"old","rules":[{"name":"r","action":"keep","all":[{"Item":{"Word":"pea"}}]}]}"#;
         let old: Profile = serde_json::from_str(text).expect("an old profile loads");

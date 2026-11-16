@@ -305,7 +305,8 @@ same):
   `a b or c` is `(a and b) or c`;
 - **numbers**: `value>250`, `al>=200`, `dmg>10`, `ws<6`, `wield<=150`
   (`level` and `req` say the same), `burden`, `speed`, `mana`, `sc`,
-  `uses`, `tinks`, `stack`, `atk`, `def`;
+  `uses`, `tinks`, `stack`, `atk`, `def`, `wcid` (the weenie class);
+  `!=` is not equal: `wcid!=37353`;
 - **cantrips** by tier, read off the spell names on the item:
   `epics>=2`, `legendaries>=1`, `majors`, `moderates`, `minors`,
   `cantrips` (any tier), `spells>=3` (everything on it), `tier:epic`
@@ -315,14 +316,21 @@ same):
   `hands`, `legs`, `feet`, `trinket`, `cloak`, `sigil`, `melee`,
   `shield`, `missile`, `ammo`, `wand`, `twohanded`;
 - one field: `spell:blood`, `type:armor`, `mat:iron`, `skill:sword`;
-  flags `wielded`, `unappraised`.
+  flags `wielded`, `unappraised`;
+- **lists** with `|` mean any of them: `type:armor|jewelry`,
+  `mat:gold|silver`, `slot:ring|bracelet`, `skill:sword|axe`,
+  `tier:epic|legendary`, `wcid=37353|37354`; after `!=` none of them,
+  `wcid!=37353|37354`. `type:weapon` is a melee weapon, or anything
+  appraised with damage of its own (thrown weapons, ammunition); a
+  wand is `type:caster`, and a bow, crossbow or atlatl `type:missile`.
 
 Examples: a Hauberk with Epic Life Mastery is `hauberk "epic life"`
 (spelt the way the cantrip is on the item, `spell:"epic life magic"`
 also does); any ring with multiple epics is `slot:ring epics>=2`; more
-than two epics is `epics>2`. A rule the parser cannot make sense of is
-shown in red with what is wrong (`Query::check`); it still runs, meaning
-as much as it can.
+than two epics is `epics>2`; an epic on anything but a weapon is
+`tier:epic not type:weapon|missile|caster`. A rule the parser cannot
+make sense of is shown in red with what is wrong (`Query::check`); it
+still runs, meaning as much as it can.
 
 **Who opens which body.** The server gives an open corpse to one
 player and refuses everyone else, so a body two characters want is a

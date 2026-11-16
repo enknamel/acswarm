@@ -735,6 +735,8 @@ pub enum Op {
     Gt,
     Ge,
     Eq,
+    /// `!=`; saved by name like the rest, so profiles saved before it still load.
+    Ne,
 }
 
 impl Op {
@@ -746,6 +748,7 @@ impl Op {
             Op::Gt => "is over",
             Op::Ge => "is at least",
             Op::Eq => "is",
+            Op::Ne => "is not",
         }
     }
 
@@ -756,6 +759,7 @@ impl Op {
             Op::Gt => x > v,
             Op::Ge => x >= v,
             Op::Eq => (x - v).abs() < 0.5,
+            Op::Ne => (x - v).abs() >= 0.5,
         }
     }
 }
@@ -782,7 +786,7 @@ pub enum Term {
     Wielded,
     /// `unappraised`
     Unappraised,
-    /// `dmg>10`, `al>=200`, `value<100`, `epics>=2`
+    /// `dmg>10`, `al>=200`, `value<100`, `epics>=2`, `wcid!=37353`
     Num(NumKey, Op, f64),
 }
 
@@ -866,6 +870,10 @@ fn tokenize(line: &str) -> Vec<Token> {
                         break;
                     }
                     word.push(c);
+                }
+                // A list goes on past the phrase: `mat:"black garnet"|"red jade"`.
+                if chars.peek() == Some(&'|') {
+                    continue;
                 }
                 let w = std::mem::take(&mut word).to_lowercase();
                 if !w.is_empty() {
@@ -966,14 +974,49 @@ impl Parser<'_> {
             // A stray `and`/`or`: the loops above consume the meaningful ones.
             Token::And | Token::Or => None,
             Token::Word(w) => {
-                let (term, problem) = parse_term(&w);
-                if let Some(p) = problem {
-                    self.problems.push(p);
-                }
-                Some(Expr::Term(term))
+                let (expr, problems) = parse_word(&w);
+                self.problems.extend(problems);
+                Some(expr)
             }
         }
     }
+}
+
+/// One word as an expression, and what was doubtful about it. A `|` list after the key is any of
+/// the choices (`type:armor|jewelry`, `wcid=1|2`); after `!=` none, as `k!=a k!=b` would say.
+fn parse_word(w: &str) -> (Expr, Vec<String>) {
+    let Some(bar) = w.find('|') else {
+        let (term, problem) = parse_term(w);
+        return (Expr::Term(term), problem.into_iter().collect());
+    };
+    let (key, choices) = w.split_at(list_key_end(&w[..bar]));
+    let mut problems = Vec::new();
+    let mut terms = Vec::new();
+    for choice in choices.split('|') {
+        if choice.is_empty() {
+            problems.push(format!("an empty choice in `{w}`"));
+            continue;
+        }
+        let (term, problem) = parse_term(&format!("{key}{choice}"));
+        problems.extend(problem);
+        terms.push(Expr::Term(term));
+    }
+    let expr = match terms.len() {
+        0 => Expr::Term(Term::Word(w.to_string())),
+        1 => terms.remove(0),
+        _ if key.ends_with("!=") => Expr::And(terms),
+        _ => Expr::Or(terms),
+    };
+    (expr, problems)
+}
+
+/// Where the key of a list's first choice ends: after its comparison, else its `:`, else at once.
+fn list_key_end(first: &str) -> usize {
+    COMPARISONS
+        .iter()
+        .find_map(|(sym, _)| first.find(sym).map(|at| at + sym.len()))
+        .or_else(|| first.find(':').map(|at| at + 1))
+        .unwrap_or(0)
 }
 
 /// One word as a term, and what was doubtful about it.
@@ -1105,15 +1148,19 @@ impl Query {
     }
 }
 
+/// The comparison symbols, two-character ones first so `>=` is not read as `>`.
+const COMPARISONS: [(&str, Op); 6] = [
+    ("!=", Op::Ne),
+    (">=", Op::Ge),
+    ("<=", Op::Le),
+    (">", Op::Gt),
+    ("<", Op::Lt),
+    ("=", Op::Eq),
+];
+
 /// `dmg>10` as a term: `Ok(None)` when the word has no comparison, `Err` for a bad key or number.
 fn parse_num(w: &str) -> Result<Option<Term>, String> {
-    for (sym, op) in [
-        (">=", Op::Ge),
-        ("<=", Op::Le),
-        (">", Op::Gt),
-        ("<", Op::Lt),
-        ("=", Op::Eq),
-    ] {
+    for (sym, op) in COMPARISONS {
         if let Some((k, v)) = w.split_once(sym) {
             let Some(key) = NumKey::parse(k) else {
                 return Err(format!("unknown number `{k}`"));
@@ -1135,11 +1182,14 @@ pub const HELP: &[(&str, &str)] = &[
     ("a or b", "either; a b or c is (a and b) or c"),
     ("not a, -a", "the opposite"),
     ("(a or b) c", "parentheses group"),
-    ("value>250, al>=200, dmg>10", "numbers: value, burden, ws, dmg, al, speed, wield, mana, sc, uses, tinks, stack, atk, def"),
+    ("value>250, al>=200, dmg>10, wcid!=37353", "numbers: value, burden, ws, dmg, al, speed, wield, mana, sc, uses, tinks, stack, atk, def, wcid; < <= > >= = !="),
+    ("wcid=37353|37354, wcid!=37353|37354", "any of the list; != none of it"),
     ("epics>=2, legendaries>=1, majors, minors, cantrips, spells>=3", "how many cantrips of a tier (or spells at all) are on it"),
     ("tier:epic", "at least one cantrip of the tier"),
     ("slot:ring", "where it is worn: head, chest, abdomen, arms, hands, legs, feet, neck, bracelet, ring, trinket, cloak, sigil, melee, shield, missile, ammo, wand, twohanded"),
     ("spell:blood, type:armor, mat:iron, skill:sword", "one field"),
+    ("type:armor|jewelry, mat:gold|silver, slot:ring|bracelet, tier:epic|legendary", "any of the list"),
+    ("tier:epic not type:weapon|missile|caster", "an epic on anything but a weapon (type:weapon is melee, or anything appraised with damage)"),
     ("wielded, unappraised", "flags"),
 ];
 
@@ -1400,6 +1450,147 @@ mod tests {
         assert!(Query::parse("epics>=2").needs_appraisal());
         assert!(Query::parse("tier:epic").needs_appraisal());
         assert!(!Query::parse("slot:ring").needs_appraisal());
+    }
+
+    #[test]
+    fn not_equal_is_one_term_and_reads_as_is_not() {
+        assert_eq!(
+            Query::parse("wcid!=37353").expr,
+            Some(Expr::Term(Term::Num(NumKey::Class, Op::Ne, 37353.0)))
+        );
+        // A `!` inside a word is the comparison, not a `not`.
+        assert_eq!(
+            Query::parse("-value!=5").expr,
+            Some(Expr::Not(Box::new(Expr::Term(Term::Num(
+                NumKey::Value,
+                Op::Ne,
+                5.0
+            )))))
+        );
+        assert_eq!(Op::Ne.word(), "is not");
+        assert!(Op::Ne.test(3.0, 4.0));
+        assert!(!Op::Ne.test(4.0, 4.0));
+        assert_eq!(Query::check("wcid!=37353"), Ok(()));
+        assert!(Query::check("wcid!=many")
+            .unwrap_err()
+            .contains("not a number"));
+    }
+
+    #[test]
+    fn a_list_is_any_of_its_choices_and_a_not_equal_list_none() {
+        let term = |t: Term| Expr::Term(t);
+        let class = |op: Op, v: f64| term(Term::Num(NumKey::Class, op, v));
+        assert_eq!(
+            Query::parse("wcid=37353|37354|37355").expr,
+            Some(Expr::Or(vec![
+                class(Op::Eq, 37353.0),
+                class(Op::Eq, 37354.0),
+                class(Op::Eq, 37355.0),
+            ]))
+        );
+        assert_eq!(
+            Query::parse("wcid!=37353|37354").expr,
+            Some(Expr::And(vec![
+                class(Op::Ne, 37353.0),
+                class(Op::Ne, 37354.0)
+            ]))
+        );
+        assert_eq!(
+            Query::parse("type:armor|jewelry").expr,
+            Some(Expr::Or(vec![
+                term(Term::Kind("armor".into())),
+                term(Term::Kind("jewelry".into()))
+            ]))
+        );
+        assert_eq!(
+            Query::parse("mat:gold|silver").expr,
+            Some(Expr::Or(vec![
+                term(Term::Material("gold".into())),
+                term(Term::Material("silver".into()))
+            ]))
+        );
+        assert_eq!(
+            Query::parse("slot:ring|bracelet").expr,
+            Some(Expr::Or(vec![
+                term(Term::Slot(slot::FINGER)),
+                term(Term::Slot(slot::WRIST))
+            ]))
+        );
+        assert_eq!(
+            Query::parse("skill:sword|axe").expr,
+            Some(Expr::Or(vec![
+                term(Term::Skill("sword".into())),
+                term(Term::Skill("axe".into()))
+            ]))
+        );
+        assert_eq!(
+            Query::parse("tier:epic|legendary").expr,
+            Some(Expr::Or(vec![
+                term(Term::Tier(Tier::Epic)),
+                term(Term::Tier(Tier::Legendary))
+            ]))
+        );
+        // A phrase may be a choice, and a `-` before the list is `not` of all of it.
+        assert_eq!(
+            Query::parse("mat:\"black garnet\"|\"red jade\"").expr,
+            Some(Expr::Or(vec![
+                term(Term::Material("black garnet".into())),
+                term(Term::Material("red jade".into()))
+            ]))
+        );
+        assert_eq!(
+            Query::parse("-type:weapon|caster").expr,
+            Some(Expr::Not(Box::new(Expr::Or(vec![
+                term(Term::Kind("weapon".into())),
+                term(Term::Kind("caster".into()))
+            ]))))
+        );
+        // A lone `|` is still `or`, and a list of one is its term.
+        assert_eq!(
+            Query::parse("ring | bracelet").expr,
+            Some(Expr::Or(vec![
+                term(Term::Word("ring".into())),
+                term(Term::Word("bracelet".into()))
+            ]))
+        );
+        assert_eq!(Query::parse("wcid=5|").expr, Some(class(Op::Eq, 5.0)));
+        assert!(Query::check("wcid=5|")
+            .unwrap_err()
+            .contains("empty choice"));
+        assert!(Query::check("wcid=5|x")
+            .unwrap_err()
+            .contains("not a number"));
+        assert!(Query::check("slot:ring|tail")
+            .unwrap_err()
+            .contains("unknown slot"));
+        assert_eq!(Query::check("type:armor|jewelry wcid!=1|2"), Ok(()));
+    }
+
+    #[test]
+    fn lists_and_not_equal_match_items() {
+        let mut ring = ItemStats {
+            name: "Gold Ring".into(),
+            wcid: 37353,
+            kind: "jewelry",
+            material: "Gold",
+            valid_locations: slot::FINGER,
+            ..Default::default()
+        };
+        let hit = |item: &ItemStats, line: &str| item.matches(&Query::parse(line));
+        assert!(hit(&ring, "wcid=1|37353"));
+        assert!(!hit(&ring, "wcid!=1|37353"));
+        assert!(hit(&ring, "wcid!=1|2"));
+        assert!(hit(
+            &ring,
+            "type:armor|jewelry mat:silver|gold slot:ring|bracelet"
+        ));
+        assert!(!hit(&ring, "-type:armor|jewelry"));
+        ring.wcid = 2;
+        assert!(!hit(&ring, "wcid!=1|2"));
+        // `skill:` and `!=` on the sword and wand of the other tests.
+        assert!(hit(&sword(), "skill:axe|sword dmg!=13"));
+        assert!(!hit(&sword(), "dmg!=14"));
+        assert!(hit(&unknown(), "-type:weapon|missile value!=49"));
     }
 
     #[test]

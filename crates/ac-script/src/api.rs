@@ -194,9 +194,10 @@ pub trait Api {
     /// name, material, kind, a spell name or a slot word; `"epic life"`
     /// is a phrase; a space is `and`, `or`, `not` (or `-x`) and
     /// parentheses combine; `dmg>10`, `al>=200`, `value<100`, `ws>=5`,
-    /// `wield<=100`, `epics>=2`, `legendaries>=1`, `cantrips`, `spells>=3`
-    /// compare numbers; `spell:blood`, `type:armor`, `mat:iron`,
-    /// `skill:sword`, `slot:ring`, `tier:epic`, `wielded`, `unappraised`.
+    /// `wield<=100`, `epics>=2`, `legendaries>=1`, `cantrips`, `spells>=3`,
+    /// `wcid!=37353` compare numbers; `spell:blood`, `type:armor`, `mat:iron`,
+    /// `skill:sword`, `slot:ring`, `tier:epic`, `wielded`, `unappraised`;
+    /// `|` lists any of several (`type:armor|jewelry`, `wcid=1|2`), `!=` none.
     fn find_items(&mut self, query: &str) -> Array;
     /// The same search over every character's last known inventory,
     /// this process's sessions and (over the bus) every other's, online

@@ -166,10 +166,14 @@ pub(crate) const HELP: &[(&str, &str)] = &[
         "spell:blood  type:armor  mat:iron  skill:sword  slot:ring  tier:epic",
         "one field; slots: head, chest, hands, feet, neck, wrist, ring, trinket, cloak, wand, shield...",
     ),
+    (
+        "type:armor|jewelry  mat:gold|silver  tier:epic|legendary",
+        "any of the list; a field or a number: slot:ring|bracelet, wcid=37353|37354",
+    ),
     ("wielded  unappraised", "worn right now; not yet appraised"),
     (
-        "dmg  al  value  burden  ws  speed  wield  mana  sc  uses  tinks  stack  atk  def",
-        "numbers, with < <= > >= =: dmg>10, al>=200, value<100, ws>=8",
+        "dmg  al  value  burden  ws  speed  wield  mana  sc  uses  tinks  stack  atk  def  wcid",
+        "numbers, with < <= > >= = !=: dmg>10, al>=200, value<100, ws>=8, wcid!=37353|37354 (none of them)",
     ),
     (
         "spells  cantrips  minors  moderates  majors  epics  legendaries",
