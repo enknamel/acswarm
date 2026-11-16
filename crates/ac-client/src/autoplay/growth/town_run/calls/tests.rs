@@ -681,3 +681,47 @@ fn a_pursued_hand_in_is_made_once_however_many_are_carried() {
         "the second is kept"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_guardian_teleporting_you_to_the_tomb_has_answered() {
+    // Live (Blargerton): the reward Guardian stamped QinXikitBeaten and teleported him to the
+    // tomb; the call read that as out of reach and the quest was dropped beside the sarcophagus.
+    let beaten = ac_world::quests::rows_of("qinxikitbeaten")
+        .next()
+        .expect("the Guardian's talk");
+    let at = beaten.places[0];
+    let local = at.at - ac_world::landblock_origin(at.cell);
+    let mut c =
+        crate::testkit::standing_in_the_field(120, at.cell, local + glam::Vec3::new(1.0, 0.0, 0.0));
+    crate::testkit::standing_by(&mut c, 0x8000_0900, beaten.giver, 1.0);
+    let now = Instant::now();
+    assert!(c.start_quest_call(beaten, at, now));
+    let run = c
+        .autoplay
+        .growth
+        .run
+        .take()
+        .expect("a call on the Guardian");
+    c.visits.current = None;
+    c.visits.finished = true;
+    let cfg = c.autoplay.config.growth.clone();
+    c.giver_step(run, now, &cfg);
+    assert!(
+        c.autoplay.status.starts_with("waiting for"),
+        "{}",
+        c.autoplay.status
+    );
+    // The answer: off to the tomb, the Guardian left behind.
+    let then = now + Duration::from_millis(300);
+    c.last_used = Some(0x8000_0900);
+    c.teleported_at = Some(then);
+    c.world.objects.remove(&0x8000_0900);
+    let run = c.autoplay.growth.run.take().expect("still calling");
+    c.giver_step(run, then, &cfg);
+    assert!(
+        !c.is_giver_refused(beaten, &at, then + Duration::from_secs(60 * 60)),
+        "refused as out of reach"
+    );
+    assert!(c.autoplay.growth.run.is_none(), "{}", c.autoplay.status);
+}

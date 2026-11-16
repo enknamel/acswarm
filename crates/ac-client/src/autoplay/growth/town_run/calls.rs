@@ -639,6 +639,20 @@ impl Client {
                         return Turn::Waited;
                     }
                 }
+                // The use was answered by a teleport (the Qin Xikit reward Guardian's tomb): heard,
+                // not a giver out of reach (the_guardian_teleporting_you_to_the_tomb_has_answered).
+                if let Some((g, since)) = self.autoplay.growth.talk_wait {
+                    if self.last_used == Some(g) && self.teleported_at.is_some_and(|t| t >= since) {
+                        self.autoplay.growth.talk_wait = None;
+                        self.autoplay.growth.talked.mark(talk_key(row), now);
+                        if row.kind == Kind::Start {
+                            self.answer_take_up(now);
+                        }
+                        let said = format!("{} sent us on for {}", row.giver, row.title);
+                        self.autoplay.note(said, now);
+                        return self.giver_done(run, now, cfg);
+                    }
+                }
                 // A fight on the way broke the visit off: the run picks it up after.
                 if self.attack_target.is_some() || self.autoplay.casting_at().is_some() {
                     self.autoplay.growth.run = Some(run);
