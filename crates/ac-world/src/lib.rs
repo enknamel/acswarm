@@ -353,6 +353,15 @@ impl WorldObject {
     pub fn is_character(&self) -> bool {
         self.is_player || self.object_desc_flags & object_desc_flags::PLAYER != 0
     }
+
+    /// A new stack size, the burden scaled with it: the server recomputes burden as unit burden
+    /// x stack (`WorldObject_Properties.cs:3138`) but sends only stack and value (`GameMessageSetStackSize.cs:14`).
+    pub fn set_stack(&mut self, stack: u32) {
+        if let Some(unit) = self.burden.checked_div(self.stack_size) {
+            self.burden = unit * stack;
+        }
+        self.stack_size = stack;
+    }
 }
 
 impl WorldObject {
@@ -1434,6 +1443,7 @@ mod tests {
                 weenie_class_id: 691,
                 stack_size: stack,
                 value: stack * 5,
+                burden: stack * 2,
                 container: Some(ME),
                 parent: Some(ME),
                 ..Default::default()
@@ -1455,7 +1465,7 @@ mod tests {
             .u32(45);
         assert_eq!(world.apply(&w.finish()), Applied::Inventory);
         let o = &world.objects[&0x8000_0010];
-        assert_eq!((o.stack_size, o.value), (9, 45));
+        assert_eq!((o.stack_size, o.value, o.burden), (9, 45, 18));
         assert!(world.generation > gen);
         // PublicUpdatePropertyInt StackSize on the same item.
         let mut w = Writer::new();
@@ -1465,7 +1475,8 @@ mod tests {
             .u32(messages::property_int::STACK_SIZE)
             .i32(7);
         assert_eq!(world.apply(&w.finish()), Applied::Inventory);
-        assert_eq!(world.objects[&0x8000_0010].stack_size, 7);
+        let o = &world.objects[&0x8000_0010];
+        assert_eq!((o.stack_size, o.burden), (7, 14));
         // Other properties and unknown objects are ignored.
         let mut w = Writer::new();
         w.u32(opcode::PUBLIC_UPDATE_PROPERTY_INT)

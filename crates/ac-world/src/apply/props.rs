@@ -8,7 +8,7 @@ impl World {
         match messages::parse_set_stack_size(body) {
             Ok((guid, stack, value)) => {
                 if let Some(o) = self.objects.get_mut(&guid) {
-                    o.stack_size = stack;
+                    o.set_stack(stack);
                     o.value = value;
                     self.generation += 1;
                     Applied::Inventory
@@ -30,7 +30,7 @@ impl World {
         let value = u.value.max(0) as u32;
         let applied = match u.key {
             messages::property_int::STACK_SIZE => {
-                o.stack_size = value;
+                o.set_stack(value);
                 Applied::Inventory
             }
             messages::property_int::VALUE => {
