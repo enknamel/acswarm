@@ -104,19 +104,19 @@ impl Client {
         true
     }
 
-    /// A walk step with no way on foot (`why`), not to an end no floor holds: the journey flown
-    /// from here, as nothing is out of a flight's reach and every other route ends in the same
-    /// walk (Ayan Baqur's Empty Mug). `false` when it may not be flown.
+    /// A walk step, or the walk to an NPC that opens the way, with no way on foot (`why`), not to
+    /// an end no floor holds: the journey flown from here, as nothing is out of a flight's reach
+    /// and every other route ends in the same walk (Ayan Baqur's Empty Mug; Kivik Lir's Odd
+    /// Looking Vine: an_npc_way_with_no_walk_to_it_is_flown). `false` when it may not be flown.
     pub(super) fn fly_walk(&mut self, why: &str) -> bool {
-        let Some(Step::Walk(to)) = self.travel_step().cloned() else {
-            return false;
-        };
+        match self.travel_step().cloned() {
+            Some(Step::Walk(to)) if !self.is_refused_off_floor(to.at) => {}
+            Some(Step::Npc { .. }) => {}
+            _ => return false,
+        }
         let (Some(owner), Some(goal)) = (self.travel.owner, self.travel.goal) else {
             return false;
         };
-        if self.is_refused_off_floor(to.at) {
-            return false;
-        }
         tracing::info!(
             "travel: step {}: {why}; the journey is flown",
             self.travel.step

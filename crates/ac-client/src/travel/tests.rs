@@ -2592,3 +2592,23 @@ fn portal_recall_waits_out_the_servers_portal_cooldown_before_it_is_cast() {
     c.step_goal(at(4.2));
     assert_eq!(c.travel.state.recall_casts, 1, "not cast once it was over");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_npc_way_with_no_walk_to_it_is_flown() {
+    // Kivik Lir's Sarcophagus lies in a dungeon the Odd Looking Vine opens the way into: the walk
+    // to the vine had no way on foot (Planner(Unreached)), and the journey was refused, not flown.
+    let (mut c, step) = by_faladha();
+    c.movement_rules = crate::player::MovementRules::Unrestricted;
+    c.world.stats.level = 200;
+    let Step::Npc { exit, .. } = step.clone() else {
+        unreachable!()
+    };
+    let trip = Trip {
+        steps: vec![step, Step::Walk(exit)],
+        seconds: 60.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
+    c.refuse_step("no way there: Planner(Unreached)");
+    assert!(c.is_journey_flown(), "the step was not flown");
+}
