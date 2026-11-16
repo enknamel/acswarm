@@ -103,7 +103,7 @@ impl Asking<'_> {
     }
 
     /// The nearest way to hand `line`'s quest in now that `end` allows, its items carried, and
-    /// how far.
+    /// how far. A stone used in a field is no hand-in: the pursuit's own step stands in it.
     pub(crate) fn hand_in_at(
         &self,
         line: &QuestLine,
@@ -111,6 +111,7 @@ impl Asking<'_> {
     ) -> Option<(f32, &'static Row, Place)> {
         crate::quest_log::worked_rows(line)
             .filter(|r| r.kind == line.kind && r.fits_level(self.level) && end.can_hand_in(r))
+            .filter(|r| r.hand != Handing::Use)
             .filter(|r| match r.want {
                 Want::Item(w) => (self.carried)(w) >= r.count.max(1),
                 _ => true,

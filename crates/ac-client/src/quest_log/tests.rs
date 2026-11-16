@@ -694,3 +694,26 @@ fn a_hand_in_paying_an_item_and_no_xp_is_done_once_the_item_comes() {
         "the boots counted for nothing"
     );
 }
+
+#[test]
+fn an_aetheria_floor_asks_the_bitfield_the_floor_above_set() {
+    // The middle centre wants its four sides and AetheriaBitfield (322) at exactly 1.
+    let id = "efmlcentermanafieldused";
+    let mut facts = pursued_at(id, 160);
+    facts.carried.insert(42710, 1);
+    for side in ["north", "south", "east", "west"] {
+        facts.held.push(format!("efml{side}manafieldused"));
+    }
+    let upper = QuestState::CantYet(Blocked::NeedsFirst {
+        title: "Used Aligned Mana Stone in EF Upper Level Center Aetheria Mana Field".into(),
+    });
+    assert_eq!(state(id, &facts), upper);
+    facts.ints.insert(322, 1);
+    assert_eq!(state(id, &facts), QuestState::Ready);
+    // Set past it (the lower floor done), or cleared by enlightenment: not 1 any more.
+    facts.ints.insert(322, 7);
+    assert_eq!(state(id, &facts), upper);
+    // Held as a flag it counts for nothing: the stat is read from the character alone.
+    facts.held.push("int322=1".into());
+    assert_eq!(state(id, &facts), upper);
+}

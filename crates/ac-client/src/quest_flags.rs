@@ -48,9 +48,11 @@ impl Client {
 
     /// A quest done stamped `flags`: held from now on, and saved.
     pub(crate) fn hold_quest_flags(&mut self, flags: &[String]) {
+        // A stat's value is read from the character, never held as a flag.
+        let is_stat = |f: &&String| ac_world::quests::stat_need(f).is_some();
         let new: Vec<String> = flags
             .iter()
-            .filter(|f| !self.holds_quest_flag(f))
+            .filter(|f| !is_stat(f) && !self.holds_quest_flag(f))
             .cloned()
             .collect();
         if new.is_empty() {

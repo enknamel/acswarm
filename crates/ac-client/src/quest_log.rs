@@ -186,6 +186,8 @@ pub struct QuestFacts {
     pub to_next_by_level: Vec<u64>,
     /// Quest flags held (`Travel::quests_done`).
     pub held: Vec<String>,
+    /// The character's own PropertyInts, which an `intSTAT=VALUE` need asks (AetheriaBitfield).
+    pub ints: BTreeMap<u32, i32>,
     pub log: QuestLog,
     /// Items carried, by weenie class.
     pub carried: BTreeMap<u32, u32>,
@@ -481,8 +483,12 @@ fn kill_counter(flag: &str) -> Option<&'static str> {
 }
 
 /// Whether the character holds `flag`: a quest flag, a kill task's counter taken up, or a stamp
-/// of a quest the log has done.
+/// of a quest the log has done; a stat's `intSTAT=VALUE` only from the stat as the server has it
+/// now (enlightenment clears 322: Enlightenment.cs:195-196).
 pub(crate) fn holds(facts: &QuestFacts, flag: &str) -> bool {
+    if let Some((stat, value)) = ac_world::quests::stat_need(flag) {
+        return facts.ints.get(&stat) == Some(&value);
+    }
     facts.held.iter().any(|h| h.eq_ignore_ascii_case(flag))
         || facts.log.kills.contains_key(&flag.to_ascii_lowercase())
         || stampers(flag)
@@ -891,6 +897,7 @@ impl Client {
                     .collect()
             }),
             held: self.travel.quests_done.clone(),
+            ints: stats.ints.iter().copied().collect(),
             log: self.quest_log.clone(),
             carried,
             config: self.autoplay.config.quests.clone(),

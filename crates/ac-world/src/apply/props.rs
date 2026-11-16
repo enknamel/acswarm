@@ -24,8 +24,20 @@ impl World {
         let Ok(u) = object::PropertyUpdate::parse_public_int(body) else {
             return Applied::Failed;
         };
+        // Our own character's stat set by an emote (SetIntStat: EmoteManager.cs:1180-1186, sent
+        // public by Player_Properties.cs:1122-1131), AetheriaBitfield among them: the sheet's.
+        let mine = Some(u.guid) == self.player_guid;
+        if mine {
+            self.stats.set_int(u.key, u.value);
+            self.generation += 1;
+        }
+        let fallback = if mine {
+            Applied::Stats
+        } else {
+            Applied::Ignored
+        };
         let Some(o) = self.objects.get_mut(&u.guid) else {
-            return Applied::Ignored;
+            return fallback;
         };
         let value = u.value.max(0) as u32;
         let applied = match u.key {
@@ -72,7 +84,7 @@ impl World {
                 o.object_desc_flags = f;
                 Applied::Appearance
             }
-            _ => return Applied::Ignored,
+            _ => return fallback,
         };
         self.generation += 1;
         applied

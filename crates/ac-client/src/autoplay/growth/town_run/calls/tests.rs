@@ -454,6 +454,35 @@ fn a_jaw_for_a_quest_paying_no_xp_is_handed_in_only_once_chosen() {
 }
 
 #[test]
+fn a_field_the_stone_is_used_in_is_never_a_call_however_ready() {
+    // The Aligned Mana Stone carried makes the north field ready; nobody is handed it.
+    let id = "efulnorthmanafieldused";
+    let field = ac_world::quests::rows_of(id).next().unwrap();
+    let at = field.places[0];
+    let mut c = character_of_level(no_data(), 150);
+    with_a_pack(&mut c, 50);
+    stand(&mut c, at.cell, at.at - ac_world::landblock_origin(at.cell));
+    thing_in_the_pack(&mut c, 0x8000_0100, "Aligned Mana Stone", 1);
+    c.world
+        .objects
+        .get_mut(&0x8000_0100)
+        .unwrap()
+        .weenie_class_id = 42710;
+    c.autoplay.config.quests.pursue_quest(id, false, 0);
+    let now = Instant::now();
+    c.refresh_quests(now);
+    let line = c
+        .quest_board
+        .iter()
+        .find(|l| l.id == id)
+        .expect("on the board");
+    assert_eq!(line.state, crate::quest_log::QuestState::Ready);
+    let me = c.my_position().unwrap().truncate();
+    let calls = c.ready_hand_ins(&[me], 5, now);
+    assert!(calls.iter().all(|h| h.row.id != id), "{calls:?}");
+}
+
+#[test]
 fn a_pursued_hand_in_rides_an_ordinary_run() {
     // 9,600 seconds out of the way for no XP: a pursued quest's giver is called on all the same.
     let legs = legs_on_a_line(0.0, &[100.0, 5_000.0], 200.0, None);

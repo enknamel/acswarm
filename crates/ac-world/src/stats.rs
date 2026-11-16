@@ -1206,7 +1206,8 @@ impl PlayerStats {
         Ok(())
     }
 
-    fn set_int(&mut self, k: u32, v: i32) {
+    /// Set a PropertyInt of our own, as a private or public update says.
+    pub(crate) fn set_int(&mut self, k: u32, v: i32) {
         match k {
             property::INT_LEVEL => self.level = v,
             property::INT_AVAILABLE_SKILL_CREDITS => self.skill_credits = v,
@@ -1261,6 +1262,11 @@ impl PlayerStats {
             Some(e) => e.1 = v,
             None => self.iids.push((k, v)),
         }
+    }
+
+    /// A PropertyInt of our own, if the server has sent it.
+    pub fn int_prop(&self, k: u32) -> Option<i32> {
+        self.ints.iter().find(|(kk, _)| *kk == k).map(|e| e.1)
     }
 
     /// A PropertyBool of our own, if the server has sent it.

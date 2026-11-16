@@ -1600,6 +1600,31 @@ mod tests {
     }
 
     #[test]
+    fn a_stat_an_emote_sets_on_us_reaches_the_character_sheet() {
+        // The Aetheria fields' SetIntStat 322 comes as a public update of our own guid.
+        let mut world = World {
+            player_guid: Some(ME),
+            ..Default::default()
+        };
+        let update = |seq: u8, guid: u32, value: i32| {
+            let mut w = Writer::new();
+            w.u32(opcode::PUBLIC_UPDATE_PROPERTY_INT)
+                .u8(seq)
+                .u32(guid)
+                .u32(322)
+                .i32(value);
+            w.finish()
+        };
+        assert_eq!(world.apply(&update(1, ME, 1)), Applied::Stats);
+        assert_eq!(world.stats.int_prop(322), Some(1));
+        assert_eq!(world.apply(&update(2, ME, 3)), Applied::Stats);
+        assert_eq!(world.stats.int_prop(322), Some(3));
+        // Another player's is not ours.
+        assert_eq!(world.apply(&update(3, 0x5000_0002, 7)), Applied::Ignored);
+        assert_eq!(world.stats.int_prop(322), Some(3));
+    }
+
+    #[test]
     fn public_property_updates_apply_to_objects() {
         let mut world = world_with_stack(0x8000_0010, 3);
         // CurrentWieldedLocation comes with the wield/unwield events.
