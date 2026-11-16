@@ -83,9 +83,11 @@ class Data:
     def __init__(self, dump):
         self.placed = defaultdict(list)
         self.wtype = {}
-        for wcid, cell, x, y, z, t in rows(dump, "placed"):
-            self.placed[int(wcid)].append((int(cell, 16), x, y, z))
-            self.wtype[int(wcid)] = int(t)
+        # Put out by a placed generator, at it: quests.sh's madenpc.
+        for name in ("placed", "madenpc"):
+            for wcid, cell, x, y, z, t in rows(dump, name):
+                self.placed[int(wcid)].append((int(cell, 16), x, y, z))
+                self.wtype[int(wcid)] = int(t)
         self.sets = {}
         self.by_obj = defaultdict(list)
         for sid, obj, cat, prob, wcid, quest in rows(dump, "emote"):
@@ -210,6 +212,8 @@ class Data:
         self.spawning_on = Spawning(dump, events_on=True)
         # Each generator's event and that event's state at server start.
         self.gen_event = {int(g): (name, int(state)) for g, name, state in rows(dump, "genevent")}
+        # The events on at server start (GameEventState On, 4).
+        self.event_on = {name.lower() for name, state in rows(dump, "events") if int(state) == 4}
         self.summon_link = {int(i): int(link) for i, link in rows(dump, "summonspell")}
         self.link_portal = {}
         for obj, t, portal, cell, x, y, z, lo, hi, quest in rows(dump, "linkportal"):
@@ -992,7 +996,10 @@ def read_path(data, root, branches, effects, never):
         if t == INQ_EVENT:
             # A server event the client cannot see running: unread for a quest, while a way its
             # starters' uses can open first keeps the events it asks running (`event_starters`).
-            r["unread"].append(EVENT_UNREAD)
+            # Not running is read for an event off at server start (the Watcher of the Dead's
+            # OnBrowerkQuest stamp, EventBrowerkStopgap): its starter's use is rare and timed.
+            if ok or a["msg"].lower() in data.event_on:
+                r["unread"].append(EVENT_UNREAD)
             if not ok:
                 r["event_off"] = True
             elif a["msg"]:

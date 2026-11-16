@@ -59,12 +59,33 @@ from landblock_instance li join weenie w on w.class_Id = li.weenie_Class_Id
 where li.weenie_Class_Id in
   (select object_Id from weenie_properties_emote where category in (1, 6, 7));'
 
+# And those a placed generator puts out, at the generator (Scatter and OnTop stay by it), or at the
+# profile's own cell when it names one (Specific); none through an Off event's generator: the
+# Watcher of the Dead, who stamps OnBrowerkQuest, comes only from its generator at 0x11340000.
+q madenpc 'with recursive made(cell, x, y, z, wcid, depth) as (
+  select li.obj_Cell_Id, li.origin_X, li.origin_Y, li.origin_Z, li.weenie_Class_Id, 0
+  from landblock_instance li
+  where li.weenie_Class_Id in (select distinct object_Id from weenie_properties_generator)
+  union all
+  select if(g.obj_Cell_Id > 0, g.obj_Cell_Id, m.cell), if(g.obj_Cell_Id > 0, g.origin_X, m.x),
+    if(g.obj_Cell_Id > 0, g.origin_Y, m.y), if(g.obj_Cell_Id > 0, g.origin_Z, m.z),
+    g.weenie_Class_Id, m.depth + 1
+  from made m join weenie_properties_generator g on g.object_Id = m.wcid
+  where m.depth < 4 and (g.where_Create & 56) = 0
+    and not exists(select 1 from weenie_properties_string s join event e on e.name = s.value
+      where s.object_Id = m.wcid and s.type = 34 and e.state <> 4)
+)
+select distinct m.wcid, hex(m.cell), round(m.x, 2), round(m.y, 2), round(m.z, 2), w.type
+from made m join weenie w on w.class_Id = m.wcid
+where m.depth > 0 and m.wcid not in (select weenie_Class_Id from landblock_instance)
+  and m.wcid in (select object_Id from weenie_properties_emote where category in (1, 6, 7));'
+
 q emote 'select id, object_Id, category, probability, coalesce(weenie_Class_Id, 0),
   coalesce(quest, "")
 from weenie_properties_emote
 where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select
   ue.object_Id from weenie_properties_emote ue join weenie_properties_generator g
-  on g.weenie_Class_Id = ue.object_Id where ue.category = 7) or object_Id in (select ev.object_Id
+  on g.weenie_Class_Id = ue.object_Id where ue.category in (1, 6, 7)) or object_Id in (select ev.object_Id
   from weenie_properties_emote ev join weenie_properties_emote_action ea on ea.emote_Id = ev.id
   where ea.type in (23, 24, 88) or (ev.category = 3 and ea.type = 22) or ev.category = 37)
 order by object_Id, id;'
@@ -79,7 +100,7 @@ from weenie_properties_emote_action a
 where a.emote_Id in (select id from weenie_properties_emote
   where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select
     ue.object_Id from weenie_properties_emote ue join weenie_properties_generator g
-    on g.weenie_Class_Id = ue.object_Id where ue.category = 7) or object_Id in (select
+    on g.weenie_Class_Id = ue.object_Id where ue.category in (1, 6, 7)) or object_Id in (select
     ev.object_Id from weenie_properties_emote ev join weenie_properties_emote_action ea
     on ea.emote_Id = ev.id where ea.type in (23, 24, 88) or (ev.category = 3 and ea.type = 22)
     or ev.category = 37))
@@ -88,6 +109,8 @@ order by a.emote_Id, a.order;'
 # Server events (Managers/EventManager.cs): each generator's GeneratorEvent (String 34) and each
 # event's state at start (GameEventState: 4 On). A creature only an Off event's generator makes
 # comes once the event is started; what starts it is an emote's StartEvent (EmoteType 23).
+q events 'select name, state from event;'
+
 q genevent 'select s.object_Id, s.value, coalesce(e.state, 0) from weenie_properties_string s
 left join event e on e.name = s.value where s.type = 34 and s.value <> "";'
 
@@ -336,9 +359,9 @@ q components 'select object_Id from weenie_properties_int where type = 1 and val
 q encroots 'select hex(landblock), weenie_Class_Id, count(*) from encounter
 group by landblock, weenie_Class_Id;'
 
-for t in placed emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
+for t in placed madenpc emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
   gens chestlist locks keys stuck nocorpse recipes combines encounters roots profiles genprops crit inst links \
-  encroots genevent summonspell linkportal deathsignals portalstamps spellpos reldest hearing \
+  encroots events genevent summonspell linkportal deathsignals portalstamps spellpos reldest hearing \
   genportals portalmet components; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done

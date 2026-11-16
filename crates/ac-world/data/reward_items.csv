@@ -22,6 +22,7 @@
 1435,Ice Tachi
 1439,Acid Axe
 2200,Copy of Witshire's Key
+2417,Smoky Quartz
 2458,Health Elixir
 2461,Mana Elixir
 2470,Stamina Elixir
@@ -50,18 +51,26 @@
 3704,Swamp Tooth Arrow
 3705,Spine Axe
 3706,Olthoi Cuirass
+3707,Obsidian Crown
 3708,Ash Tooth Dagger
 3709,Ivory Tooth Dart
+3710,Gem of Black Fire
+3711,Blue Gem
+3712,Red Gem
 3713,Swamp Gem
 3715,Olthoi Helm
 3717,Obsidian Jewel
 3718,Golem Jo
 3719,Golem Mace
 3720,Obsidian Sphere
+3721,Orb of Black Fire
 3722,Potion of Black Fire
+3723,Obsidian Ring
 3724,Olthoi Sword
 3746,Auroch Horn Spear
 3747,Jade Tooth Quarrel
+3748,White Virindi Wand
+3749,Wand of Black Fire
 3933,Dull Gem
 4222,Armoredillo Hide Bracers
 4223,Armoredillo Hide Breastplate
@@ -224,6 +233,7 @@
 7595,Refined Low-Grade Chorizite
 7596,Refined Medium-Grade Chorizite
 7597,Refined High-Grade Chorizite
+7602,Yellow Virindi Wand
 7603,White Phyntos Wasp Wing
 7604,Yellow Jewel
 7898,Tattered Note
@@ -518,6 +528,42 @@
 11148,Clay Totem
 11149,Head of the Olthoi Queen
 11150,The Queen's Head
+11155,Rubble
+11157,Alchemy Tessera
+11158,Arcane Lore Tessera
+11159,Armor Tinkering Tessera
+11160,Light Weapons Tessera
+11161,Missile Weapons Tessera
+11162,Cooking Tessera
+11163,Creature Assessment Tessera
+11164,Creature Enchantment Tessera
+11165,Crossbow Tessera
+11166,Finesse Weapons Tessera
+11167,Deception Tessera
+11168,Fletching Tessera
+11169,Healing Tessera
+11170,Item Tinkering Tessera
+11171,Item Enchantment Tessera
+11172,Jump Tessera
+11173,Leadership Tessera
+11174,Life Magic Tessera
+11175,Lockpick Tessera
+11176,Loyalty Tessera
+11177,Dual Wield Tessera
+11178,Magic Item Tinkering Tessera
+11179,Magic Defense Tessera
+11180,Mana Conversion Tessera
+11181,Melee Defense Tessera
+11182,Missile Defense Tessera
+11183,Person Assessment Tessera
+11184,Run Tessera
+11185,Spear Tessera
+11186,Staff Tessera
+11187,Sword Tessera
+11188,Recklessness Tessera
+11189,Unarmed Combat Tessera
+11190,War Magic Tessera
+11191,Weapon Tinkering Tessera
 11232,Timaru Totem
 11233,Carenzi Totem
 11234,Siraluun Totem
@@ -755,6 +801,7 @@
 19248,Oxidized Statue
 19254,Bronze Spring from a Statue
 19353,Etheric Seal
+19421,Sunflower Oil
 19478,Sharp Tusker Slave Tusk
 19479,The Boon
 19480,Crafting the Horn of Vigilance
@@ -842,6 +889,7 @@
 21963,Phantom Atlatl
 21964,Phantom Bow
 21965,Phantom Crossbow
+22013,Olthoi Helm
 22014,Virindi Profatrix Mask
 22015,Pwyll's Guard
 22016,Shroud of Night
@@ -972,6 +1020,7 @@
 23122,Parallax Auguries
 23124,Research Notes: "Children of Darkness"
 23194,Sturdy Iron Keyring
+23200,Queenslayer Title Token
 23202,Platinum Golem Heart
 23203,Pyreal Golem Heart
 23206,Old Boot
@@ -1104,6 +1153,22 @@
 24240,Olthoi Acid Katar
 24241,Olthoi Spear
 24259,A Note from a Scout
+24359,Asheron's Raiment
+24360,Asheron's Raiment
+24361,Asheron's Supreme Raiment
+24362,Asheron's Supreme Raiment
+24363,Asheron's Supreme Raiment
+24364,Asheron's Supreme Raiment
+24365,Asheron's Raiment
+24366,Asheron's Greater Raiment
+24367,Asheron's Greater Raiment
+24368,Asheron's Greater Raiment
+24369,Asheron's Greater Raiment
+24370,Asheron's Lesser Raiment
+24371,Asheron's Lesser Raiment
+24372,Asheron's Lesser Raiment
+24373,Asheron's Lesser Raiment
+24374,Asheron's Raiment
 24454,Artificer's Gauntlets
 24455,Missile Specialist's Gauntlets
 24456,Missile Specialist's Gauntlets
@@ -1123,11 +1188,47 @@
 24474,Harker's Orders
 24477,Sturdy Steel Key
 24614,Instructions
+24615,Fine Olthoi Bracers
+24616,Good Olthoi Bracers
+24617,Fine Olthoi Breastplate
+24618,Good Olthoi Breastplate
+24619,Fine Olthoi Gauntlets
+24620,Good Olthoi Gauntlets
+24621,Fine Olthoi Girth
+24622,Good Olthoi Girth
+24623,Fine Olthoi Greaves
+24624,Good Olthoi Greaves
+24625,Fine Olthoi Brood Queen Helm
+24626,Good Olthoi Brood Queen Helm
+24627,Fine Olthoi Pauldrons
+24628,Good Olthoi Pauldrons
+24629,Fine Olthoi Sollerets
+24630,Good Olthoi Sollerets
+24631,Fine Olthoi Tassets
+24632,Good Olthoi Tassets
 24855,The New Alchemy
 24870,Experimentation
 24871,Natural Order
 24879,Virindi Profatrix Mask
 24887,Sturdy Steel Keyring
+24889,Greater Olthoi Bracers
+24890,Lesser Olthoi Bracers
+24891,Greater Olthoi Breastplate
+24892,Lesser Olthoi Breastplate
+24893,Greater Olthoi Gauntlets
+24894,Lesser Olthoi Gauntlets
+24895,Greater Olthoi Girth
+24896,Lesser Olthoi Girth
+24897,Greater Olthoi Greaves
+24898,Lesser Olthoi Greaves
+24899,Greater Olthoi Brood Queen Helm
+24900,Lesser Olthoi Brood Queen Helm
+24901,Greater Olthoi Pauldrons
+24902,Lesser Olthoi Pauldrons
+24903,Greater Olthoi Sollerets
+24904,Lesser Olthoi Sollerets
+24905,Greater Olthoi Tassets
+24906,Lesser Olthoi Tassets
 25313,Walking Boots
 25335,Virindi Consul Mask
 25336,Alfric's Bull
@@ -1170,9 +1271,12 @@
 25481,Scintillating Crystal Ring
 25501,Renegade Mace
 25503,Cydna Wren's Journal
+25504,Letter to General Garsh
+25520,Travel Log
 25522,Skull Cap
 25523,Rendeath Coat
 25524,Armoredillo Hide Cuirass
+25525,Mutilator Helm
 25526,Skeletal Helm
 25527,Gauloth Leggings
 25528,Hearty Reedshark Robe
@@ -1194,6 +1298,11 @@
 25544,Potion of Endless Vigor
 25545,Dastardly Dirk
 25546,Bludgeoning Sword
+25547,Greater Olthoi Shield
+25548,Fine Olthoi Shield
+25549,Good Olthoi Shield
+25550,Lesser Olthoi Shield
+25551,Olthoi Abdomen Fragment
 25553,Chicken Hat
 25554,Knath Head
 25555,Moarsman Mask
@@ -1540,6 +1649,14 @@
 28151,Gromnie Hide Amuli Leggings
 28152,Heavy Gromnie Hide Leggings
 28153,Lustrous Winged Leggings
+28154,Amethyst Oculus
+28155,Ashen Oculus
+28156,Teal Oculus
+28157,Emerald Oculus
+28158,Ivory Oculus
+28159,Ruby Oculus
+28160,Rusty Oculus
+28161,Sapphire Oculus
 28162,Gromnie Hide Leggings
 28211,Ash Gromnie Wings
 28212,Azure Gromnie Wings
@@ -1676,6 +1793,7 @@
 28865,Mite Mask
 28867,Modified Left Peg Leg
 28926,Salvaging Gem of Forgetfulness
+28927,Soul Stone
 28983,Hand-Written Journal
 28985,Remains of Xi Ru
 28986,Burial Urn
@@ -2007,6 +2125,7 @@
 32226,Mistress Gabille's Notes
 32229,Master Vaserio's Notes
 32254,Gem of Ardent Loyalty
+32255,Gem of Arcane Corruption
 32260,Plain Mukkir Orb
 32261,Solid Mukkir Orb
 32262,Detailed Mukkir Orb
@@ -2041,6 +2160,8 @@
 32687,Rossu Morta Boots
 32698,Shield of Strathelar
 32718,Rat Tail Bracelet
+32721,Perforated Knight Plaque
+32722,Nymph Maniac Plaque
 32750,Instructions for Essence Recovery
 32758,Prismatic Oil
 32769,Replica Sword of Bellenesse
@@ -2158,6 +2279,7 @@
 34505,A Note on Ancient Goblets
 34506,A Note on Ancient Necklaces
 34507,A Note on Ancient Rings
+34610,Golden Egg
 34843,The Founding of Kor-Gursha
 34850,Tiriun Mushroom
 34855,Tiriun Mushroom Cap
@@ -2227,9 +2349,15 @@
 35914,Paradox-touched Olthoi Katar
 35915,Paradox-touched Olthoi Spear
 35916,Paradox-touched Olthoi Sword
+35931,Amelia's Gargoyle Amulet
 35943,King's Crown Infusion
 35963,Havala's Composite Atlatl Manual
 35982,Aegis of the Golden Flame
+36013,Spectral Light Weapon Mastery Crystal
+36015,Spectral Missile Weapon Mastery Crystal
+36017,Spectral Finesse Weapon Mastery Crystal
+36021,Spectral Heavy Weapon Mastery Crystal
+36024,Spectral Crystal of the Hieromancer
 36048,Visage of the Shadow Virindi
 36067,Atuakeh Dust
 36174,Harbinger's Foci
@@ -2268,8 +2396,12 @@
 36638,Helm of the Crag
 36639,Crest of Kings
 36642,Powdered Chorizite Pea
+36672,Red Stone
+36673,White Stone
+36674,Yellow Stone
 36678,Royal Summons
 36705,Scepter of Might
+36708,Spectral Crystal of the Life Giver
 36719,Balor's Robe
 36747,Empowered Bracers of the Perfect Light
 36748,Empowered Breastplate of the Perfect Light
@@ -2287,6 +2419,7 @@
 37076,Purified Quiddity Ingot
 37078,Purified Quiddity Ingot
 37111,Empowered Girth of the Perfect Light
+37126,Arcane Pyramid
 37186,Rytheran's Journal
 37233,Ball of Fire
 37234,Ace of Hands
@@ -2315,6 +2448,9 @@
 37257,Jack of Eyes
 37258,Queen of Eyes
 37259,King of Eyes
+37260,The Jester
+37261,Deck of Hands
+37262,Deck of Eyes
 37290,Jester's Token
 37300,Glyph of Endurance
 37301,Glyph of Flame
@@ -2389,6 +2525,7 @@
 37616,Tenets of the Radiant Blood
 37618,Celestial Hand Letter of Introduction
 37619,Eldrytch Web Letter of Introduction
+38023,The Jester's Revelations
 38043,Diplomatic Message from Harlune
 38044,Green Mire Yoroi Cuirass
 38048,Green Mire Yari
@@ -2484,6 +2621,7 @@
 39028,Armored Sclavus Mask
 39029,Armored Sclavus Mask
 39287,Golden Key
+39369,Pack T'thuun
 39745,Explorer's Backpack
 39984,Adventurer's Token
 40326,Fist of Enlightenment
@@ -2522,6 +2660,7 @@
 41481,Hand of the Remorseless
 41482,Eye of the Remorseless
 41490,Master of the Focused Eye
+41541,Shattered Aetherium Core Sample
 41542,Unstable Mana Stone
 41635,Ravenous Two Handed Spear
 41637,Hollow Two Handed Spear
@@ -2532,6 +2671,7 @@
 41713,Whispering Blade Token
 41739,Two Handed Combat Gem of Forgetfulness
 41740,Two Handed Combat Gem of Enlightenment
+41745,Spectral Two Handed Mastery Crystal
 41747,Glyph of Two Handed Combat
 41788,Ultimate Singularity Greatsword
 41789,Singularity Greatsword
@@ -2545,10 +2685,22 @@
 41930,Translated Tomb Writings
 41931,Ancient Journal
 41945,Strange Jewel
+41957,Mhoire Castle Treasury Key
 42019,Mhoire Sword of Courage
+42039,Mhoire Signet Ring
 42207,Ornate Nekode
 42208,Silver Atlatl
 42209,Tetsubo Slugger
+42301,Gear Crossbow
+42302,Gear Crossbow
+42303,Gear Crossbow
+42304,Gear Crossbow
+42305,Gear Crossbow
+42306,Gear Crossbow
+42307,Gear Crossbow
+42308,Gear Crossbow
+42309,Gear Crossbow
+42310,Gear Crossbow
 42490,Enchanted Mana Stone
 42667,Top Hat
 42709,Royal Bouquet
@@ -2581,6 +2733,7 @@
 43400,Void Magic Gem of Enlightenment
 43402,Void Magic Gem of Forgetfulness
 43407,Corruptor's Crystal
+43408,Spectral Crystal of the Corruptor
 43420,Corruptor's Gauntlets
 43472,Luminous Pearl of Blood Drinking
 43473,Luminous Crystal of Surging Strength
@@ -2785,6 +2938,7 @@
 46362,The Story of the Lost Sisters
 46423,Stipend
 46454,Society Gem of Lesser Luminance
+46460,Final Gate Key
 46461,Middle Gate Key
 46828,Purified Mouryou Katana
 46829,Purified Mouryou Nanjou-tachi
@@ -2873,6 +3027,10 @@
 52796,Gauntlet Ticket
 52797,Gauntlet Coin
 52968,Infused Amber Shard
+52969,Corrupted Amber Shard
+52982,Life Infused Nightbloom
+52983,Mana Infused Nightbloom
+52984,Vigor Infused Nightbloom
 52985,Amber Infused Honey
 53016,Corrupted Amber: Bracers of the Corrupted Heart.
 53017,Corrupted Amber: Gauntlets of the Corrupted Heart.
@@ -2970,6 +3128,7 @@
 53450,Viridian Rise Deru Portal Sending Gem
 53452,Corrupted Amber: Weapon of the Corrupted Heart.
 53453,Corrupted Amber: Weapon of the Corrupted Soul.
+53474,Spectral Amber Shard
 70005,Tethana's Price
 70007,Hagra's Treaty
 70094,Offering to Xik Minru
@@ -3041,6 +3200,12 @@
 72170,Translated Fractured Message Shard
 72204,Mhoire Sword of Virtue
 72280,Jester Prison Key
+72291,Torn Parchment
+72292,Torn Parchment
+72293,Torn Parchment
+72294,Torn Parchment
+72295,Torn Parchment
+72296,Torn Parchment
 72297,Torn Parchment
 72298,Torn Parchment
 72299,Torn Parchment
@@ -3083,16 +3248,30 @@
 80016,Carenzi Cup
 80023,Void Crystal
 80078,Pon Mi's confession
+80124,Arena Atlatl
+80125,Arena Axe
+80126,Arena Bow
+80127,Arena Claw
+80128,Arena Crossbow
+80129,Arena Dagger
+80130,Arena Mace
+80131,Arena Spear
+80132,Arena Staff
+80133,Arena Sword
+80134,Arena Wand
 80302,Radiant Blood Letter of Introduction
 80306,Corrupted Mana Shard
 80438,Ornate Armor Writ
+81079,Mysterious Untranslated Scroll
 81080,Mysterious Untranslated Scroll
 87040,Translated Thief of Dreams Message Shard
 87141,Enhanced Skeletal Atlatl
 87142,Enhanced Energy Crown
 87143,Enhanced Obsidian Axe
 87153,Monster Fight Shirt
+87213,K'nath Core
 87214,K'nath Core
+87215,K'nath Core
 87216,Empowered K'nath Core
 87220,Small Ruschk Ice Totem
 87222,Vial of strange fluid

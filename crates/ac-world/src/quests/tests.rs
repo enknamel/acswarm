@@ -37,10 +37,11 @@ fn san_mings_blood_shreth_kill_task_loads_as_the_design_works_it() {
 
 #[test]
 fn a_red_rat_tail_is_one_quest_per_reward_for_any_of_its_givers() {
-    // Eight Collector weenies, one row each, in eleven places give Stamina Elixirs; Wa Shi Pyreals.
+    // Nine Collector weenies, one row each, in fourteen places (three a generator puts out) give
+    // Stamina Elixirs; Wa Shi Pyreals.
     let rows: Vec<&Row> = rows_of("give:3684:2470").collect();
-    assert_eq!(rows.len(), 8);
-    assert_eq!(rows.iter().map(|r| r.places.len()).sum::<usize>(), 11);
+    assert_eq!(rows.len(), 9);
+    assert_eq!(rows.iter().map(|r| r.places.len()).sum::<usize>(), 14);
     assert!(rows
         .iter()
         .all(|r| r.title == "Red Rat Tail for Stamina Elixir"));

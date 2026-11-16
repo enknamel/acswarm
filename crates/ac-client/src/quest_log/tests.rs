@@ -104,7 +104,7 @@ fn an_item_quest_needs_its_item_carried_and_one_done_by_talk_stays_done() {
 fn the_board_wants_a_few_of_an_any_time_hand_in_and_nothing_once_switched_off() {
     let mut facts = on();
     let board = quest_board(&rows("give:3684:2470"), &facts);
-    assert_eq!(board[0].givers, 11);
+    assert_eq!(board[0].givers, 14);
     assert_eq!(
         quest_wants(&board),
         [QuestWant {

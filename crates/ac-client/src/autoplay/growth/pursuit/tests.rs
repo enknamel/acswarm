@@ -4890,3 +4890,41 @@ fn a_chorizite_goal_works_its_chain_of_recipes_and_hand_ins() {
     in_the_pack(&mut c, 0x8000_0907, 7581, "Chorizite", 40);
     assert_eq!(step(&mut c), PursuitStep::Finished);
 }
+
+#[test]
+fn the_browerk_flag_is_had_from_the_watcher_a_generator_puts_out() {
+    // OnBrowerkQuest opens the Gate to Qin Xikit's Island; only the Watcher of the Dead stamps it,
+    // and only its generator at 0x11340000 puts it out (quests.sh's madenpc).
+    let f = facts(111, &[]);
+    let carried = |_| 0;
+    let asking = Asking {
+        level: f.level,
+        held: &f.held,
+        carried: &carried,
+        refused: &|_, _| false,
+        away: &|_| 0.0,
+    };
+    let held = BTreeMap::new();
+    let arena = arena::ArenaView::default();
+    let ask = Ask {
+        facts: &f,
+        asking: &asking,
+        tried: &|_: &Unlock| false,
+        held: &held,
+        led: None,
+        chains: &ChainData,
+        dropped: &|_| false,
+        unlocked: &|_| false,
+        ways: &BTreeMap::new(),
+        gem_grounds: &Default::default(),
+        flag_ways: &BTreeMap::new(),
+        portal_ways: &BTreeMap::new(),
+        here: None,
+        bound: None,
+        kill_secs: &|_| Some(20.0),
+        event_on: &|_| false,
+        arena: &arena,
+    };
+    let step = ask.flag_step_by("OnBrowerkQuest", 0, true).0;
+    assert!(format!("{step:?}").contains("29731"), "{step:?}");
+}
