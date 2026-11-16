@@ -19,6 +19,12 @@ const NPC_NEAR: f32 = 20.0;
 /// off before its UseDone cancels the server's walk to it (Player_Move2.cs:172).
 const FIRST_ANSWER: Duration = Duration::from_secs(10);
 
+/// The NPC used after its objects has carried us off within this, else they are used again
+/// (guess): its teleport lands in under a second, and a use cut short has no answer of its own.
+pub(super) const FIRSTS_AGAIN: Duration = Duration::from_secs(4);
+/// Rounds of the objects asked first before the NPC's way is given up (guess).
+pub(super) const FIRST_ROUNDS: u32 = 3;
+
 /// What an NPC step is: its NPC, what it is handed, whether it summons, and its emotes' delay.
 struct NpcStep<'a> {
     npc: u32,
@@ -117,6 +123,19 @@ impl Client {
             since_portal,
             self.travel.state.summoned_uses,
         );
+        // Not carried off: an object used first may not have taken (the Portal Device "too weak",
+        // an Eye's walk cut short), so each is used again (a_device_still_unfuelled_has_its_eyes_used_again).
+        let teleports = !step.summons && step.item.is_none() && !step.first.is_empty();
+        if teleports && since_way >= FIRSTS_AGAIN && self.travel.state.first_rounds < FIRST_ROUNDS {
+            tracing::info!(
+                "travel: {} opened no way; what it asks used first again",
+                step.name
+            );
+            self.travel.state.first_rounds += 1;
+            self.travel.state.firsts_used.clear();
+            self.travel.state.gem_used = None;
+            return None;
+        }
         match next {
             GemNext::Wait => {}
             GemNext::UseGem | GemNext::UsePortal(_) if self.hands_busy(now) => {}

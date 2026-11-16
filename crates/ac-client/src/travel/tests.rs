@@ -2243,6 +2243,72 @@ fn a_device_fuelled_by_eyes_has_each_eye_used_before_it() {
     );
 }
 
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_device_still_unfuelled_has_its_eyes_used_again() {
+    use super::npc_step::{FIRSTS_AGAIN, FIRST_ROUNDS};
+    // Blargerton's four Eye uses each had a UseDone and none took ("The portal is too weak ...
+    // All must be activated."): the device sent nobody, so each Eye is used again.
+    let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    let me = c.my_position().unwrap();
+    let near = me + Vec3::new(1.0, 0.0, 0.0);
+    let mut eye = crate::testkit::creature(0x7000_0001, "Eye of the Watcher");
+    eye.weenie_class_id = 29715;
+    eye.position = crate::testkit::placed(0xA9B4_0019, near);
+    c.world.objects.insert(eye.guid, eye);
+    let mut device = crate::testkit::creature(0x7000_0003, "Portal Device");
+    device.weenie_class_id = 29728;
+    device.position = crate::testkit::placed(0xA9B4_0019, me);
+    c.world.objects.insert(device.guid, device);
+    let step = Step::Npc {
+        npc: 29728,
+        name: "Portal Device".into(),
+        item: None,
+        portal: None,
+        secs: 0.0,
+        first: vec![(29715, c.place_at(near))],
+        mouth: c.place_at(me),
+        exit: c.place_at(me),
+    };
+    let t0 = Instant::now();
+    let mut t = t0;
+    for round in 0..=FIRST_ROUNDS {
+        // The eye used, its UseDone heard, then the device used.
+        let _ = c.travel_npc_wait(&step, t);
+        assert_eq!(
+            c.last_used,
+            Some(0x7000_0001),
+            "round {round}: the eye not used"
+        );
+        c.autoplay.cast_answered();
+        c.use_done = Some((0, t + Duration::from_millis(500)));
+        t += Duration::from_secs(1);
+        let _ = c.travel_npc_wait(&step, t);
+        assert!(
+            c.travel.state.gem_used.is_some(),
+            "round {round}: the device not used"
+        );
+        c.autoplay.cast_answered();
+        // Not carried off.
+        t += FIRSTS_AGAIN;
+        let _ = c.travel_npc_wait(&step, t);
+        if round < FIRST_ROUNDS {
+            assert!(
+                c.travel.state.firsts_used.is_empty(),
+                "round {round}: eyes not used again"
+            );
+        }
+    }
+    // The rounds spent, the way is given up once the device's wait is.
+    assert!(
+        !c.travel.state.firsts_used.is_empty(),
+        "a round past the last"
+    );
+    let _ = c.travel_npc_wait(&step, t + Duration::from_secs(5));
+    assert!(c.is_npc_way_refused(29728), "never given up");
+}
+
 /// Faladha the Emissary two paces off in Holtburg's field, a 10,000 note carried: her NPC step.
 fn by_faladha() -> (Client, Step) {
     let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
