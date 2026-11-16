@@ -206,13 +206,14 @@ pub(crate) fn draw(
                 actions.appraise_all = true;
             }
         });
-        let (r, _) = ui.dnd_drop_zone::<ItemDrag, _>(egui::Frame::new().inner_margin(2), |ui| {
-            ui.label(
-                egui::RichText::new("drop items here to store")
-                    .color(egui::Color32::from_gray(170)),
-            );
-        });
-        if let Some(p) = r.response.dnd_release_payload::<ItemDrag>() {
+        let (_, dropped) =
+            ui.dnd_drop_zone::<ItemDrag, _>(egui::Frame::new().inner_margin(2), |ui| {
+                ui.label(
+                    egui::RichText::new("drop items here to store")
+                        .color(egui::Color32::from_gray(170)),
+                );
+            });
+        if let Some(p) = dropped {
             actions.store.push(p.0);
         }
     });

@@ -87,7 +87,7 @@ pub(crate) fn draw(
                     .color(egui::Color32::from_rgb(255, 150, 150)),
             );
         }
-        let (r, _) = ui.dnd_drop_zone::<ItemDrag, _>(egui::Frame::new().inner_margin(2), |ui| {
+        let (_, dropped) = ui.dnd_drop_zone::<ItemDrag, _>(egui::Frame::new().inner_margin(2), |ui| {
             egui::ScrollArea::vertical()
                 .max_height(200.0)
                 .show(ui, |ui| {
@@ -124,7 +124,7 @@ pub(crate) fn draw(
                     );
                 });
         });
-        if let Some(p) = r.response.dnd_release_payload::<ItemDrag>() {
+        if let Some(p) = dropped {
             actions.add.push(p.0);
         }
         ui.horizontal(|ui| {

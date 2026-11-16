@@ -37,7 +37,7 @@ pub(crate) fn draw(egui: &egui::Context, t: &TargetView) -> Option<u32> {
     let w = egui.viewport_rect().width();
     let mut given = None;
     super::area("target", egui::pos2(w * 0.5 - 130.0, 8.0)).show(egui, |ui| {
-        let (zone, _) = ui.dnd_drop_zone::<ItemDrag, _>(egui::Frame::new(), |ui| {
+        let (_, dropped) = ui.dnd_drop_zone::<ItemDrag, _>(egui::Frame::new(), |ui| {
             frame(160, 6).show(ui, |ui| {
                 let (rect, _) =
                     ui.allocate_exact_size(egui::vec2(248.0, 18.0), egui::Sense::hover());
@@ -55,7 +55,7 @@ pub(crate) fn draw(egui: &egui::Context, t: &TargetView) -> Option<u32> {
                 );
             });
         });
-        if let Some(p) = zone.response.dnd_release_payload::<ItemDrag>() {
+        if let Some(p) = dropped {
             given = Some(p.0);
         }
     });

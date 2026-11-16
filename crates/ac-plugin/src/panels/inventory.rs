@@ -547,11 +547,11 @@ fn slot_chip(ui: &mut egui::Ui, index: usize, slot: &Slot, actions: &mut Actions
             );
         }
         Slot::Empty => {
-            let (r, _) =
+            let (r, dropped) =
                 ui.dnd_drop_zone::<ItemDrag, _>(egui::Frame::new().inner_margin(1), |ui| {
                     ui.label(egui::RichText::new("[ empty ]").color(dim).small());
                 });
-            if let Some(p) = r.response.dnd_release_payload::<ItemDrag>() {
+            if let Some(p) = dropped {
                 // Moving a pack into the main pack is what puts it on:
                 // the server routes a pack to a pack slot by itself.
                 actions.moves.push((p.0, 0));
@@ -565,7 +565,7 @@ fn slot_chip(ui: &mut egui::Ui, index: usize, slot: &Slot, actions: &mut Actions
 
 /// A pack header that takes drops; returns whether it was clicked (fold).
 fn pack_header(ui: &mut egui::Ui, text: String, container: u32, actions: &mut Actions) -> bool {
-    let (r, _) = ui.dnd_drop_zone::<ItemDrag, _>(egui::Frame::new().inner_margin(2), |ui| {
+    let (r, dropped) = ui.dnd_drop_zone::<ItemDrag, _>(egui::Frame::new().inner_margin(2), |ui| {
         ui.add(
             egui::Label::new(
                 egui::RichText::new(text)
@@ -575,7 +575,7 @@ fn pack_header(ui: &mut egui::Ui, text: String, container: u32, actions: &mut Ac
             .sense(egui::Sense::click()),
         )
     });
-    if let Some(p) = r.response.dnd_release_payload::<ItemDrag>() {
+    if let Some(p) = dropped {
         if p.0 != container {
             actions.moves.push((p.0, container));
         }

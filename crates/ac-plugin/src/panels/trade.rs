@@ -110,7 +110,7 @@ pub(crate) fn draw(egui: &egui::Context, icons: &mut IconCache, v: &TradeView) -
         ui.set_min_size(egui::vec2(424.0, 284.0));
         title_bar(ui, "trade", format!("Trade with {}", v.partner));
         ui.columns(2, |cols| {
-            let (zone, _) =
+            let (_, dropped) =
                 cols[0].dnd_drop_zone::<ItemDrag, _>(egui::Frame::new().inner_margin(2), |ui| {
                     caption(ui, "Your offer (drop items here)");
                     ui.set_min_height(170.0);
@@ -129,7 +129,7 @@ pub(crate) fn draw(egui: &egui::Context, icons: &mut IconCache, v: &TradeView) -
                         );
                     }
                 });
-            if let Some(p) = zone.response.dnd_release_payload::<ItemDrag>() {
+            if let Some(p) = dropped {
                 actions.add.push(p.0);
             }
             caption(&mut cols[1], format!("{}'s offer", v.partner));
@@ -254,6 +254,55 @@ impl Plugin for Trade {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_item_dropped_on_your_offer_is_added() {
+        // The drop zone takes the payload itself (egui ui.rs:2734): read again, every drop was lost.
+        let ctx = egui::Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let v = TradeView {
+            partner: "Bot".into(),
+            mine: vec![],
+            theirs: vec![],
+            stats: Default::default(),
+            i_accepted: false,
+            they_accepted: false,
+            failure: None,
+        };
+        let mut icons = IconCache::default();
+        // The window opens at (180, 150), 440 by 300: its left column is your offer.
+        let over = egui::pos2(260.0, 260.0);
+        let input = |events| egui::RawInput {
+            screen_rect: Some(screen),
+            events,
+            ..Default::default()
+        };
+        let mut actions = Actions::default();
+        // A window's first frames size it: the hit test needs it laid out.
+        for _ in 0..3 {
+            let mut out = ctx.run_ui(input(vec![egui::Event::PointerMoved(over)]), |ui| {
+                actions = draw(ui.ctx(), &mut icons, &v);
+            });
+            out.textures_delta.clear();
+        }
+        let mut out = ctx.run_ui(input(vec![]), |ui| {
+            egui::DragAndDrop::set_payload(ui.ctx(), ItemDrag(7));
+            actions = draw(ui.ctx(), &mut icons, &v);
+        });
+        out.textures_delta.clear();
+        assert!(actions.add.is_empty());
+        let release = egui::Event::PointerButton {
+            pos: over,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        };
+        let mut out = ctx.run_ui(input(vec![release]), |ui| {
+            actions = draw(ui.ctx(), &mut icons, &v);
+        });
+        out.textures_delta.clear();
+        assert_eq!(actions.add, vec![7], "the drop was lost");
+    }
 
     #[test]
     fn status_follows_acceptance() {
