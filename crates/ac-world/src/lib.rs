@@ -108,6 +108,8 @@ impl Default for Motion {
 /// One object the server has placed in the world.
 pub mod object_desc_flags {
     pub const OPENABLE: u32 = 0x0000_0001;
+    /// May be inscribed: only here, never in an appraisal (PropertyBool 22 is not assessed).
+    pub const INSCRIBABLE: u32 = 0x0000_0002;
     /// Cannot be picked up (NPCs, doors, signs, furniture).
     pub const STUCK: u32 = 0x0000_0004;
     pub const PLAYER: u32 = 0x0000_0008;

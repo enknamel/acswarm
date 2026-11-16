@@ -364,9 +364,6 @@ pub(crate) fn build(
         if a.bool(91).unwrap_or(false) {
             flags.push("retained");
         }
-        if a.bool(22).unwrap_or(false) {
-            flags.push("inscribable");
-        }
         if !flags.is_empty() {
             lines.push(("Flags".into(), flags.join(", ")));
         }
@@ -395,8 +392,13 @@ pub(crate) fn view(c: &Client) -> Option<AppraisalView> {
             .objects
             .get(&guid)
             .is_some_and(|o| o.wielder.is_some() && o.wielder == me);
-    let inscription =
-        (held && a.bool(22).unwrap_or(false)).then(|| a.string(7).unwrap_or("").to_string());
+    // The server says so on the object, never in its appraisal (PropertyBool 22 is not assessed).
+    let inscribable = c
+        .world
+        .objects
+        .get(&guid)
+        .is_some_and(|o| o.object_desc_flags & ac_world::object_desc_flags::INSCRIBABLE != 0);
+    let inscription = (held && inscribable).then(|| a.string(7).unwrap_or("").to_string());
     let mut v = build(
         &name,
         a,
@@ -588,6 +590,40 @@ impl Plugin for AppraisalPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_carried_item_flagged_inscribable_on_the_object_offers_its_inscription() {
+        // The appraisal never carries Inscribable (bool 22): the box waited for it and never showed.
+        let mut c = Client::offline(std::rc::Rc::new(ac_scene::Assets::empty()));
+        c.world.player_guid = Some(0x5000_0001);
+        const RING: u32 = 0x8000_0042;
+        c.world.objects.insert(
+            RING,
+            ac_world::WorldObject {
+                guid: RING,
+                name: "Ring".into(),
+                container: Some(0x5000_0001),
+                object_desc_flags: ac_world::object_desc_flags::INSCRIBABLE,
+                ..Default::default()
+            },
+        );
+        let a = Appraisal {
+            guid: RING,
+            success: true,
+            strings: vec![(7, "mine".into())],
+            ..Default::default()
+        };
+        c.appraisals.insert(RING, a);
+        c.last_appraisal = Some(RING);
+        let v = view(&c).expect("appraised");
+        assert_eq!(v.inscription.as_deref(), Some("mine"));
+        c.world.objects.get_mut(&RING).unwrap().object_desc_flags = 0;
+        assert_eq!(
+            view(&c).unwrap().inscription,
+            None,
+            "offered on a plain ring"
+        );
+    }
 
     #[test]
     fn imbues_defenses_caster_mods_and_ratings_are_shown() {
