@@ -25,12 +25,13 @@ impl Client {
                 .any(|m| m.debuffed.contains(&guid))
     }
 
-    /// Whether `guid` is of a kind no debuff takes hold on (`Client::hear_magic_immune`).
+    /// Whether `guid` is of a kind no debuff takes hold on: flagged so in the world data
+    /// (`ac_world::immune`), or the server said so (`Client::hear_magic_immune`).
     pub(crate) fn is_magic_immune(&self, guid: u32) -> bool {
-        self.world
-            .objects
-            .get(&guid)
-            .is_some_and(|o| self.autoplay.magic_immune.contains(&o.weenie_class_id))
+        self.world.objects.get(&guid).is_some_and(|o| {
+            let wcid = o.weenie_class_id;
+            ac_world::immune::is_magic_immune(wcid) || self.autoplay.magic_immune.contains(&wcid)
+        })
     }
 
     /// This character's Life Magic as it stands (skill 33).

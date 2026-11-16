@@ -161,6 +161,43 @@ impl Client {
         }
     }
 
+    /// The kinds no debuff takes hold on, one file per server beside its characters' quest files:
+    /// the flag is the creature's own (NonProjectileMagicImmune), so every character there shares it.
+    fn magic_immune_path(&self) -> Option<std::path::PathBuf> {
+        let beside = self.profiles.dir().parent()?.to_path_buf();
+        let host = ac_store::file_safe(&self.config.host);
+        Some(beside.join("quests").join(host).join("magic_immune.json"))
+    }
+
+    /// Read back the kinds learned in earlier sessions, at login: none is tried again.
+    pub(crate) fn load_magic_immune(&mut self) {
+        let Some(path) = self.magic_immune_path() else {
+            return;
+        };
+        match ac_store::read_json::<Vec<u32>>(&path) {
+            Ok(Some(kinds)) => {
+                let known = &mut self.autoplay.magic_immune;
+                for k in kinds {
+                    if !known.contains(&k) {
+                        known.push(k);
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!("autoplay: reading {}: {e}", path.display()),
+        }
+    }
+
+    pub(crate) fn save_magic_immune(&self) {
+        let Some(path) = self.magic_immune_path() else {
+            return;
+        };
+        let kinds = &self.autoplay.magic_immune;
+        if let Err(e) = ac_store::write_json_atomic(&path, kinds, ac_store::Visibility::Normal) {
+            tracing::warn!("autoplay: writing {}: {e}", path.display());
+        }
+    }
+
     /// A spell failed to affect the creature `name` (`Refusal::Affect`): its kind is immune to all
     /// but projectiles (Player_Magic.cs:1109), so no debuff is counted on it or cast at one again.
     pub(crate) fn hear_magic_immune(&mut self, name: &str) {
@@ -178,13 +215,14 @@ impl Client {
             return;
         };
         let wcid = self.world.objects.get(&g).map_or(0, |o| o.weenie_class_id);
-        let st = &mut self.autoplay;
-        if wcid != 0 && !st.magic_immune.contains(&wcid) {
-            st.magic_immune.push(wcid);
+        if wcid != 0 && !self.autoplay.magic_immune.contains(&wcid) {
+            self.autoplay.magic_immune.push(wcid);
+            self.save_magic_immune();
             tracing::info!(
                 "autoplay: {name} ({wcid}) takes no debuff; none cast at its kind again"
             );
         }
+        let st = &mut self.autoplay;
         st.vulned.retain(|(t, _)| *t != g);
         st.yielded.retain(|(t, _)| *t != g);
         st.imperiled.retain(|t| *t != g);

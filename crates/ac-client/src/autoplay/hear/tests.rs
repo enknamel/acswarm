@@ -145,8 +145,9 @@ fn a_kind_a_debuff_failed_to_affect_is_never_debuffed_again() {
     // Blargerton's Tusker's Gift came back "You fail to affect Olthoi Slayer with Tusker's Gift"
     // (NonProjectileMagicImmune, Player_Magic.cs:1109) once per Slayer, each counted as on.
     let mut c = crate::testkit::offline_client();
+    // A kind the world data does not flag (`ac_world::immune`): the server's word is all there is.
     let slayer = |guid| ac_world::WorldObject {
-        weenie_class_id: 35146,
+        weenie_class_id: 99_001,
         ..crate::testkit::creature(guid, "Olthoi Slayer")
     };
     c.world.objects.insert(0x8000_0103, slayer(0x8000_0103));
@@ -164,4 +165,24 @@ fn a_kind_a_debuff_failed_to_affect_is_never_debuffed_again() {
     assert!(c.is_magic_immune(0x8000_0103));
     assert!(c.is_magic_immune(0x8000_0104), "every one of its kind");
     assert!(!c.is_magic_immune(0x8000_0105), "another kind is not");
+    // Kept for the next session on this server.
+    c.profiles = std::sync::Arc::new(crate::testkit::shelf("magic-immune", Vec::new()));
+    c.config.host = "play.example:9000".into();
+    c.save_magic_immune();
+    let mut next = crate::testkit::offline_client();
+    next.profiles = c.profiles.clone();
+    next.config.host = c.config.host.clone();
+    next.load_magic_immune();
+    assert_eq!(next.autoplay.magic_immune, vec![99_001]);
+}
+
+#[test]
+fn a_kind_the_world_data_flags_is_never_debuffed() {
+    let mut c = crate::testkit::offline_client();
+    let slasher = ac_world::WorldObject {
+        weenie_class_id: 31007,
+        ..crate::testkit::creature(0x8000_0103, "Olthoi Slasher")
+    };
+    c.world.objects.insert(slasher.guid, slasher);
+    assert!(c.is_magic_immune(0x8000_0103));
 }

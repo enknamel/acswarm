@@ -1,0 +1,117 @@
+# Creatures no spell but a projectile affects (NonProjectileMagicImmune).
+# wcid,name
+# Regenerate with reference/scripts/data/magic_immune.sh (reads the ACE world database).
+7418,Easter Bunny
+30680,Withered Drudge Seraph
+30681,Withered Drudge Seraph
+30682,Withered Drudge Seraph Mystic
+30683,Withered Banderling Hierophant
+30684,Withered Banderling Hierophant
+30685,Withered Banderling Paragon
+30686,Withered Transcendent Tumerok
+30687,Withered Revered Tumerok Shaman
+30688,Withered Revered Tumerok Shaman
+30689,Withered Raider Prefect
+30690,Withered Raider Prefect
+30691,Withered Raider Justicar
+30834,Shadow Lugian Portal
+31005,Olthoi Ripper
+31007,Olthoi Slasher
+31008,Olthoi Slayer
+31016,Agitated Phyntos Wasp
+31017,Kirit Zefir
+31021,Puffball Thrungus
+31022,Jelly Thrungus
+31023,Black Morel Thrungus
+31025,Fire Morel Thrungus
+31516,Withered Banderling Hierophant
+31517,Withered Raider Prefect
+33698,Pillar of Fire
+33894,Abyssal Totem
+35146,Olthoi Slayer
+35149,Olthoi Ripper
+35150,Olthoi Slasher
+35167,Kirit Zefir
+35251,Exhumed Bones Piles
+35830,Withered Banderling Paragon
+35831,Withered Drudge Seraph Mystic
+35832,Withered Raider Justicar
+35833,Withered Raider Prefect
+35834,Withered Raider Prefect
+35835,Withered Transcendent Tumerok
+35879,Paradox-touched Olthoi Ripper
+35880,Paradox-touched Olthoi Slasher
+36175,Pillar of Acid
+36176,Pillar of Frost
+36177,Pillar of Lightning
+36759,Virindi Portal
+36760,Virindi Portal
+36761,Virindi Portal
+36762,Virindi Portal
+36763,Virindi Portal
+41798,Killer Phyntos Hive
+42040,Noble Remains
+44297,Cracked Stone Tablet
+44651,Pillar of Fire
+44695,Pillar of Fire
+46300,Pillar of Frost
+46690,Guruk Grunt
+51599,Pillar of Lightning
+51831,Pillar of Frost
+51971,Sanctum Warding Crystal
+51972,Sanctum Warding Crystal
+51973,Sanctum Warding Crystal
+51974,Sanctum Warding Crystal
+52260,Pillar of Frost
+52261,Pillar of Lightning
+52262,Pillar of Acid
+52263,Pillar of Fire
+52271,Shadowy Pillar
+52283,Frozen Crystal
+52290,Desert Cactus
+52305,Corrupted Gravestone
+52712,Ruuk Ranger
+52726,Defensive Crystal
+52727,Defensive Crystal
+53290,Ice Storm
+70017,Tomb of Adhorix
+70365,Bloodstone Crystal Stockpile
+70701,Dull Aetherium Ore Stockpile
+70702,Bright Aetherium Ore Stockpile
+72122,Lightning Cloud
+72166,Lightning Cloud
+72173,Lightning Cloud
+72504,Spirit of Dana'lith
+72505,Ward of Decay
+72506,Ward of Blight
+72507,Ward of Darkness
+73072,Count Dardante's Desk
+73218,Holiday Present
+73226,Holiday Presents
+73236,Strange Device 1 Reward Giver
+73239,Strange Device 2 Reward Giver
+73242,Strange Device 4 Reward Giver
+87025,StrangeDeviceThree Watcher
+87027,StrangeDeviceThree Controller
+87031,SecondScene Controller
+87041,KnorrQudditySeedEvent Watcher
+87047,KnorrQudditySeedEvent Starter
+87165,Monster Fights Controller
+87259,Frozen Gearknight
+87262,Frozen Cave Gearknight Controller
+87270,Deewains Chamber Controller
+87275,Quiddity Seed
+87276,Withered Revered Tumerok Shaman
+87329,Burun Shaman StopGap
+87330,Burun Shaman Controller
+87504,Empyrean Rescue Quest Stopgap
+87505,Empyrean Rescue Watcher
+87830,Olthoi Slasher
+88154,Drudge Wilter
+88451,RB Palm Fort Rewards Stopgap
+88452,RB Palm Fort Stopgap
+88454,RB Palm Fort Rewards Stopgap
+88459,EW Palm Fort Rewards Stopgap
+88460,EW Palm Fort Stopgap
+88466,CH Palm Fort Rewards Stopgap
+88467,CH Palm Fort Stopgap

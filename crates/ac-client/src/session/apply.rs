@@ -55,6 +55,7 @@ impl Client {
         self.load_quest_log();
         self.load_proven_tier();
         self.load_bodies();
+        self.load_magic_immune();
     }
 
     /// Pump the network, apply the server's messages, run the gameplay

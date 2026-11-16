@@ -13,6 +13,7 @@ pub mod fletching;
 pub mod gems;
 pub mod housing;
 pub mod hunting;
+pub mod immune;
 pub mod landmarks;
 pub mod lookup;
 pub mod material;
