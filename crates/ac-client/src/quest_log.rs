@@ -1128,6 +1128,7 @@ impl Client {
         if !paid && (!taken || row.repeat == Repeat::Any) {
             let key = (row.giver_wcid, asked.place.cell);
             self.autoplay.growth.givers_refused.mark(key, now);
+            self.autoplay.growth.givers_means.remove(&key);
             let why = format!("{} gave nothing for {}", row.giver, row.title);
             self.autoplay.note(why, now);
             self.server_quests_due = true;

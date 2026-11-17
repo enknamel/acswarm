@@ -222,6 +222,8 @@ pub struct State {
     needs: Vec<Need>,
     /// Quest givers no journey reached, by giver class and cell, and since when.
     pub(crate) givers_refused: Recent<(u32, u32)>,
+    /// The journey means (`Client::journey_means`) each giver no journey reached was refused with.
+    pub(crate) givers_means: std::collections::BTreeMap<(u32, u32), u64>,
     /// Talks made to quest givers lately: by quest id, giver class, and whether it took the quest
     /// up (the hand-in to the same giver is another talk).
     pub(crate) talked: Recent<(String, u32, bool)>,

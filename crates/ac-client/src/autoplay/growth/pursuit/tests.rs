@@ -5313,3 +5313,60 @@ fn a_field_silent_to_the_stone_is_used_again_then_passed_over() {
     assert!(c.autoplay.growth.pursuit_held.contains_key(&line.id));
     assert_eq!(c.autoplay.growth.using, None);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_sarcophagus_unreached_without_the_crown_is_called_on_with_it() {
+    // Blargerton took the Crown off the Ensorcelled Dais and recalled to his area: the
+    // Sarcophagus stood refused from before, "cannot be asked now", and nothing was worked.
+    let mut c = mage_pursuing("qinxikitcomplete", "chained-quests");
+    c.world.stats.level = 120;
+    let now = Instant::now();
+    c.travel.quests_done = [
+        "RoadsJournal",
+        "OnBrowerkQuest",
+        "BloodPuzzleCompleted",
+        "QinXikitBeaten",
+    ]
+    .iter()
+    .map(|h| h.to_string())
+    .collect();
+    c.server_quests_read = true;
+    again(&mut c, now);
+    let (row, at) = c.pursuit_call().expect("the Sarcophagus is called on");
+    assert!(
+        !c.start_quest_call(row, at, now),
+        "no way without the Crown"
+    );
+    assert!(c.is_giver_refused(row, &at, now));
+    // In the crown chamber with the Crown: the Enchanted Dais's way opens, the refusal goes.
+    crate::testkit::stand(&mut c, 0x00F2_0147, Vec3::new(10.4, -91.3, 0.0));
+    in_the_pack(&mut c, 0x7000_0001, 29591, "Qin Xikit's Crown", 1);
+    let t = now + Duration::from_secs(5);
+    let step = again(&mut c, t);
+    assert!(
+        matches!(step, PursuitStep::HandIn { row, .. } if row.giver_wcid == 29729),
+        "{}",
+        step.words(0)
+    );
+    assert!(c.pursuit[0].working);
+    let (row, at) = c.pursuit_call().expect("still called on");
+    assert!(c.start_quest_call(row, at, t), "{}", c.autoplay.status);
+    // Handed the Crown, the Dais's gate to the island; on by the Portal Device, the Guardians and
+    // the Exit to the tomb (npc_ways.csv's Browerk rows).
+    let trip = c.travel_trip().expect("a journey to the Sarcophagus");
+    let npcs: Vec<u32> = trip
+        .steps
+        .iter()
+        .filter_map(|s| match s {
+            ac_world::trip::Step::Npc { npc, .. } => Some(*npc),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(npcs, [29713, 29728, 29721, 29722], "{:?}", trip.steps);
+    assert!(
+        matches!(trip.steps.last(), Some(ac_world::trip::Step::Walk(p)) if p.cell >> 16 == 0x00F3),
+        "{:?}",
+        trip.steps
+    );
+}

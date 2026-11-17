@@ -200,8 +200,12 @@ impl Client {
     /// talk, that talk made lately.
     pub(crate) fn is_giver_refused(&self, row: &Row, p: &Place, now: Instant) -> bool {
         let st = &self.autoplay.growth;
-        st.givers_refused
-            .within(&(row.giver_wcid, p.cell), now, GIVER_RETRY)
+        let key = (row.giver_wcid, p.cell);
+        // Unreached stands only while the planner's means do: the Crown carried opens the
+        // Sarcophagus's way (the_sarcophagus_unreached_without_the_crown_is_called_on_with_it).
+        let same_means = |m: &u64| *m == self.journey_means();
+        (st.givers_refused.within(&key, now, GIVER_RETRY)
+            && st.givers_means.get(&key).is_none_or(same_means))
             || (row.hand == Handing::Talk && st.talked.within(&talk_key(row), now, TALK_AGAIN))
     }
 
@@ -335,8 +339,17 @@ impl Client {
     fn refuse_givers(&mut self, hand_ins: &[HandIn], refused: &[usize], now: Instant) {
         for &k in refused {
             let HandIn { row, at, .. } = hand_ins[k];
-            self.refuse_giver(row, at, &format!("no way to {}", row.giver), now);
+            self.refuse_unreached(row, at, now);
         }
+    }
+
+    /// `row`'s giver at `at`, which no journey reaches with the means it has now, refused: until
+    /// [`GIVER_RETRY`] or those means change (an item carried that an NPC way takes, a flag held).
+    fn refuse_unreached(&mut self, row: &Row, at: Place, now: Instant) {
+        self.refuse_giver(row, at, &format!("no way to {}", row.giver), now);
+        let means = self.journey_means();
+        let st = &mut self.autoplay.growth;
+        st.givers_means.insert((row.giver_wcid, at.cell), means);
     }
 
     fn refuse_giver(&mut self, row: &Row, at: Place, why: &str, now: Instant) {
@@ -350,6 +363,7 @@ impl Client {
         }
         let key = (row.giver_wcid, at.cell);
         self.autoplay.growth.givers_refused.mark(key, now);
+        self.autoplay.growth.givers_means.remove(&key);
         self.autoplay.note(format!("{why} for {}", row.title), now);
     }
 
@@ -491,7 +505,7 @@ impl Client {
                         format!("{}: to {} for {}", run.reason, row.giver, row.title),
                     );
                 } else {
-                    self.refuse_giver(row, at, &format!("no way to {}", row.giver), now);
+                    self.refuse_unreached(row, at, now);
                 }
                 ok
             }
