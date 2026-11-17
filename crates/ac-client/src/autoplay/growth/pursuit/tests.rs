@@ -82,6 +82,7 @@ fn dropper(want: Want, wcid: u32, name: &str, level: u32) -> &'static Source {
         needs: Vec::new(),
         respawn: None,
         band: None,
+        drain: None,
     })
 }
 
@@ -833,6 +834,7 @@ fn necklace_from(kind: Yield, wcid: u32, name: &str, at: Place) -> Source {
         needs: Vec::new(),
         respawn: None,
         band: None,
+        drain: None,
     }
 }
 
@@ -1567,6 +1569,7 @@ fn vortex(at: Place) -> PursuitStep {
         needs: Vec::new(),
         respawn: None,
         band: None,
+        drain: None,
     };
     PursuitStep::UseOn {
         source: leak(source),
@@ -5144,6 +5147,59 @@ fn an_event_starter_out_of_its_use_reach_is_walked_into_it_before_the_use() {
         "{}",
         c.autoplay.status
     );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_eye_that_drains_is_used_alone_and_at_full_health() {
+    // Each Eye cuts every skill and attribute to 1% for 60 s and drains 35 health each 10.5 s
+    // for 292 s: two used 0.6 s apart killed a level 120 in 33 s, every heal fizzling.
+    let want = Want::Event("templematriarchsummon1".into());
+    let source = ac_world::quests::sources_of(&want)
+        .find(|s| s.kind == Yield::Start)
+        .expect("an Eye starts it");
+    let (mut c, line) = fetching(|at| PursuitStep::AskFor { source, at });
+    let PursuitStep::AskFor { at, .. } = line.step else {
+        unreachable!()
+    };
+    lying(&mut c, REPAIR_GOLEM, source.wcid, "Eye of the Watcher", at);
+    in_use_reach(&mut c, REPAIR_GOLEM);
+    let health = |c: &mut Client, have: u32| {
+        let v = &mut c.world.stats.vitals[0];
+        (v.base, v.current) = (305, have);
+    };
+    health(&mut c, 305);
+    let start = Instant::now();
+    c.note_event("templematriarchfeeder", start);
+    let used = |c: &Client| c.autoplay.growth.fetching.as_ref().map(|f| f.act);
+    let now = start + Duration::from_secs(9);
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    assert_eq!(used(&c), Some(fetch::Act::Start), "used at full health");
+    c.use_done = Some((0, now));
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    // The next draining use waits out this one's drain, whatever its health.
+    let soon = now + Duration::from_secs(1);
+    assert_eq!(c.grow_fetch(&line, soon), Some(true));
+    assert_eq!(used(&c), None, "{}", c.autoplay.status);
+    assert!(
+        c.autoplay.status.contains("waiting out"),
+        "{}",
+        c.autoplay.status
+    );
+    // Run out, it waits on the heals filling the bar.
+    let later = now + Duration::from_secs(400);
+    health(&mut c, 200);
+    assert_eq!(c.grow_fetch(&line, later), Some(true));
+    assert_eq!(used(&c), None, "{}", c.autoplay.status);
+    assert!(
+        c.autoplay.status.contains("healing to full"),
+        "{}",
+        c.autoplay.status
+    );
+    assert!(c.autoplay.heal_full_until.is_some_and(|t| t > later));
+    health(&mut c, 305);
+    assert_eq!(c.grow_fetch(&line, later), Some(true));
+    assert_eq!(used(&c), Some(fetch::Act::Start));
 }
 
 #[test]

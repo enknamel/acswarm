@@ -631,13 +631,16 @@ fn ixir_zis_consort_comes_by_a_watch_on_the_eyes_the_guardian_feeds() {
     for (e, eye) in summons.zip([26576, 26577, 26578, 26579]) {
         let s = of(&e);
         assert_eq!(s.len(), 1, "{e}");
-        assert_eq!((s[0].kind, s[0].wcid, s[0].band), (Yield::Start, eye, None));
+        // Its use drains its user for 292 s (28 Death's Embraces, 10.5 s apart after 6 s).
+        let drain = (s[0].kind, s[0].wcid, s[0].band, s[0].drain);
+        assert_eq!(drain, (Yield::Start, eye, None, Some(292.0)));
         assert_eq!(s[0].needs, ["templeconsortfeeder"]);
     }
     let feeder = |e: &str| of(e).into_iter().next().unwrap_or_else(|| panic!("{e}"));
     let consort = feeder("templeconsortfeeder");
     assert_eq!((consort.kind, consort.wcid), (Yield::Start, 26564));
     assert_eq!((consort.band, consort.needs.len()), (Some((40, 69)), 0));
+    assert_eq!(consort.drain, None);
     assert_eq!(feeder("templeapprenticefeeder").band, Some((70, 99)));
     let matriarch = feeder("templematriarchfeeder");
     assert_eq!(matriarch.band, Some((100, 0)));

@@ -1,5 +1,5 @@
 # Where what a quest wants comes from, and what each source itself needs.
-# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn[,count[,band]]
+# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn[,count[,band[,drain]]]
 # want: an item wcid or a kill counter, as quests.csv names it, a key a container or use
 # below needs, or event:NAME, a server event a source below needs, or flag:NAME, a flag stamped
 # on a creature's killer or a portal's user, or fellow:NAME, a quest stamped on the fellowship
@@ -30,7 +30,8 @@
 # respawn: for a floor item, seconds its generator takes to put it back once taken (profile delay
 # and a regeneration interval); blank when unknown. count: for a kill a watcher hears, the deaths
 # it must hear before it starts the event (only written when more than 1). band: for a start,
-# the level band its use asks, min-max (max 0: open); count is blank before it.
+# the level band its use asks, min-max (max 0: open); count is blank before it. drain: for a
+# start, seconds its use's harm runs on the user (to its last harmful cast's delays).
 # Regenerate with reference/scripts/data/quests.sh.
 107,floor,107,Sollerets,0,1,6344011F:1,26.42 -20.15 0,,,,,20
 10703,drop,7988,Sephal Niffis,67,0.03,EC0F:2;F419:3;F518:4,,,1,2:15;3:15;4:40,,
@@ -11825,20 +11826,20 @@ event:northwesthighswarmc,kill,72722,Olthoi Hive Mutilator,200,1,18BB:3;18BC:4;1
 5780,combine,5779,Strange Stick,0,1,,,5778=Whittling Knife;5779=Strange Stick,,,,
 1538,drop,1523,Undead Curator,15,1,1AE:1,,,1,1:10,,
 event:templeconsortfeeder,start,26564,Guardian of the High Matriarch,171,1,65450243:1,210 -110 0,,,,,,,40-69
-event:templeconsortsummon1,start,26576,Eye of the Watcher,276,1,65450207:1,145.1 -80 0,,,,templeconsortfeeder,
-event:templeconsortsummon2,start,26577,Eye of the Watcher,276,1,65450206:1,145.12 -70 0,,,,templeconsortfeeder,
-event:templeconsortsummon3,start,26578,Eye of the Watcher,276,1,65450219:1,174.9 -80 0,,,,templeconsortfeeder,
-event:templeconsortsummon4,start,26579,Eye of the Watcher,276,1,65450218:1,174.9 -70 0,,,,templeconsortfeeder,
+event:templeconsortsummon1,start,26576,Eye of the Watcher,276,1,65450207:1,145.1 -80 0,,,,templeconsortfeeder,,,,292
+event:templeconsortsummon2,start,26577,Eye of the Watcher,276,1,65450206:1,145.12 -70 0,,,,templeconsortfeeder,,,,292
+event:templeconsortsummon3,start,26578,Eye of the Watcher,276,1,65450219:1,174.9 -80 0,,,,templeconsortfeeder,,,,292
+event:templeconsortsummon4,start,26579,Eye of the Watcher,276,1,65450218:1,174.9 -70 0,,,,templeconsortfeeder,,,,292
 event:templeapprenticefeeder,start,26564,Guardian of the High Matriarch,171,1,65450243:1,210 -110 0,,,,,,,70-99
-event:templeapprenticesummon1,start,26571,Eye of the Watcher,276,1,6545022F:1,195.1 -80 0,,,,templeapprenticefeeder,
-event:templeapprenticesummon2,start,26572,Eye of the Watcher,276,1,6545022E:1,195.49 -70 0,,,,templeapprenticefeeder,
-event:templeapprenticesummon3,start,26573,Eye of the Watcher,276,1,65450251:1,224.89 -80 0,,,,templeapprenticefeeder,
-event:templeapprenticesummon4,start,26574,Eye of the Watcher,276,1,65450250:1,224.89 -70 0,,,,templeapprenticefeeder,
+event:templeapprenticesummon1,start,26571,Eye of the Watcher,276,1,6545022F:1,195.1 -80 0,,,,templeapprenticefeeder,,,,292
+event:templeapprenticesummon2,start,26572,Eye of the Watcher,276,1,6545022E:1,195.49 -70 0,,,,templeapprenticefeeder,,,,292
+event:templeapprenticesummon3,start,26573,Eye of the Watcher,276,1,65450251:1,224.89 -80 0,,,,templeapprenticefeeder,,,,292
+event:templeapprenticesummon4,start,26574,Eye of the Watcher,276,1,65450250:1,224.89 -70 0,,,,templeapprenticefeeder,,,,292
 event:templematriarchfeeder,start,26564,Guardian of the High Matriarch,171,1,65450243:1,210 -110 0,,,,,,,100-0
-event:templematriarchsummon1,start,26582,Eye of the Watcher,276,1,6545025D:1,245.1 -80 0,,,,templematriarchfeeder,
-event:templematriarchsummon2,start,26583,Eye of the Watcher,276,1,6545025C:1,245.1 -70 0,,,,templematriarchfeeder,
-event:templematriarchsummon3,start,26584,Eye of the Watcher,276,1,65450263:1,274.51 -80 0,,,,templematriarchfeeder,
-event:templematriarchsummon4,start,26585,Eye of the Watcher,276,1,65450262:1,274.51 -70 0,,,,templematriarchfeeder,
+event:templematriarchsummon1,start,26582,Eye of the Watcher,276,1,6545025D:1,245.1 -80 0,,,,templematriarchfeeder,,,,292
+event:templematriarchsummon2,start,26583,Eye of the Watcher,276,1,6545025C:1,245.1 -70 0,,,,templematriarchfeeder,,,,292
+event:templematriarchsummon3,start,26584,Eye of the Watcher,276,1,65450263:1,274.51 -80 0,,,,templematriarchfeeder,,,,292
+event:templematriarchsummon4,start,26585,Eye of the Watcher,276,1,65450262:1,274.51 -70 0,,,,templematriarchfeeder,,,,292
 event:hivequeenstatic,give,11201,Aun Aanaua,183,1,1ABE0000:1,180.66 13.28 148.01,51157=Tuning Fork,,,menhirdrummernw,
 event:menhirdrummernw,give,11204,Aun Laiaua,183,1,1AB70000:1,59.89 59.73 96,11019=Pyreal Bell,,,menhirdrummersw,
 event:menhirdrummernw,give,11204,Aun Laiaua,183,1,1AB70000:1,59.89 59.73 96,51157=Tuning Fork,,,menhirdrummersw,

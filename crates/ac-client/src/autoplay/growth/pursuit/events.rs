@@ -249,6 +249,7 @@ impl Client {
         if let Want::Event(e) = &s.want {
             self.note_event(e, now);
         }
+        self.note_drain(s, now);
     }
 }
 

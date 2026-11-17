@@ -281,6 +281,8 @@ pub struct State {
     pub(crate) events_on: Recent<String>,
     /// Kills of ours an event's watcher heard while it was not taken for on, by event.
     pub(crate) event_deaths: std::collections::BTreeMap<String, u32>,
+    /// When the drain of a starter we used runs out (`pursuit::drain`): the next waits till then.
+    pub(crate) drained_until: Option<Instant>,
     /// The arena deed awaiting its answer (`pursuit::arena`).
     pub(crate) arena_deeding: Option<pursuit::arena::Deeding>,
     /// When this character's ticket was taken: its fellowship's arena access since.

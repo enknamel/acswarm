@@ -187,6 +187,8 @@ pub struct Autoplay {
     /// `Event::Noted`s; taken by `Client::drain_events`.
     pub announced: Vec<crate::Event>,
     last_heal: Option<Instant>,
+    /// Till then the heals fill the bar, not only past the slider: a draining use waits on it.
+    pub(crate) heal_full_until: Option<Instant>,
     last_attack: Option<Instant>,
     /// When a cast, or a sale or purchase at a counter, was sent and the
     /// server has not yet said it is done. Cleared by its answer

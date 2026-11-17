@@ -22,6 +22,7 @@ fn placed(want: u32, kind: Yield, wcid: u32, chance: f32, at: Place) -> &'static
         needs: Vec::new(),
         respawn: None,
         band: None,
+        drain: None,
     })
 }
 

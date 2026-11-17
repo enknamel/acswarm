@@ -327,6 +327,9 @@ pub struct Source {
     /// For a [`Yield::Start`], the level band its use asks, `(lo, hi)` with hi 0 open (the
     /// Guardian of the High Matriarch's 40-69, 70-99 and 100 up); `None` for any level.
     pub band: Option<(u32, u32)>,
+    /// For a [`Yield::Start`], seconds its use's harm runs on the user (the Eye of the Watcher's
+    /// drains, 292 s); `None` when it casts none.
+    pub drain: Option<f32>,
 }
 
 impl Source {
@@ -633,7 +636,7 @@ fn parse_rates(s: &str, entries: usize) -> Option<Vec<SpawnRate>> {
 /// hunted one's rates (the tenth, a creature's spawn share, is read by [`spawn_share`]).
 fn parse_source(line: &str) -> Option<Source> {
     let f: Vec<&str> = line.split(',').collect();
-    if ![7, 9, 10, 11, 12, 13, 14, 15].contains(&f.len()) {
+    if ![7, 9, 10, 11, 12, 13, 14, 15, 16].contains(&f.len()) {
         return None;
     }
     let kind = match f[1] {
@@ -683,13 +686,14 @@ fn parse_source(line: &str) -> Option<Source> {
             _ => Vec::new(),
         },
         respawn: f.get(12).and_then(|r| r.parse().ok()),
-        band: match f.get(14) {
+        band: match f.get(14).filter(|b| !b.is_empty()) {
             Some(b) => {
                 let (lo, hi) = b.split_once('-')?;
                 Some((lo.parse().ok()?, hi.parse().ok()?))
             }
             None => None,
         },
+        drain: f.get(15).and_then(|d| d.parse().ok()),
     })
 }
 
@@ -726,6 +730,7 @@ fn vendor_sources(parsed: &[Source]) -> Vec<Source> {
                 needs: Vec::new(),
                 respawn: None,
                 band: None,
+                drain: None,
             });
         }
     }

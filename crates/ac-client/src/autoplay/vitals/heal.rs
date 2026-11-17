@@ -459,7 +459,10 @@ impl Client {
         self.log_self_heals();
         let cfg = self.autoplay.config.survive.clone();
         let health = self.health_fraction();
-        if health >= cfg.heal_below || health <= 0.0 {
+        // A draining use waits on a full bar (`pursuit::drain`): the heals fill it.
+        let full = self.autoplay.heal_full_until.is_some_and(|t| now < t);
+        let line = if full { 1.0 } else { cfg.heal_below };
+        if health >= line || health <= 0.0 {
             return false;
         }
         // Paced by the server, not by a clock: the next heal goes out

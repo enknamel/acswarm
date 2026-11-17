@@ -19,6 +19,7 @@ use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState};
 use crate::Client;
 
 pub(crate) mod arena;
+mod drain;
 mod events;
 mod fastest;
 mod fellow_stamp;

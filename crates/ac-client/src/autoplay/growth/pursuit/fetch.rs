@@ -503,6 +503,11 @@ impl Client {
                 self.autoplay.say(Doing::Looting, why);
                 return Some(true);
             }
+            if let Some(why) = self.drain_wait(source, now) {
+                self.autoplay
+                    .say(Doing::Looting, format!("for {}: {why}", line.title));
+                return Some(true);
+            }
         }
         if !self.has_room_for(line, now) {
             return Some(false);

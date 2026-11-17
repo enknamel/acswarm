@@ -251,6 +251,8 @@ class Data:
         self.start_needs = defaultdict(set)
         # A use's level band, (lo, hi) with hi 0 open, by (event, obj): its path's level checks.
         self.start_band = {}
+        # Seconds a use's harm runs on its user, by (event, obj): its last harmful cast's delays.
+        self.start_drain = {}
         self.starts, self.summons, self.stamps, self.fellow_stamps = event_starts(self)
         # The events a generator portal waits on (event_portal_rows): their starters are written.
         self.portal_events = set()
@@ -884,6 +886,17 @@ def event_starts(data):
                             asks = {b[2]["msg"].lower() for b in branches
                                     if b[0] == INQ_EVENT and b[1] is True and b[2]["msg"]}
                             data.start_needs[(a["msg"].lower(), obj)] |= asks
+                        # How long its harm runs on whoever used it: the delays to its last
+                        # harmful cast, the longest path's (the Eye of the Watcher's 28 drains).
+                        if kind == "use":
+                            secs, last = 0.0, 0.0
+                            for e in effects:
+                                secs += e["delay"]
+                                if is_harm(data, e):
+                                    last = secs
+                            key = (a["msg"].lower(), obj)
+                            if last > data.start_drain.get(key, 0.0):
+                                data.start_drain[key] = last
                         # Its level band, the widest of its paths' (any path open, any level).
                         band = use_band(branches) if kind == "use" else None
                         if band:
@@ -1733,7 +1746,12 @@ def build(data, never):
                ev or "", "" if back is None else "%g" % round(back))
         # The deaths a watcher must hear, only where more than one; a use's level band after it.
         band = data.start_band.get((want[6:], c)) if kind == "start" else None
-        if band and band != (0, 0):
+        band = band if band and band != (0, 0) else None
+        drain = data.start_drain.get((want[6:], c)) if kind == "start" else None
+        if drain:
+            row += (str(count) if count > 1 else "", "%d-%d" % band if band else "",
+                    "%g" % round(drain))
+        elif band:
             row += (str(count) if count > 1 else "", "%d-%d" % band)
         elif count > 1:
             row += (str(count),)
@@ -2216,7 +2234,7 @@ GIVERS_HEADER = """\
 
 SOURCES_HEADER = """\
 # Where what a quest wants comes from, and what each source itself needs.
-# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn[,count[,band]]
+# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn[,count[,band[,drain]]]
 # want: an item wcid or a kill counter, as quests.csv names it, a key a container or use
 # below needs, or event:NAME, a server event a source below needs, or flag:NAME, a flag stamped
 # on a creature's killer or a portal's user, or fellow:NAME, a quest stamped on the fellowship
@@ -2247,7 +2265,8 @@ SOURCES_HEADER = """\
 # respawn: for a floor item, seconds its generator takes to put it back once taken (profile delay
 # and a regeneration interval); blank when unknown. count: for a kill a watcher hears, the deaths
 # it must hear before it starts the event (only written when more than 1). band: for a start,
-# the level band its use asks, min-max (max 0: open); count is blank before it.
+# the level band its use asks, min-max (max 0: open); count is blank before it. drain: for a
+# start, seconds its use's harm runs on the user (to its last harmful cast's delays).
 # Regenerate with reference/scripts/data/quests.sh.
 """
 
