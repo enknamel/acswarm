@@ -2707,6 +2707,8 @@ fn a_use_the_server_walked_short_of_is_sent_again() {
     );
 }
 
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn kivik_lirs_gallery_is_reached_through_the_haven_and_trial_devices() {
     // Blargerton (level 120) hunting Coglock: "~1440 min", no way into 0x0277. Only the Trials'
     // Strange Device sends there, and only a Haven's device into the Trials, each after its Eyes.
