@@ -10,7 +10,8 @@ use std::sync::OnceLock;
 use ac_world::quests::{Want, Yield};
 use glam::Vec3;
 
-use super::{stuck, Ask, Hunting, PursuitStep};
+use super::{is_stuck, stuck, Ask, Hunting, PursuitStep};
+use crate::quest_log::QuestLine;
 use crate::Client;
 
 /// Each creature whose death stamps quests on its killer's fellowship, and those quests.
@@ -28,20 +29,45 @@ fn stamped_on_fellows() -> &'static BTreeMap<u32, Vec<String>> {
 }
 
 impl Ask<'_> {
-    /// Quest `id`'s step while its fellowship must hold `quest`: a fellowship founded, then a
-    /// creature stamping it hunted (or its ground's way had first); else why not.
-    pub(super) fn fellow_step(&self, id: &str, quest: &str) -> (PursuitStep, Option<Hunting>) {
+    /// Quest `line`'s step while its fellowship must hold `quest`: a fellowship founded, then a
+    /// creature stamping it hunted (or its ground's way had first); else why not. Another row's
+    /// fellowship quest is worked when `quest` has no way: a level 120 has Kixkti Xri's stamp,
+    /// not Ibrexi Jikti's, as the Guardian of the High Matriarch feeds each level band its own.
+    pub(super) fn fellow_ways(
+        &self,
+        line: &QuestLine,
+        quest: &str,
+    ) -> (PursuitStep, Option<Hunting>) {
         if self.arena.team_unfellowed {
             let why = format!("{quest} is stamped on a fellowship, and the team's is switched off");
             return (stuck(why), None);
         }
-        if !self.arena.fellowship {
-            let quest = quest.to_string();
-            return (PursuitStep::Fellow { quest }, None);
+        let rows = crate::quest_log::worked_rows(line).filter(|r| r.fits_level(self.facts.level));
+        let mut quests: Vec<&str> = vec![quest];
+        let others = rows
+            .flat_map(|r| r.needs.iter())
+            .filter(|n| !crate::quest_log::holds(self.facts, n))
+            .filter_map(|n| n.strip_prefix("fellow:"));
+        for q in others {
+            if !quests.iter().any(|h| h.eq_ignore_ascii_case(q)) {
+                quests.push(q);
+            }
         }
-        let want = Want::Fellow(quest.to_ascii_lowercase());
-        let step = self.obtain(&[want], 1, &format!("the fellowship's {quest}"), 0);
-        self.way_first(id, step)
+        let mut first = None;
+        for q in quests {
+            let want = Want::Fellow(q.to_ascii_lowercase());
+            let step = self.obtain(&[want], 1, &format!("the fellowship's {q}"), 0);
+            let got = self.way_first(&line.id, step);
+            if is_stuck(&got.0) {
+                first.get_or_insert(got);
+            } else if self.arena.fellowship {
+                return got;
+            } else {
+                let quest = q.to_string();
+                return (PursuitStep::Fellow { quest }, None);
+            }
+        }
+        first.unwrap_or_else(|| (stuck(format!("nothing stamps {quest}")), None))
     }
 }
 

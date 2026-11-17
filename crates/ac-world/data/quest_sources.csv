@@ -1,5 +1,5 @@
 # Where what a quest wants comes from, and what each source itself needs.
-# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn[,count]
+# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn[,count[,band]]
 # want: an item wcid or a kill counter, as quests.csv names it, a key a container or use
 # below needs, or event:NAME, a server event a source below needs, or flag:NAME, a flag stamped
 # on a creature's killer or a portal's user, or fellow:NAME, a quest stamped on the fellowship
@@ -9,11 +9,12 @@
 # event), portal (going through it stamps the flag), revealed (as portal, made by a generator
 # once something reveals it: the Colosseum's, arenas.csv), npc (a placed NPC, or an object a generator
 # puts out, whose talk gives the item), start (an object whose use starts the event, once the
-# events in its event column run), floor (made on the ground by a
+# events in its event column run), watch (an object whose heartbeat starts the event once the
+# events in its event column run: nothing used), floor (made on the ground by a
 # generator; wcid is the item's own), container (a chest that holds it, chance per fill), use
 # (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried
 # item a recipe makes it on; nowhere to go). landblocks: hex landblock:spawn entries;... (for
-# an npc, start, give, portal, revealed, floor, container or use, hex cell:1 per placement, with at the matching local
+# an npc, start, watch, give, portal, revealed, floor, container or use, hex cell:1 per placement, with at the matching local
 # "x y z";...; for a drop or kill the encounter table alone spawns, each landblock's busiest
 # encounter corner, "x y 0";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a give, the item handed; for a
 # use, the items used on it; for a combine, the item used then the one used on;
@@ -25,10 +26,11 @@
 # its slots held, the others an hour that clearing kills; from a seeded simulation of ACE's
 # generators, with its event on when it has one. event: the Off event (EventManager.cs) whose
 # generator alone puts the creature or NPC out: it comes only once that event is started; for a
-# start, the events its use asks running first, ;-separated.
+# start or watch, the events it asks running first (a watch's own generator's among them), ;-separated.
 # respawn: for a floor item, seconds its generator takes to put it back once taken (profile delay
 # and a regeneration interval); blank when unknown. count: for a kill a watcher hears, the deaths
-# it must hear before it starts the event (only written when more than 1).
+# it must hear before it starts the event (only written when more than 1). band: for a start,
+# the level band its use asks, min-max (max 0: open); count is blank before it.
 # Regenerate with reference/scripts/data/quests.sh.
 107,floor,107,Sollerets,0,1,6344011F:1,26.42 -20.15 0,,,,,20
 10703,drop,7988,Sephal Niffis,67,0.03,EC0F:2;F419:3;F518:4,,,1,2:15;3:15;4:40,,
@@ -11454,6 +11456,9 @@ event:eventheatfont4,start,29699,Sealed Valve,171,1,01980100:1,25.61 -50 -78,,,,
 event:monouga120fphugegenevent,start,35762,Bell,0,1,1A7302F4:1,116.06 35.15 232.4,,,,,
 event:monouga150fpgiantgenevent,start,35763,Bell,0,1,1A7302B2:1,61.95 89.13 232.4,,,,,
 event:monouga80fplargegenevent,start,35761,Bell,0,1,1A7302E1:1,109.63 28.82 232.4,,,,,
+event:templeconsortsummon,watch,26575,Temple Consort Controller,15,1,65450213:1,160 -60 0,,,,templeconsortfeeder;templeconsortsummon1;templeconsortsummon2;templeconsortsummon3;templeconsortsummon4,
+event:templeapprenticesummon,watch,26570,Temple Apprentice Controller,15,1,65450240:1,210 -60 0,,,,templeapprenticefeeder;templeapprenticesummon1;templeapprenticesummon2;templeapprenticesummon3;templeapprenticesummon4,
+event:templematriarchsummon,watch,26581,Temple Matriarch Controller,15,1,6545025E:1,260 -60 0,,,,templematriarchfeeder;templematriarchsummon1;templematriarchsummon2;templematriarchsummon3;templematriarchsummon4,
 event:blindkeeperdead,kill,38349,Blind Keeper,200,1,DE:1,,,1,1:10,,
 event:hivequeendynamic,kill,72427,Olthoi Hive Queen,300,1,586B:1,,,1,1:12,hivequeenstatic,
 event:handaugrunversusblood,start,42228,Operations Specialist,200,1,8A030182:1,79.94 -207.8 0,,,,,
@@ -11819,6 +11824,21 @@ event:northwesthighswarmc,kill,72722,Olthoi Hive Mutilator,200,1,18BB:3;18BC:4;1
 7835,drop,14466,Two Headed Snowman,15,1,A6C5:7;ADC2:8;AEC2:8;AEC5:7;B036:7;B0C4:7;B2CF:7;B3CA:7;B435:7;B4CF:8;B532:7;B5C7:7;B5C9:9;B6BC:7;B6C7:8;B6C8:9;B7BA:7;B8C4:8;B8C9:7;B932:11;B939:8;B9B9:10;B9C4:7;B9C6:7;B9C9:7;B9CE:7;BAB7:7;BACD:8;BBB7:9;BBB8:7;BBCA:8;BC3D:7;BCB4:7;BCC9:7;BDBC:7;C346:9;C349:10;C445:10;C448:9;C547:12;C548:9;C644:8;C647:8;C743:8;C744:11;C74A:8;C849:8;C8B5:8;CAB1:9;CC4B:9;CD54:8;CE4F:9;CEB3:9;CF52:8;D040:8;D2B3:10;D2B6:8;D33A:10;D63C:9;D83B:8;DB36:9;DE35:8;E033:9;E938:8,72 48 0;72 72 0;96 120 0;72 96 0;120 96 0;120 72 0;48 96 0;48 96 0;96 96 0;120 144 0;72 96 0;72 120 0;96 72 0;96 96 0;120 120 0;48 96 0;72 96 0;72 96 0;120 120 0;120 72 0;72 144 0;72 96 0;96 96 0;96 72 0;96 48 0;72 120 0;72 72 0;144 72 0;96 96 0;72 96 0;48 96 0;120 96 0;120 96 0;72 72 0;96 96 0;96 48 0;96 24 0;96 72 0;48 96 0;120 96 0;48 96 0;48 96 0;120 120 0;96 24 0;120 96 0;72 120 0;72 120 0;96 120 0;120 72 0;120 72 0;120 96 0;96 96 0;72 72 0;144 144 0;72 48 0;96 96 0;72 96 0;144 96 0;96 72 0;144 96 0;48 120 0;96 72 0;72 96 0;96 96 0,,0.001,0.0069:0.015:48;0.0079:0.017:55;0.0079:0.017:55;0.0069:0.015:48;0.0069:0.025:79;0.0069:0.015:48;0.0069:0.015:48;0.0069:0.015:48;0.0069:0.025:78;0.0079:0.017:55;0.0069:0.025:79;0.0069:0.015:48;0.0088:0.019:61;0.0069:0.015:48;0.0079:0.017:55;0.0088:0.019:61;0.0069:0.015:48;0.0079:0.004:70;0.0069:0.0035:61;0.011:0.017:41;0.0079:0.029:84;0.0098:0.021:68;0.0069:0.0035:61;0.0069:0.0035:61;0.0069:0.0035:61;0.0069:0.013:50;0.0069:0.014:44;0.0079:0.004:70;0.0088:0.015:31;0.0069:0.011:29;0.0079:0.004:70;0.0069:0.025:78;0.0069:0.011:33;0.0069:0.0035:61;0.0069:0.015:48;0.0088:0.041:114;0.0098:0.036:114;0.0098:0.048:130;0.0088:0.033:102;0.012:0.049:144;0.0088:0.033:98;0.0079:0.029:91;0.0079:0.038:104;0.0079:0.029:91;0.011:0.04:125;0.0079:0.029:91;0.0079:0.038:104;0.0079:0.016:44;0.0088:0.019:61;0.0088:0.041:114;0.0079:0.029:91;0.0088:0.04:108;0.0088:0.019:61;0.0079:0.029:86;0.0079:0.029:91;0.0098:0.021:68;0.0079:0.015:38;0.0098:0.018:45;0.0088:0.033:102;0.0079:0.029:91;0.0088:0.033:102;0.0079:0.029:91;0.0088:0.014:33;0.0079:0.029:91,,
 5780,combine,5779,Strange Stick,0,1,,,5778=Whittling Knife;5779=Strange Stick,,,,
 1538,drop,1523,Undead Curator,15,1,1AE:1,,,1,1:10,,
+event:templeconsortfeeder,start,26564,Guardian of the High Matriarch,171,1,65450243:1,210 -110 0,,,,,,,40-69
+event:templeconsortsummon1,start,26576,Eye of the Watcher,276,1,65450207:1,145.1 -80 0,,,,templeconsortfeeder,
+event:templeconsortsummon2,start,26577,Eye of the Watcher,276,1,65450206:1,145.12 -70 0,,,,templeconsortfeeder,
+event:templeconsortsummon3,start,26578,Eye of the Watcher,276,1,65450219:1,174.9 -80 0,,,,templeconsortfeeder,
+event:templeconsortsummon4,start,26579,Eye of the Watcher,276,1,65450218:1,174.9 -70 0,,,,templeconsortfeeder,
+event:templeapprenticefeeder,start,26564,Guardian of the High Matriarch,171,1,65450243:1,210 -110 0,,,,,,,70-99
+event:templeapprenticesummon1,start,26571,Eye of the Watcher,276,1,6545022F:1,195.1 -80 0,,,,templeapprenticefeeder,
+event:templeapprenticesummon2,start,26572,Eye of the Watcher,276,1,6545022E:1,195.49 -70 0,,,,templeapprenticefeeder,
+event:templeapprenticesummon3,start,26573,Eye of the Watcher,276,1,65450251:1,224.89 -80 0,,,,templeapprenticefeeder,
+event:templeapprenticesummon4,start,26574,Eye of the Watcher,276,1,65450250:1,224.89 -70 0,,,,templeapprenticefeeder,
+event:templematriarchfeeder,start,26564,Guardian of the High Matriarch,171,1,65450243:1,210 -110 0,,,,,,,100-0
+event:templematriarchsummon1,start,26582,Eye of the Watcher,276,1,6545025D:1,245.1 -80 0,,,,templematriarchfeeder,
+event:templematriarchsummon2,start,26583,Eye of the Watcher,276,1,6545025C:1,245.1 -70 0,,,,templematriarchfeeder,
+event:templematriarchsummon3,start,26584,Eye of the Watcher,276,1,65450263:1,274.51 -80 0,,,,templematriarchfeeder,
+event:templematriarchsummon4,start,26585,Eye of the Watcher,276,1,65450262:1,274.51 -70 0,,,,templematriarchfeeder,
 event:hivequeenstatic,give,11201,Aun Aanaua,183,1,1ABE0000:1,180.66 13.28 148.01,51157=Tuning Fork,,,menhirdrummernw,
 event:menhirdrummernw,give,11204,Aun Laiaua,183,1,1AB70000:1,59.89 59.73 96,11019=Pyreal Bell,,,menhirdrummersw,
 event:menhirdrummernw,give,11204,Aun Laiaua,183,1,1AB70000:1,59.89 59.73 96,51157=Tuning Fork,,,menhirdrummersw,

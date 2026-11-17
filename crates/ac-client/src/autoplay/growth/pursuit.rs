@@ -450,6 +450,10 @@ fn stuck(why: String) -> PursuitStep {
     PursuitStep::Stuck { why }
 }
 
+fn is_stuck(step: &PursuitStep) -> bool {
+    matches!(step, PursuitStep::Stuck { .. })
+}
+
 /// A hunt's grounds, soonest first at the ground, and the creatures sought there.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Hunting {
@@ -517,9 +521,7 @@ impl Ask<'_> {
                 stuck(format!("its givers take {band}; this character is {level}"))
             }
             QuestState::CantYet(Blocked::Locked { flag }) => return self.flag_step(flag, 0),
-            QuestState::CantYet(Blocked::Fellow { quest }) => {
-                return self.fellow_step(&line.id, quest)
-            }
+            QuestState::CantYet(Blocked::Fellow { quest }) => return self.fellow_ways(line, quest),
             QuestState::CantYet(Blocked::NeedsFirst { title }) => {
                 stuck(format!("{} comes first", title.trim()))
             }
@@ -785,6 +787,20 @@ impl Ask<'_> {
             .iter()
             .flat_map(|w| self.chains.sources(w))
             .find(|s| s.kind == Yield::Npc);
+        // A use for another level band: the Guardian of the High Matriarch feeds each its own.
+        let banded = wants
+            .iter()
+            .flat_map(|w| self.chains.sources(w))
+            .filter(|s| !s.fits_level(level))
+            .find_map(|s| Some((s, s.band?)));
+        if let Some((s, (lo, hi))) = banded.filter(|_| grounds.is_empty()) {
+            let band = match hi {
+                0 => format!("from level {lo}"),
+                hi => format!("at levels {lo}-{hi}"),
+            };
+            let why = format!("{} starts {what} only {band}; this is {level}", s.name);
+            return (stuck(why), None);
+        }
         let why = match (npc, grounds.is_empty()) {
             (_, false) if !droppers.is_empty() => {
                 format!("where a way in reaches, nothing that drops {what} is ever about")
@@ -812,6 +828,7 @@ impl Client {
         now: Instant,
     ) {
         self.see_events(now);
+        self.see_watches(now);
         self.forget_unseen_portals(now);
         let st = &mut self.autoplay.growth;
         st.pursuit_held
@@ -970,17 +987,30 @@ impl Client {
 
     /// Log the working line, should `lines` have it stuck: the board passes it over unheld
     /// (`hold_pursuit` logs its own).
-    fn log_stuck_lines(&self, lines: &[PursuitLine]) {
-        let Some(was) = self.working_pursuit() else {
-            return;
-        };
-        if self.autoplay.growth.pursuit_held.contains_key(&was.id) {
-            return;
+    fn log_stuck_lines(&mut self, lines: &[PursuitLine]) {
+        let was = self.working_pursuit().map(|l| l.id.clone());
+        let held = |id: &str| self.autoplay.growth.pursuit_held.contains_key(id);
+        let now = lines
+            .iter()
+            .find(|l| Some(&l.id) == was.as_ref() && !l.working);
+        if let (Some(PursuitStep::Stuck { why }), Some(id)) = (now.map(|l| &l.step), &was) {
+            if !held(id) {
+                tracing::info!("pursuit: {id} stuck: {why}");
+            }
         }
-        let now = lines.iter().find(|l| l.id == was.id && !l.working);
-        if let Some(PursuitStep::Stuck { why }) = now.map(|l| &l.step) {
-            tracing::info!("pursuit: {} stuck: {why}", was.id);
+        // A line never taken up says why once per change, so no pursuit is passed over unsaid.
+        let mut said = std::mem::take(&mut self.autoplay.growth.unstarted_said);
+        said.retain(|id, _| lines.iter().any(|l| &l.id == id && is_stuck(&l.step)));
+        for l in lines.iter().filter(|l| Some(&l.id) != was.as_ref()) {
+            let PursuitStep::Stuck { why } = &l.step else {
+                continue;
+            };
+            if said.get(&l.id) != Some(why) {
+                tracing::info!("pursuit: {} can't start: {why}", l.id);
+                said.insert(l.id.clone(), why.clone());
+            }
         }
+        self.autoplay.growth.unstarted_said = said;
     }
 
     /// The working pursued quest, if one can go on.

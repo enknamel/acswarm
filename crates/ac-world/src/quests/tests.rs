@@ -614,3 +614,39 @@ fn kivik_lirs_sarcophagus_asks_its_fellowship_stamped_by_a_guardians_death() {
     assert_eq!(wcids, [28381, 28382, 28384]);
     assert_eq!(fellow_need("kiviklirfinished"), None);
 }
+
+#[test]
+fn ixir_zis_consort_comes_by_a_watch_on_the_eyes_the_guardian_feeds() {
+    // The Temple Consort Controller's heartbeat starts TempleConsortSummon once its four summons
+    // run (weenie 26575, out only while TempleConsortFeeder runs); each Eye of the Watcher starts
+    // one while the feeder runs, which the Guardian of the High Matriarch starts for 40-69.
+    let of = |e: &str| sources_of(&Want::Event(e.into())).collect::<Vec<_>>();
+    let watch = of("templeconsortsummon");
+    assert_eq!(watch.len(), 1);
+    assert_eq!((watch[0].kind, watch[0].wcid), (Yield::Watch, 26575));
+    let summons = (1..=4).map(|i| format!("templeconsortsummon{i}"));
+    let mut asked = vec!["templeconsortfeeder".to_string()];
+    asked.extend(summons.clone());
+    assert_eq!(watch[0].needs, asked);
+    for (e, eye) in summons.zip([26576, 26577, 26578, 26579]) {
+        let s = of(&e);
+        assert_eq!(s.len(), 1, "{e}");
+        assert_eq!((s[0].kind, s[0].wcid, s[0].band), (Yield::Start, eye, None));
+        assert_eq!(s[0].needs, ["templeconsortfeeder"]);
+    }
+    let feeder = |e: &str| of(e).into_iter().next().unwrap_or_else(|| panic!("{e}"));
+    let consort = feeder("templeconsortfeeder");
+    assert_eq!((consort.kind, consort.wcid), (Yield::Start, 26564));
+    assert_eq!((consort.band, consort.needs.len()), (Some((40, 69)), 0));
+    assert_eq!(feeder("templeapprenticefeeder").band, Some((70, 99)));
+    let matriarch = feeder("templematriarchfeeder");
+    assert_eq!(matriarch.band, Some((100, 0)));
+    assert!(matriarch.fits_level(120) && !consort.fits_level(120) && consort.fits_level(40));
+    // The Consort, whose death stamps the fellowship, comes only once her event is started.
+    let kill = sources_of(&Want::Fellow("templekilledibrexijikti".into())).next();
+    let kill = kill.expect("her death stamps it");
+    assert_eq!(
+        (kill.wcid, kill.event.as_deref()),
+        (26517, Some("templeconsortsummon"))
+    );
+}

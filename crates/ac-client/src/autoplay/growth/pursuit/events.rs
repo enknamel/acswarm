@@ -49,6 +49,15 @@ fn started_by_kill() -> &'static BTreeMap<u32, Vec<String>> {
     })
 }
 
+/// Each watcher's source: an event its heartbeat starts once the events it asks run.
+fn watches() -> &'static [&'static Source] {
+    static WATCHES: OnceLock<Vec<&'static Source>> = OnceLock::new();
+    WATCHES.get_or_init(|| {
+        let sources = ac_world::quests::sources().iter();
+        sources.filter(|s| s.kind == Yield::Watch).collect()
+    })
+}
+
 /// An NPC asked for an item, or an object used to start an event, `place` in words.
 pub(super) fn ask_words(source: &Source, place: &str) -> String {
     match (&source.want, source.kind) {
@@ -115,6 +124,25 @@ impl Client {
             .collect();
         for e in seen {
             self.note_event(&e, now);
+        }
+    }
+
+    /// Every event a watcher has started: each of its events taken for on. Its heartbeat stops
+    /// them as it starts its own (weenie 26575's EventSuccess set: StopEvent of the four summons
+    /// and the feeder), so they are let go: a second run starts them again.
+    pub(super) fn see_watches(&mut self, now: Instant) {
+        let fired: Vec<&'static Source> = watches()
+            .iter()
+            .copied()
+            .filter(|s| !s.needs.is_empty() && s.needs.iter().all(|n| self.is_event_on(n, now)))
+            .collect();
+        for s in fired {
+            let Want::Event(e) = &s.want else { continue };
+            tracing::info!("pursuit: {} has seen {:?} on", s.name, s.needs);
+            self.note_event(e, now);
+            for n in &s.needs {
+                self.forget_event(n);
+            }
         }
     }
 

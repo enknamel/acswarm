@@ -269,7 +269,7 @@ impl Client {
 
     /// The walk into `guid`'s use reach, landed, before it is used; `None` stood there, on the
     /// floor: the server walks a body no further when it is flying (Xi Ru's Eyes, live).
-    fn approach_use(&mut self, guid: u32) -> Option<Goal> {
+    pub(crate) fn approach_use(&mut self, guid: u32) -> Option<Goal> {
         let o = self.world.objects.get(&guid)?;
         let (at, cell) = (o.world_pos()?, o.position.as_ref()?.cell);
         let reach = self.use_reach(guid);

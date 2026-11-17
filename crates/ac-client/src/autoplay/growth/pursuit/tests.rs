@@ -81,6 +81,7 @@ fn dropper(want: Want, wcid: u32, name: &str, level: u32) -> &'static Source {
         event: None,
         needs: Vec::new(),
         respawn: None,
+        band: None,
     })
 }
 
@@ -831,6 +832,7 @@ fn necklace_from(kind: Yield, wcid: u32, name: &str, at: Place) -> Source {
         event: None,
         needs: Vec::new(),
         respawn: None,
+        band: None,
     }
 }
 
@@ -978,6 +980,13 @@ fn lying(c: &mut Client, guid: u32, wcid: u32, name: &str, at: Place) {
             ..Default::default()
         },
     );
+}
+
+/// `guid`'s use radius as the Sealed Valves' and the Font Guardian's (UseRadius, PropertyFloat
+/// 54: 3 m): a use is sent from where the fetch stands.
+fn in_use_reach(c: &mut Client, guid: u32) {
+    let o = c.world.objects.get_mut(&guid).expect("lying");
+    o.use_radius = Some(3.0);
 }
 
 /// Carry one of `wcid` as `guid`.
@@ -1557,6 +1566,7 @@ fn vortex(at: Place) -> PursuitStep {
         event: None,
         needs: Vec::new(),
         respawn: None,
+        band: None,
     };
     PursuitStep::UseOn {
         source: leak(source),
@@ -5085,6 +5095,7 @@ fn a_sealed_valve_is_used_and_its_event_taken_for_on() {
         unreachable!()
     };
     lying(&mut c, REPAIR_GOLEM, source.wcid, "Sealed Valve", at);
+    in_use_reach(&mut c, REPAIR_GOLEM);
     let now = Instant::now();
     assert_eq!(c.grow_fetch(&line, now), Some(true));
     let f = c
@@ -5104,6 +5115,39 @@ fn a_sealed_valve_is_used_and_its_event_taken_for_on() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn an_event_starter_out_of_its_use_reach_is_walked_into_it_before_the_use() {
+    // An Eye of the Watcher's UseRadius is 1 m: from 1 m off its centre the server would walk
+    // the rest, which it does not for a body flying (Xi Ru's Eyes, live).
+    let want = Want::Event("templematriarchsummon1".into());
+    let source = ac_world::quests::sources_of(&want)
+        .find(|s| s.kind == Yield::Start)
+        .expect("an Eye starts it");
+    let (mut c, line) = fetching(|at| PursuitStep::AskFor { source, at });
+    let PursuitStep::AskFor { at, .. } = line.step else {
+        unreachable!()
+    };
+    lying(&mut c, REPAIR_GOLEM, source.wcid, "Eye of the Watcher", at);
+    c.world
+        .objects
+        .get_mut(&REPAIR_GOLEM)
+        .expect("lying")
+        .use_radius = Some(0.0);
+    c.note_event("templematriarchfeeder", Instant::now());
+    let now = Instant::now() + Duration::from_secs(9);
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    assert_eq!(
+        c.autoplay.growth.fetching, None,
+        "not used from out of reach"
+    );
+    assert!(
+        c.autoplay.status.contains("up to Eye"),
+        "{}",
+        c.autoplay.status
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_font_guardian_waits_for_the_last_valves_event_to_start() {
     // Used 5.4 s after the fourth valve, it heard EventHeatFont4 not yet on (Fail_Case).
     let want = Want::Event("eventfontbrowerkstopgap".into());
@@ -5115,6 +5159,7 @@ fn the_font_guardian_waits_for_the_last_valves_event_to_start() {
         unreachable!()
     };
     lying(&mut c, REPAIR_GOLEM, source.wcid, "Font Guardian", at);
+    in_use_reach(&mut c, REPAIR_GOLEM);
     let now = Instant::now();
     for e in &source.needs {
         c.note_event(e, now);
@@ -5491,4 +5536,81 @@ fn a_guardian_killed_in_a_fellowship_earns_it_the_stamp_until_it_is_left() {
     c.world.fellowship = None;
     c.refresh_quests(Instant::now());
     assert!(c.autoplay.growth.fellow_earned.is_empty());
+}
+
+/// The Falatacot shirt pursued at `level`, in a fellowship or not, it holding `fellow`, with the
+/// server events `on` says taken for on.
+fn temple_shirt_step(
+    level: u32,
+    fellowship: bool,
+    fellow: &[&str],
+    on: &dyn Fn(&str) -> bool,
+) -> PursuitStep {
+    let mut f = facts(level, &[("templereceivedshirt", false)]);
+    f.fellow = fellow.iter().map(|q| q.to_string()).collect();
+    let v = arena::ArenaView {
+        fellowship,
+        ..Default::default()
+    };
+    let p = work_in(&f, &ChainData, None, &|_| false, &|_| Some(20.0), on, &v);
+    p.lines[0].step.clone()
+}
+
+/// The object a step uses and the event its use starts.
+fn used_for(step: PursuitStep) -> (u32, Want) {
+    match step {
+        PursuitStep::AskFor { source, .. } => (source.wcid, source.want.clone()),
+        other => panic!("a use: {other:?}"),
+    }
+}
+
+#[test]
+fn the_temple_shirt_at_level_120_feeds_wakes_and_kills_the_matriarch_in_a_fellowship() {
+    // The Sarcophagus asks any of three fellowship stamps; the Guardian of the High Matriarch
+    // feeds a level 120 only the Matriarch (level 100 up), whose four Eyes, used while
+    // TempleMatriarchFeeder runs, wake the controller that starts TempleMatriarchSummon.
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 120);
+    let now = Instant::now();
+    let step = |c: &Client, fellowship: bool, fellow: &[&str]| {
+        temple_shirt_step(120, fellowship, fellow, &|e| c.is_event_on(e, now))
+    };
+    let quest = "templekilledkixktixri".to_string();
+    assert_eq!(step(&c, false, &[]), PursuitStep::Fellow { quest });
+    let feeder = Want::Event("templematriarchfeeder".into());
+    assert_eq!(used_for(step(&c, true, &[])), (26564, feeder));
+    // Each use's event on as the server starts it: the Eyes, in order, while the feeder runs.
+    c.note_event("templematriarchfeeder", now);
+    for (i, eye) in [26582, 26583, 26584, 26585].into_iter().enumerate() {
+        let e = format!("templematriarchsummon{}", i + 1);
+        assert_eq!(used_for(step(&c, true, &[])), (eye, Want::Event(e.clone())));
+        c.note_event(&e, now);
+    }
+    // The controller's heartbeat sees all four: its event is on, and those it stops are let go.
+    c.see_watches(now);
+    assert!(c.is_event_on("templematriarchsummon", now));
+    assert!(!c.is_event_on("templematriarchfeeder", now));
+    match step(&c, true, &[]) {
+        PursuitStep::Hunt { creature, .. } => assert_eq!(creature, "Matriarch Kixkti Xri"),
+        other => panic!("the Matriarch hunted: {other:?}"),
+    }
+    match step(&c, true, &["templekilledkixktixri"]) {
+        PursuitStep::HandIn { row, .. } => assert_eq!(row.giver_wcid, 26538),
+        other => panic!("the Sarcophagus used: {other:?}"),
+    }
+}
+
+#[test]
+fn the_guardian_of_the_high_matriarch_feeds_each_level_band_its_own_crypt() {
+    let feeds = |level| used_for(temple_shirt_step(level, true, &[], &|_| false));
+    let event = |e: &str| Want::Event(e.into());
+    assert_eq!(feeds(50), (26564, event("templeconsortfeeder")));
+    assert_eq!(feeds(80), (26564, event("templeapprenticefeeder")));
+    assert_eq!(feeds(275), (26564, event("templematriarchfeeder")));
+    // Under 40 the Guardian feeds nobody: said so, not founded a fellowship for.
+    let why = temple_shirt_step(30, false, &[], &|_| false);
+    assert!(
+        why.words(0).contains("only at levels 40-69"),
+        "{}",
+        why.words(0)
+    );
 }

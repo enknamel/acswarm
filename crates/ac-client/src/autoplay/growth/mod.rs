@@ -244,6 +244,8 @@ pub struct State {
     journeys: pursuit::Journeys,
     /// The fastest-way choice last logged for each pursued line, by id (`pursuit::Choice`).
     fastest_said: std::collections::BTreeMap<String, pursuit::Choice>,
+    /// Why each pursued line, by id, last could not start, as logged: said again on a change.
+    unstarted_said: std::collections::BTreeMap<String, String>,
     /// The flag each pursued quest, by id, has first, the only way on (see `pursuit::flag_way`).
     pursuit_flags: std::collections::BTreeMap<String, String>,
     /// The event each pursued quest, by id, starts first: only its portal leads on (see

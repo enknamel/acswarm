@@ -146,7 +146,9 @@ impl Ask<'_> {
                 s.kind == Yield::Give && !(self.dropped)(s) && s.keys.iter().any(|k| carried(&k.0))
             });
             for s in self.chains.sources(want) {
-                if s.kind.is_hunted() || (self.dropped)(s) {
+                // A use asking another level band starts nothing for this character (the Guardian
+                // of the High Matriarch starts a level 120's TempleMatriarchFeeder only).
+                if s.kind.is_hunted() || (self.dropped)(s) || !s.fits_level(self.facts.level) {
                     continue;
                 }
                 // An NPC only an event puts out is gone to once the event is on; a give's item
@@ -172,6 +174,10 @@ impl Ask<'_> {
                             events.push(e);
                         }
                     }
+                    continue;
+                }
+                // A watcher's event is had by its events alone (`Client::see_watches`): no act.
+                if s.kind == Yield::Watch {
                     continue;
                 }
                 // A combine is made where the character stands: no place of its own.
@@ -466,6 +472,21 @@ impl Client {
                 .say(Doing::Looting, format!("looking for {label}"));
             return Some(true);
         };
+        // An event's starter is used stood in its reach and landed, as a journey's NPC step's
+        // objects are: the server walks a flying body no further (Xi Ru's Eyes, live).
+        let starts =
+            matches!(line.step, PursuitStep::AskFor { source, .. } if source.kind == Yield::Start);
+        if let Some(crate::Goal::At { place, within }) =
+            starts.then(|| self.approach_use(guid)).flatten()
+        {
+            if self.journey_to(place, within) {
+                self.autoplay.say(
+                    Doing::Traveling,
+                    format!("for {}: up to {label}", line.title),
+                );
+                return Some(true);
+            }
+        }
         // The server walks the character to what it takes or uses, and movement of ours ends that
         // walk cancelled (Player_Inventory.cs:1014-1018): the trip here stops a tick first.
         if self.traveling() || self.is_walking() {

@@ -15,6 +15,9 @@ from collections import defaultdict
 # EmoteCategory (ACE.Entity/Enum/EmoteCategory.cs).
 REFUSE, GIVE, USE = 1, 6, 7
 DEATH = 3
+# HeartBeat: run each HeartbeatInterval by a creature not awake (Creature_Tick.cs:35,
+# EmoteManager.cs:1904-1914): the Temple Consort Controller's watch on its four events.
+HEARTBEAT = 5
 # StartEvent, and CastSpellInstant (a creature's portal summon at its death).
 START_EVENT, CAST_INSTANT = 23, 19
 # ReceiveLocalSignal (EmoteCategory.cs), and a watcher's own counter: StampMyQuest and
@@ -246,6 +249,8 @@ class Data:
                                                     int(lo), int(hi), quest)
         self.event_name = {}
         self.start_needs = defaultdict(set)
+        # A use's level band, (lo, hi) with hi 0 open, by (event, obj): its path's level checks.
+        self.start_band = {}
         self.starts, self.summons, self.stamps, self.fellow_stamps = event_starts(self)
         # The events a generator portal waits on (event_portal_rows): their starters are written.
         self.portal_events = set()
@@ -858,7 +863,7 @@ def event_starts(data):
     and on its killer's fellowship (StampFellowQuest, EmoteManager.cs:1252-1263: Kivik Lir's)."""
     starts, summons, stamps = defaultdict(set), {}, defaultdict(set)
     fellows = defaultdict(set)
-    kinds = {GIVE: "give", DEATH: "kill", USE: "use"}
+    kinds = {GIVE: "give", DEATH: "kill", USE: "use", HEARTBEAT: "watch"}
     objs = {s["obj"] for s in data.sets.values()
             if any(a["type"] in (START_EVENT, CAST_INSTANT) for a in s["acts"])
             or s["cat"] == DEATH and any(a["type"] in (STAMP, STAMP_FELLOW) for a in s["acts"])}
@@ -873,12 +878,19 @@ def event_starts(data):
                         data.event_name.setdefault(a["msg"].lower(), a["msg"])
                         item = s["wcid"] if kind == "give" else 0
                         starts[a["msg"].lower()].add((kind, obj, item))
-                        # The events a use asks running on its way there (the Font Guardian's
-                        # four heat events, each a Sealed Valve's): started first.
-                        if kind == "use":
+                        # The events a use or a watch asks running on its way there (the Font
+                        # Guardian's four heat events, each a Sealed Valve's): started first.
+                        if kind in ("use", "watch"):
                             asks = {b[2]["msg"].lower() for b in branches
                                     if b[0] == INQ_EVENT and b[1] is True and b[2]["msg"]}
                             data.start_needs[(a["msg"].lower(), obj)] |= asks
+                        # Its level band, the widest of its paths' (any path open, any level).
+                        band = use_band(branches) if kind == "use" else None
+                        if band:
+                            key = (a["msg"].lower(), obj)
+                            was = data.start_band.get(key, band)
+                            hi = 0 if 0 in (was[1], band[1]) else max(was[1], band[1])
+                            data.start_band[key] = (min(was[0], band[0]), hi)
                     elif (a["type"] == CAST_INSTANT and kind == "kill"
                           and a["spell"] in data.summon_link):
                         did = 31 if data.summon_link[a["spell"]] <= 1 else 48
@@ -889,6 +901,26 @@ def event_starts(data):
                     elif a["type"] == STAMP_FELLOW and kind == "kill" and a["msg"]:
                         fellows[qname(a["msg"])].add(obj)
     return starts, summons, stamps, fellows
+
+
+def use_band(branches):
+    """The level band a path's level checks hold it to, (lo, hi) with hi 0 open ((0, 0): any
+    level), None when empty: its yeses, then the rungs it failed below or above (the Guardian of
+    the High Matriarch's 40-69 and 70-99 failed on the way to 100 and up)."""
+    checks = [(ok, int(num(a["min"])), int(num(a["max"], MAX_LEVEL))) for t, ok, a in branches
+              if t == INQ_INT and ok in (True, False) and num(a["stat"]) == LEVEL_STAT]
+    lo, hi = 0, MAX_LEVEL
+    for ok, a_lo, a_hi in checks:
+        if ok:
+            lo, hi = max(lo, a_lo), min(hi, a_hi)
+    for ok, a_lo, a_hi in checks:
+        if ok or a_hi < lo or a_lo > hi:
+            continue
+        if a_lo <= max(lo, 1):
+            lo = a_hi + 1
+        elif a_hi >= hi:
+            hi = a_lo - 1
+    return None if lo > hi else (lo, 0 if hi >= MAX_LEVEL else hi)
 
 
 def reached(data, obj, s, depth=0):
@@ -1597,9 +1629,10 @@ def build(data, never):
                         todo.append((str(item), depth + 1))
                 elif kind == "kill" and data.spawns.get(obj):
                     src.append((want, "kill", obj, 1.0, ""))
-                elif kind == "use" and (data.placed.get(obj) or data.ground_places(obj)):
-                    src.append((want, "start", obj, 1.0, ""))
-                    for ev in sorted(data.start_needs.get((want[6:], obj), ())):
+                elif kind in ("use", "watch") and (data.placed.get(obj)
+                                                   or data.ground_places(obj)):
+                    src.append((want, "start" if kind == "use" else "watch", obj, 1.0, ""))
+                    for ev in start_needs(data, want[6:], kind, obj):
                         if "event:" + ev not in seen and depth < EVENT_DEPTH:
                             seen.add("event:" + ev)
                             todo.append(("event:" + ev, depth + 1))
@@ -1643,7 +1676,7 @@ def build(data, never):
         return data.gate_of(r[2])[1] if r[1] in ("drop", "kill", "npc", "give") else None
 
     def needs(r):
-        return data.start_needs.get((r[0][6:], r[2]), ()) if r[1] == "start" else ()
+        return start_needs(data, r[0][6:], r[1], r[2]) if r[1] in ("start", "watch") else ()
 
     src = kept_uses(src, wants, data.sold | rewards, gate, needs)
     had = {r[0] for r in src} | {str(w) for w in data.sold}
@@ -1654,8 +1687,9 @@ def build(data, never):
         at, blocks, count = "", [], 1
         if kind == "combine":
             where = ""
-        elif kind in ("npc", "start", "floor", "container", "use", "give", "portal", "revealed"):
-            if kind == "start":
+        elif kind in ("npc", "start", "watch", "floor", "container", "use", "give", "portal",
+                      "revealed"):
+            if kind in ("start", "watch"):
                 spots = data.placed.get(c) or sorted(set(data.ground_places(c)))
             elif kind == "npc":
                 spots = data.placed.get(c) or sorted(set(data.made_on_ground(c)))
@@ -1684,8 +1718,8 @@ def build(data, never):
         spawn = "%g" % round(share, 4) if share > 0 else ""
         rates = ""
         ev = gate((want, kind, c))
-        if kind == "start":
-            ev = ";".join(sorted(data.start_needs.get((want[6:], c), ()))) or None
+        if kind in ("start", "watch"):
+            ev = ";".join(start_needs(data, want[6:], kind, c)) or None
         if kind in ("drop", "kill"):
             # One an event gates, as it comes once the event is started.
             spawning = data.spawning_on if ev else data.spawning
@@ -1697,9 +1731,23 @@ def build(data, never):
         row = (want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
                "%g" % round(p, 4), where, at, keys, spawn, rates,
                ev or "", "" if back is None else "%g" % round(back))
-        # The deaths a watcher must hear, only where more than one: no other row has the column.
-        src_out.append(row + (str(count),) if count > 1 else row)
+        # The deaths a watcher must hear, only where more than one; a use's level band after it.
+        band = data.start_band.get((want[6:], c)) if kind == "start" else None
+        if band and band != (0, 0):
+            row += (str(count) if count > 1 else "", "%d-%d" % band)
+        elif count > 1:
+            row += (str(count),)
+        src_out.append(row)
     return rows_out, givers_out, src_out, reasons
+
+
+def start_needs(data, event, kind, obj):
+    """The events (sorted, lower case) a start's use or a watch asks running before it starts
+    `event`: those its path asks, and for a watch the event its generator waits on, as it is
+    out only then (the Temple Consort Controller, TempleConsortFeeder's)."""
+    asks = set(data.start_needs.get((event, obj), ()))
+    gate = data.gate_of(obj)[1] if kind == "watch" else None
+    return sorted(asks | ({gate} if gate else set()))
 
 
 def placed_at(data, wcid, depth=0):
@@ -2168,7 +2216,7 @@ GIVERS_HEADER = """\
 
 SOURCES_HEADER = """\
 # Where what a quest wants comes from, and what each source itself needs.
-# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn[,count]
+# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn[,count[,band]]
 # want: an item wcid or a kill counter, as quests.csv names it, a key a container or use
 # below needs, or event:NAME, a server event a source below needs, or flag:NAME, a flag stamped
 # on a creature's killer or a portal's user, or fellow:NAME, a quest stamped on the fellowship
@@ -2178,11 +2226,12 @@ SOURCES_HEADER = """\
 # event), portal (going through it stamps the flag), revealed (as portal, made by a generator
 # once something reveals it: the Colosseum's, arenas.csv), npc (a placed NPC, or an object a generator
 # puts out, whose talk gives the item), start (an object whose use starts the event, once the
-# events in its event column run), floor (made on the ground by a
+# events in its event column run), watch (an object whose heartbeat starts the event once the
+# events in its event column run: nothing used), floor (made on the ground by a
 # generator; wcid is the item's own), container (a chest that holds it, chance per fill), use
 # (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried
 # item a recipe makes it on; nowhere to go). landblocks: hex landblock:spawn entries;... (for
-# an npc, start, give, portal, revealed, floor, container or use, hex cell:1 per placement, with at the matching local
+# an npc, start, watch, give, portal, revealed, floor, container or use, hex cell:1 per placement, with at the matching local
 # "x y z";...; for a drop or kill the encounter table alone spawns, each landblock's busiest
 # encounter corner, "x y 0";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a give, the item handed; for a
 # use, the items used on it; for a combine, the item used then the one used on;
@@ -2194,10 +2243,11 @@ SOURCES_HEADER = """\
 # its slots held, the others an hour that clearing kills; from a seeded simulation of ACE's
 # generators, with its event on when it has one. event: the Off event (EventManager.cs) whose
 # generator alone puts the creature or NPC out: it comes only once that event is started; for a
-# start, the events its use asks running first, ;-separated.
+# start or watch, the events it asks running first (a watch's own generator's among them), ;-separated.
 # respawn: for a floor item, seconds its generator takes to put it back once taken (profile delay
 # and a regeneration interval); blank when unknown. count: for a kill a watcher hears, the deaths
-# it must hear before it starts the event (only written when more than 1).
+# it must hear before it starts the event (only written when more than 1). band: for a start,
+# the level band its use asks, min-max (max 0: open); count is blank before it.
 # Regenerate with reference/scripts/data/quests.sh.
 """
 

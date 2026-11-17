@@ -270,6 +270,9 @@ pub enum Yield {
     /// An object whose use starts the event once the events in `needs` run (a Sealed Valve; the
     /// Font Guardian, its four heat events running).
     Start,
+    /// A watcher whose heartbeat starts the event once the events in `needs` run: had by having
+    /// them, nothing used (the Temple Consort Controller's four summons: EmoteManager.cs:1904-1914).
+    Watch,
 }
 
 impl Yield {
@@ -316,13 +319,23 @@ pub struct Source {
     /// The server event (lower case) whose generator alone puts the creature or NPC out: it comes
     /// only once that event is started, and its rates are those it then has.
     pub event: Option<String>,
-    /// For a [`Yield::Start`], the events (lower case) its use asks running: started first.
+    /// For a [`Yield::Start`] or [`Yield::Watch`], the events (lower case) it asks running:
+    /// started first.
     pub needs: Vec<String>,
     /// For a floor item, seconds its generator takes to put it back once taken.
     pub respawn: Option<f32>,
+    /// For a [`Yield::Start`], the level band its use asks, `(lo, hi)` with hi 0 open (the
+    /// Guardian of the High Matriarch's 40-69, 70-99 and 100 up); `None` for any level.
+    pub band: Option<(u32, u32)>,
 }
 
 impl Source {
+    /// Whether its use's level band holds `level`.
+    pub fn fits_level(&self, level: u32) -> bool {
+        self.band
+            .is_none_or(|(lo, hi)| level >= lo && (hi == 0 || level <= hi))
+    }
+
     /// How fast it comes on `landblock`: the data's figure, else its spawn entries there taken
     /// for the load and none an hour.
     pub fn rate_at(&self, landblock: u32) -> SpawnRate {
@@ -620,7 +633,7 @@ fn parse_rates(s: &str, entries: usize) -> Option<Vec<SpawnRate>> {
 /// hunted one's rates (the tenth, a creature's spawn share, is read by [`spawn_share`]).
 fn parse_source(line: &str) -> Option<Source> {
     let f: Vec<&str> = line.split(',').collect();
-    if ![7, 9, 10, 11, 12, 13, 14].contains(&f.len()) {
+    if ![7, 9, 10, 11, 12, 13, 14, 15].contains(&f.len()) {
         return None;
     }
     let kind = match f[1] {
@@ -635,6 +648,7 @@ fn parse_source(line: &str) -> Option<Source> {
         "portal" => Yield::Portal,
         "revealed" => Yield::Revealed,
         "start" => Yield::Start,
+        "watch" => Yield::Watch,
         _ => return None,
     };
     let landblocks = pairs(f[6], 16)?;
@@ -658,10 +672,10 @@ fn parse_source(line: &str) -> Option<Source> {
         keys: parse_keys(keys)?,
         event: f
             .get(11)
-            .filter(|e| !e.is_empty() && kind != Yield::Start)
+            .filter(|e| !e.is_empty() && !matches!(kind, Yield::Start | Yield::Watch))
             .map(|e| e.to_string()),
         needs: match (kind, f.get(11)) {
-            (Yield::Start, Some(e)) => e
+            (Yield::Start | Yield::Watch, Some(e)) => e
                 .split(';')
                 .filter(|n| !n.is_empty())
                 .map(String::from)
@@ -669,6 +683,13 @@ fn parse_source(line: &str) -> Option<Source> {
             _ => Vec::new(),
         },
         respawn: f.get(12).and_then(|r| r.parse().ok()),
+        band: match f.get(14) {
+            Some(b) => {
+                let (lo, hi) = b.split_once('-')?;
+                Some((lo.parse().ok()?, hi.parse().ok()?))
+            }
+            None => None,
+        },
     })
 }
 
@@ -704,6 +725,7 @@ fn vendor_sources(parsed: &[Source]) -> Vec<Source> {
                 event: None,
                 needs: Vec::new(),
                 respawn: None,
+                band: None,
             });
         }
     }
