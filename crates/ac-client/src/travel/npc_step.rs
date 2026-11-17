@@ -15,6 +15,10 @@ use crate::{Client, Goal};
 const NPC_STOP: f32 = 1.5;
 /// The NPC is looked for this near its spot in the data (metres): it may wander a little.
 const NPC_NEAR: f32 = 20.0;
+/// An object used before the NPC is used from this near (metres, 3D) and counts as used only
+/// stood this near at its UseDone: the Eyes' use radius is 1 m (float 54) and the server's walk
+/// the rest of the way fails silently (a_use_the_server_walked_short_of_is_sent_again).
+const FIRST_REACH: f32 = 2.0;
 /// A use of an object before the NPC is answered within this, else sent again (guess): a walk
 /// off before its UseDone cancels the server's walk to it (Player_Move2.cs:172).
 const FIRST_ANSWER: Duration = Duration::from_secs(10);
@@ -171,10 +175,14 @@ impl Client {
             // UseDone comes whether the server's walk to it got there or not (Player_Use.cs:223-238):
             // a cast or a sidestep since cut that walk, so the use is sent again.
             let cut = self.last_used != Some(guid) || self.stepped_aside.is_some_and(|t| t >= sent);
+            // Nor does it say whether the server's walk got there: a use is had only standing at it.
+            let away = (self.world.objects.get(&guid))
+                .and_then(|o| o.world_pos())
+                .is_none_or(|at| me.distance(at) > FIRST_REACH);
             match self.use_done.filter(|(_, at)| *at >= sent) {
                 Some((err, _)) => {
                     self.travel.state.first_sent = None;
-                    if cut || err != 0 {
+                    if cut || err != 0 || away {
                         self.travel.state.firsts_used.pop();
                     }
                 }
@@ -187,7 +195,7 @@ impl Client {
         }
         let used = &self.travel.state.firsts_used;
         let &(wcid, place) = step.first.iter().find(|(w, _)| !used.contains(w))?;
-        if me.distance(place.at) > crate::visit::REACH {
+        if me.distance(place.at) > FIRST_REACH {
             if !self.is_in_region(place) {
                 return Some(self.overland_goal(place.at.truncate()));
             }

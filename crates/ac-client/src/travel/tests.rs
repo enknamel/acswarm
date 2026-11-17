@@ -2645,3 +2645,64 @@ fn a_corridor_stretch_with_no_way_on_foot_is_flown() {
     assert!(c.is_journey_flown(), "the stretch was walked round");
     assert!(c.travel.state.stretch.is_none());
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_use_the_server_walked_short_of_is_sent_again() {
+    // Blargerton's Eyes on Xi Ru's island: each use sent from 3 m had its UseDone and none took
+    // (the Eyes' use radius is 1 m; the server's walk the rest of the way failed while flying).
+    let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    let me = c.my_position().unwrap();
+    let spot = me + Vec3::new(2.5, 0.0, 0.0);
+    let mut eye = crate::testkit::creature(0x7000_0001, "Eye of the Watcher");
+    eye.weenie_class_id = 29715;
+    eye.position = crate::testkit::placed(0xA9B4_0019, spot);
+    c.world.objects.insert(eye.guid, eye);
+    let mut device = crate::testkit::creature(0x7000_0003, "Portal Device");
+    device.weenie_class_id = 29728;
+    device.position = crate::testkit::placed(0xA9B4_0019, me);
+    c.world.objects.insert(device.guid, device);
+    let step = Step::Npc {
+        npc: 29728,
+        name: "Portal Device".into(),
+        item: None,
+        portal: None,
+        secs: 0.0,
+        first: vec![(29715, c.place_at(spot))],
+        mouth: c.place_at(me),
+        exit: c.place_at(me),
+    };
+    let t0 = Instant::now();
+    // 2.5 m off: walked up to first, not used from here.
+    let goal = c.travel_npc_wait(&step, t0);
+    assert!(matches!(goal, Some(Goal::At { .. })), "{goal:?}");
+    assert!(c.travel.state.firsts_used.is_empty(), "used from 2.5 m");
+    // Stood beside it: used.
+    let beside = spot - Vec3::new(1.0, 0.0, 0.0);
+    crate::testkit::stand(
+        &mut c,
+        0xA9B4_0019,
+        beside - ac_world::landblock_origin(0xA9B4_0019),
+    );
+    let _ = c.travel_npc_wait(&step, t0 + Duration::from_secs(1));
+    assert_eq!(c.travel.state.firsts_used, [29715]);
+    c.autoplay.cast_answered();
+    // Its UseDone heard stood 4 m off (the server's walk went nowhere): not used, sent again.
+    let off = spot - Vec3::new(4.0, 0.0, 0.0);
+    crate::testkit::stand(
+        &mut c,
+        0xA9B4_0019,
+        off - ac_world::landblock_origin(0xA9B4_0019),
+    );
+    c.use_done = Some((0, t0 + Duration::from_millis(1500)));
+    let _ = c.travel_npc_wait(&step, t0 + Duration::from_secs(2));
+    assert!(
+        c.travel.state.firsts_used.is_empty(),
+        "a use short of it counted"
+    );
+    assert!(
+        c.travel.state.gem_used.is_none(),
+        "the device used unfuelled"
+    );
+}
