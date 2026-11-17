@@ -160,8 +160,12 @@ fn a_carried_hand_in_item_is_handed_in_outright() {
     f.me = Some(holtburg(0.0).at);
     f.carried.insert(30810, 1);
     let step = obtained(&f, &ChainData, 11710, 10);
+    // To the Agent in Holtburg, not the data's first, in dungeon 018A (regression: live 04:43).
     match step {
-        PursuitStep::HandIn { row, .. } => assert_eq!(row.want, Want::Item(30810)),
+        PursuitStep::HandIn { row, at } => {
+            assert_eq!(row.want, Want::Item(30810));
+            assert_eq!(at.cell >> 16, 0xA9B4, "{at:?}");
+        }
         other => panic!("not handed in: {other:?}"),
     }
 }
@@ -205,7 +209,10 @@ fn a_writ_of_refuge_goal_is_had_the_fastest_way_from_holtburg() {
     // A Shadow Cursed Totem carried is handed in for its Writ.
     in_the_pack(&mut c, 0x8000_0901, 30810, "Shadow Cursed Totem", 1);
     match settled(&mut c, now) {
-        PursuitStep::HandIn { row, .. } => assert_eq!(row.want, Want::Item(30810)),
+        PursuitStep::HandIn { row, at } => {
+            assert_eq!(row.want, Want::Item(30810));
+            assert_eq!(at.cell >> 16, 0xA9B4, "{at:?}");
+        }
         other => panic!("not handed in: {other:?}"),
     }
 }

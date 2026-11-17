@@ -537,18 +537,18 @@ impl Ask<'_> {
                 let Want::Item(input) = r.want else {
                     continue;
                 };
-                let Some(at) = r.places.iter().find(|p| !(self.asking.refused)(r, p)) else {
+                let Some(at) = self.open_place(r) else {
                     continue;
                 };
                 let count = r.count.max(1);
                 let have = (self.asking.carried)(input);
                 let per = yield_of(r, item);
                 if have >= count {
-                    out.push((r, *at, None));
+                    out.push((r, at, None));
                 } else if per > 0.0 {
                     let hands = (more as f32 / per).ceil().max(1.0);
                     let need = (hands as u32 * count).saturating_sub(have).max(1);
-                    out.push((r, *at, Some((need, hands))));
+                    out.push((r, at, Some((need, hands))));
                 }
             }
         }

@@ -591,6 +591,16 @@ impl Ask<'_> {
         step
     }
 
+    /// `r`'s giver placement nearest the body of those not refused: the data's first may be in
+    /// a dungeon far off (an Agent of the Arcanum in 018A, one in Holtburg beside him).
+    pub(super) fn open_place(&self, r: &Row) -> Option<Place> {
+        let away = |p: &&Place| self.facts.me.map_or(0.0, |m| p.at.distance(m));
+        (r.places.iter())
+            .filter(|p| !(self.asking.refused)(r, p))
+            .min_by(|a, b| away(a).total_cmp(&away(b)))
+            .copied()
+    }
+
     /// `wants` had as another quest's reward: its hand-in made when what it takes is carried, else
     /// that come by first, [`OBTAIN_DEPTH`] deep; `None` when no quest gives any of them.
     fn reward_step(&self, wants: &[Want], depth: usize) -> Option<(PursuitStep, Option<Hunting>)> {
@@ -609,11 +619,11 @@ impl Ask<'_> {
             let Want::Item(input) = r.want else {
                 continue;
             };
-            let Some(at) = r.places.iter().find(|p| !(self.asking.refused)(r, p)) else {
+            let Some(at) = self.open_place(r) else {
                 continue;
             };
             if (self.asking.carried)(input) >= r.count.max(1) {
-                return Some((PursuitStep::HandIn { row: r, at: *at }, None));
+                return Some((PursuitStep::HandIn { row: r, at }, None));
             }
             let name = r.item.as_ref().map_or("", |i| i.name);
             let got = self.obtain(
