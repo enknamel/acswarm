@@ -951,6 +951,7 @@ impl Client {
         };
         let pursued = pursuit_of(&self.quest_board, chained, &ask);
         drop(killing);
+        self.log_stuck_lines(&pursued.lines);
         self.pursuit = pursued.lines;
         let st = &mut self.autoplay.growth;
         // Another hunt, or its droppers another: the plan set off on is not its plan.
@@ -965,6 +966,21 @@ impl Client {
         st.pursuit_items = pursued.items;
         self.keep_road_droppers();
         self.keep_quest_section(&ChainData);
+    }
+
+    /// Log the working line, should `lines` have it stuck: the board passes it over unheld
+    /// (`hold_pursuit` logs its own).
+    fn log_stuck_lines(&self, lines: &[PursuitLine]) {
+        let Some(was) = self.working_pursuit() else {
+            return;
+        };
+        if self.autoplay.growth.pursuit_held.contains_key(&was.id) {
+            return;
+        }
+        let now = lines.iter().find(|l| l.id == was.id && !l.working);
+        if let Some(PursuitStep::Stuck { why }) = now.map(|l| &l.step) {
+            tracing::info!("pursuit: {} stuck: {why}", was.id);
+        }
     }
 
     /// The working pursued quest, if one can go on.
