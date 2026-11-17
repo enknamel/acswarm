@@ -1236,3 +1236,27 @@ fn a_hunting_area_is_never_left_for_a_better_ground_while_a_quest_is_pursued() {
     assert!(!c.grow_hunt(now, &cfg), "{}", c.autoplay.status);
     assert_eq!(c.autoplay.growth.bound, None, "bound for another ground");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_walk_to_a_ground_held_for_a_buff_is_no_ground_out_of_reach() {
+    // Blargerton, just dead with every bane down: the journey to Coglock's ground was held for
+    // the buffs (`held_for_buffs`), never set off, and the next look read that as a ground out of
+    // reach; a vendor run and a portal gem for the "unreachable" ground followed, each the same.
+    let now = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_with_a_buff_due(now);
+    c.autoplay.config.enabled = true;
+    let cfg = Growth::default();
+    let me = c.player.as_ref().unwrap().world_position();
+    let at = Vec2::new(me.x + 250.0, me.y);
+    let lb = (((at.x / 192.0) as u32) << 8) | (at.y / 192.0) as u32;
+    assert!(
+        c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE),
+        "the held journey read as no way"
+    );
+    assert!(!c.traveling(), "set off with a buff down");
+    c.autoplay.growth.bound = Some((lb, at, "Coglock".into()));
+    assert!(c.grow_hunt(now, &cfg), "gave the ground up while buffing");
+    assert!(c.autoplay.growth.bound.is_some());
+    assert!(c.autoplay.growth.skip.is_empty(), "the ground was skipped");
+}

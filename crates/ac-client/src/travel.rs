@@ -607,7 +607,9 @@ impl Client {
     /// else it went to do (a use, a fight, a corpse) or put down as its row stood aside: whatever
     /// set it off plans it again once free. One that arrived, gave up or was cancelled answers no.
     pub(crate) fn journey_broken_off(&self) -> bool {
-        !self.traveling() && self.travel.broken_off
+        // One held for a buff that is down (`held_for_buffs`) has not set off yet: it walks on
+        // once buffed, never a goal out of reach (a_walk_to_a_ground_held_for_a_buff_is_no_ground_out_of_reach).
+        !self.traveling() && (self.travel.broken_off || self.autoplay.buffing_to_leave.is_some())
     }
 
     /// Where the journey is going (world xy), while one is under way.
