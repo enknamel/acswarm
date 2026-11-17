@@ -566,6 +566,7 @@ fn a_kill_task_handed_in_short_and_unpaid_is_not_done_and_starts_no_wait() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_quest_asked_again_after_its_hand_in_is_done() {
     // Blargerton handed Bleeargh the Necklace of Leerargh and the run used him again 0.3 s on:
     // that ask, the necklace gone already, replaced the first, and "gave nothing" was heard.
