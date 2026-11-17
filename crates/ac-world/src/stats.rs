@@ -228,6 +228,8 @@ pub mod enchantment_type {
     pub const INT: u32 = 0x0000_0004;
     pub const FLOAT: u32 = 0x0000_0008;
     pub const SKILL: u32 = 0x0000_0010;
+    /// Every statistic of its kind at once, keyed 0 (the Eye of the Watcher's Grip of Death).
+    pub const MULTIPLE_STAT: u32 = 0x0000_2000;
     pub const MULTIPLICATIVE: u32 = 0x0000_4000;
     pub const ADDITIVE: u32 = 0x0000_8000;
     pub const VITAE: u32 = 0x0080_0000;
@@ -241,6 +243,15 @@ impl Enchantment {
     /// cooldown), by the server's flag.
     pub fn is_beneficial(&self) -> bool {
         self.stat_mod_type & enchantment_type::BENEFICIAL != 0
+    }
+
+    /// Whether it moves statistic `key` of `kind`: keyed to it, or to every one of the kind (key 0,
+    /// vitae aside: PropertiesEnchantmentRegistryExtensions.cs:212-222).
+    fn touches(&self, kind: u32, key: u32) -> bool {
+        let every = self.stat_mod_type & enchantment_type::MULTIPLE_STAT != 0
+            && self.stat_mod_key == 0
+            && !self.is_vitae();
+        self.stat_mod_type & kind != 0 && (self.stat_mod_key == key || every)
     }
 
     pub fn is_vitae(&self) -> bool {
@@ -655,10 +666,7 @@ impl PlayerStats {
         use std::collections::HashMap;
         let mut top: HashMap<u16, f32> = HashMap::new();
         for e in &self.enchantments {
-            if e.stat_mod_type & kind == 0 || e.stat_mod_type & enchantment_type::ADDITIVE == 0 {
-                continue;
-            }
-            if e.stat_mod_key != key {
+            if !e.touches(kind, key) || e.stat_mod_type & enchantment_type::ADDITIVE == 0 {
                 continue;
             }
             let slot = top.entry(e.category).or_insert(0.0);
@@ -673,9 +681,7 @@ impl PlayerStats {
         self.enchantments
             .iter()
             .filter(|e| {
-                e.stat_mod_type & kind != 0
-                    && e.stat_mod_type & enchantment_type::MULTIPLICATIVE != 0
-                    && e.stat_mod_key == key
+                e.touches(kind, key) && e.stat_mod_type & enchantment_type::MULTIPLICATIVE != 0
             })
             .map(|e| e.stat_mod_value)
             .product()
@@ -1521,6 +1527,41 @@ mod tests {
         assert_eq!(stats.skill_current(&stats.skills[0], None), 110);
         // The sheet value never moves.
         assert_eq!(stats.skill_value(&stats.skills[0], None), 105);
+    }
+
+    #[test]
+    fn a_curse_on_every_skill_and_attribute_counts_on_each() {
+        let mut stats = PlayerStats::default();
+        stats.skills.push(Skill {
+            id: 33,
+            ranks: 300,
+            advancement: sac::TRAINED,
+            ..Default::default()
+        });
+        stats.attributes[1].ranks = 200;
+        stats.vitals[0].base = 100;
+        let full = stats.vital_max_current(0);
+        // The Eye of the Watcher's Grip of Death (3042) and Paralyzing Touch (3053): 0x6010 and
+        // 0x6001 at 0.01, keyed 0.
+        let curse = |spell_id: u16, kind: u32| Enchantment {
+            spell_id,
+            category: spell_id,
+            stat_mod_type: kind
+                | enchantment_type::MULTIPLE_STAT
+                | enchantment_type::MULTIPLICATIVE,
+            stat_mod_key: 0,
+            stat_mod_value: 0.01,
+            ..Default::default()
+        };
+        stats
+            .enchantments
+            .push(curse(3042, enchantment_type::SKILL));
+        assert_eq!(stats.skill_current(&stats.skills[0], None), 3);
+        stats
+            .enchantments
+            .push(curse(3053, enchantment_type::ATTRIBUTE));
+        assert_eq!(stats.attribute_current(2), 2);
+        assert!(stats.vital_max_current(0) < full);
     }
     use ac_formats::skill_table::{attribute, SkillFormula};
     use ac_net::wire::Writer;
