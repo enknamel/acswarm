@@ -1,7 +1,8 @@
 //! A journey's NPC step: walked to, handed its item or used, then through the portal it summons
 //! in front of it or carried off (a teleport): Faladha the Emissary's portal to Aerlinthe for a
-//! 10,000 note (`portals::npc_ways`). Objects it asks used first are walked to and used before it
-//! (Browerk's Eyes). Retries and give-up are a gem's (`gem_room::gem_next`), after its emotes.
+//! 10,000 note (`portals::npc_ways`). Objects it asks used first are walked to and used before it,
+//! in order (Browerk's Eyes; Kivik Lir's, whose stamps hold 30 s). Retries and give-up are a gem's
+//! (`gem_room::gem_next`), after its emotes.
 
 use std::time::{Duration, Instant};
 
@@ -163,8 +164,8 @@ impl Client {
     }
 
     /// The step's next object to use before its NPC (`NpcStep::first`): walked to, used, and stood
-    /// at till the server answers (each starts a server event, so a use more is harmless); `None`
-    /// once all are used.
+    /// at till the server answers (each starts a server event or stamps a flag the NPC asks held,
+    /// so a use more is harmless); `None` once all are used.
     fn npc_first_use(
         &mut self,
         step: &NpcStep,

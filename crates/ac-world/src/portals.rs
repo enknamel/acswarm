@@ -456,8 +456,8 @@ pub struct NpcWay {
     pub to: Vec3,
     /// Seconds of the NPC's emote delays before the portal is summoned or the teleport made.
     pub secs: f32,
-    /// Placed objects used first, each starting a server event the NPC asks running: weenie
-    /// class and where it stands (Browerk's Portal Device and the four Eyes of the Watcher).
+    /// Placed objects used first, in order, each starting an event or stamping a flag the NPC asks:
+    /// weenie class and where it stands (Browerk's and Kivik Lir's Eyes of the Watcher).
     pub first: Vec<(u32, crate::Place)>,
 }
 

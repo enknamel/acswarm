@@ -162,7 +162,7 @@ pub enum Step {
         portal: Option<u32>,
         /// Seconds of the NPC's emotes before the way opens.
         secs: f32,
-        /// Objects used first, each starting an event the NPC asks running (`NpcWay::first`).
+        /// Objects used first, in order, each starting an event or a stamp it asks (`NpcWay::first`).
         first: Vec<(u32, Place)>,
         mouth: Place,
         exit: Place,
