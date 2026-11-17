@@ -16,10 +16,19 @@ use crate::{Client, Goal};
 const NPC_STOP: f32 = 1.5;
 /// The NPC is looked for this near its spot in the data (metres): it may wander a little.
 const NPC_NEAR: f32 = 20.0;
-/// An object used before the NPC is used from this near (metres, 3D) and counts as used only
-/// stood this near at its UseDone: the Eyes' use radius is 1 m (float 54) and the server's walk
-/// the rest of the way fails silently (a_use_the_server_walked_short_of_is_sent_again).
+/// An object used before the NPC is walked to this near its spot in the data (metres, 3D),
+/// there to be seen; then into its own use reach ([`Client::use_reach`]).
 const FIRST_REACH: f32 = 2.0;
+/// ACE's use radius when an object sends none (metres, edge to edge; WorldObject_Use.cs:50).
+const DEFAULT_USE_RADIUS: f32 = 0.6;
+/// The character's radius when its Setup is unknown (metres, under a human's).
+const BODY_RADIUS: f32 = 0.3;
+/// A use counts only stood this much past its reach at its UseDone (metres, 3D): the server's
+/// walk the rest of the way fails silently, flying (a_use_the_server_walked_short_of_is_sent_again).
+const USED_SLACK: f32 = 0.5;
+/// The NPC is waited for this long stood at its spot before it counts as not there (guess: the
+/// server's view of a flown body catching up, ObjectMaint's cell visibility).
+pub(super) const NPC_LOOK: Duration = Duration::from_secs(8);
 /// A use of an object before the NPC is answered within this, else sent again (guess): a walk
 /// off before its UseDone cancels the server's walk to it (Player_Move2.cs:172).
 const FIRST_ANSWER: Duration = Duration::from_secs(10);
@@ -87,10 +96,19 @@ impl Client {
             });
         }
         let Some(guid) = self.npc_near(step.npc, step.mouth) else {
-            self.travel_npc_refused(step, "is not where it stands");
+            // The server sends an object only once its cell is in view: a body flown through the
+            // walls stands there first (Kivik Lir's Guardian, given up 3.4 s into the Halls).
+            let since = *self.travel.state.npc_unseen.get_or_insert(now);
+            if now.duration_since(since) >= NPC_LOOK {
+                self.travel_npc_refused(step, "is not where it stands");
+            }
             return None;
         };
+        self.travel.state.npc_unseen = None;
         if first {
+            if let Some(goal) = self.approach_use(guid) {
+                return Some(goal);
+            }
             if self.hands_busy(now) {
                 return None;
             }
@@ -177,9 +195,10 @@ impl Client {
             // a cast or a sidestep since cut that walk, so the use is sent again.
             let cut = self.last_used != Some(guid) || self.stepped_aside.is_some_and(|t| t >= sent);
             // Nor does it say whether the server's walk got there: a use is had only standing at it.
+            let reach = self.use_reach(guid) + USED_SLACK;
             let away = (self.world.objects.get(&guid))
                 .and_then(|o| o.world_pos())
-                .is_none_or(|at| me.distance(at) > FIRST_REACH);
+                .is_none_or(|at| me.distance(at) > reach);
             match self.use_done.filter(|(_, at)| *at >= sent) {
                 Some((err, _)) => {
                     self.travel.state.first_sent = None;
@@ -206,9 +225,17 @@ impl Client {
             }));
         }
         let Some(guid) = self.npc_near(wcid, place) else {
-            self.travel_npc_refused(step, "has something to use first that is not there");
+            // Not sent yet, as the NPC may not be (`NPC_LOOK`).
+            let since = *self.travel.state.npc_unseen.get_or_insert(now);
+            if now.duration_since(since) >= NPC_LOOK {
+                self.travel_npc_refused(step, "has something to use first that is not there");
+            }
             return Some(None);
         };
+        self.travel.state.npc_unseen = None;
+        if let Some(goal) = self.approach_use(guid) {
+            return Some(Some(goal));
+        }
         if self.hands_busy(now) {
             return Some(None);
         }
@@ -220,6 +247,43 @@ impl Client {
         self.travel.state.firsts_used.push(wcid);
         self.travel.state.first_sent = Some((now, guid));
         Some(None)
+    }
+
+    /// How near `guid`'s centre a use of it is sent from (metres, 3D): its use radius plus both
+    /// bodies' radii (Setup radius × scale), as ACE's cylinder distance (WorldObject_Use.cs:47-60).
+    pub(crate) fn use_reach(&self, guid: u32) -> f32 {
+        let radius = |g: u32| {
+            let o = self.world.objects.get(&g)?;
+            let setup = self.assets.setup(o.setup_id).ok()?;
+            Some(setup.radius * if o.scale > 0.0 { o.scale } else { 1.0 })
+        };
+        let me = self
+            .world
+            .player_guid
+            .and_then(radius)
+            .unwrap_or(BODY_RADIUS);
+        let it = radius(guid).unwrap_or(0.0);
+        let use_radius = self.world.objects.get(&guid).and_then(|o| o.use_radius);
+        use_radius.unwrap_or(DEFAULT_USE_RADIUS) + me + it
+    }
+
+    /// The walk into `guid`'s use reach, landed, before it is used; `None` stood there, on the
+    /// floor: the server walks a body no further when it is flying (Xi Ru's Eyes, live).
+    fn approach_use(&mut self, guid: u32) -> Option<Goal> {
+        let o = self.world.objects.get(&guid)?;
+        let (at, cell) = (o.world_pos()?, o.position.as_ref()?.cell);
+        let reach = self.use_reach(guid);
+        let me = self.my_position()?;
+        if me.distance(at) > reach {
+            return Some(Goal::At {
+                place: Place { at, cell },
+                within: reach * 0.8,
+            });
+        }
+        if self.noclip() && self.set_noclip(false) {
+            tracing::info!("travel: landing to use {guid:#010x}");
+        }
+        None
     }
 
     /// The NPC of weenie class `npc` in view nearest its spot `at`, within [`NPC_NEAR`].

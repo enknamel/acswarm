@@ -119,6 +119,8 @@ struct StepState {
     first_sent: Option<(Instant, u32)>,
     /// Times every object asked first was used again, the NPC having opened no way.
     first_rounds: u32,
+    /// When the NPC step stood at its NPC's spot and saw no NPC there, till it is sent.
+    npc_unseen: Option<Instant>,
     /// The step's walk end on its floor, once the region holds it.
     end: Option<Place>,
     /// The overland corridor, while the region does not hold the walk end.

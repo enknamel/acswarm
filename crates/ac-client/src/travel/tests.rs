@@ -2179,6 +2179,7 @@ fn a_device_fuelled_by_eyes_has_each_eye_used_before_it() {
     let thing = |guid: u32, wcid: u32, name: &str, at: Vec3| ac_world::WorldObject {
         weenie_class_id: wcid,
         position: crate::testkit::placed(0xA9B4_0019, at),
+        use_radius: Some(1.0),
         ..crate::testkit::creature(guid, name)
     };
     let (near, far) = (
@@ -2255,6 +2256,7 @@ fn a_device_still_unfuelled_has_its_eyes_used_again() {
     let near = me + Vec3::new(1.0, 0.0, 0.0);
     let mut eye = crate::testkit::creature(0x7000_0001, "Eye of the Watcher");
     eye.weenie_class_id = 29715;
+    eye.use_radius = Some(1.0);
     eye.position = crate::testkit::placed(0xA9B4_0019, near);
     c.world.objects.insert(eye.guid, eye);
     let mut device = crate::testkit::creature(0x7000_0003, "Portal Device");
@@ -2320,6 +2322,7 @@ fn by_faladha() -> (Client, Step) {
     let mut faladha = crate::testkit::creature(0x5000_0741, "Faladha the Emissary");
     faladha.weenie_class_id = 7403;
     faladha.position = crate::testkit::placed(0xA9B4_0019, at);
+    faladha.use_radius = Some(2.5);
     c.world.objects.insert(faladha.guid, faladha);
     let mouth = c.place_at(at);
     let exit = Place {
@@ -2640,10 +2643,20 @@ fn a_corridor_stretch_with_no_way_on_foot_is_flown() {
     assert!(!c.is_journey_flown(), "flown on a server-safe body");
     // One that may flies the step.
     c.movement_rules = crate::player::MovementRules::Unrestricted;
-    c.travel.state.stretch = Some(Place::on_map(me.truncate() + Vec2::new(200.0, 0.0)));
+    let gap = Place::on_map(me.truncate() + Vec2::new(200.0, 0.0));
+    c.travel.state.stretch = Some(gap);
+    // The walk refused itself as it answered (`go_to`): flown, that refusal no longer stands, or
+    // the step is refused at once (Kivik Lir's Odd Looking Vine, live).
+    let owner = c.travel.owner.expect("the journey's owner");
+    let to = Goal::At {
+        place: gap,
+        within: 1.0,
+    };
+    c.refuse(owner, to, me, gap.at, "no way there: Planner(Unreached)");
     c.stretch_answered(&blocked);
     assert!(c.is_journey_flown(), "the stretch was walked round");
     assert!(c.travel.state.stretch.is_none());
+    assert!(c.refusals.is_empty(), "the flown walk still refused");
 }
 
 #[test]
@@ -2657,6 +2670,7 @@ fn a_use_the_server_walked_short_of_is_sent_again() {
     let spot = me + Vec3::new(2.5, 0.0, 0.0);
     let mut eye = crate::testkit::creature(0x7000_0001, "Eye of the Watcher");
     eye.weenie_class_id = 29715;
+    eye.use_radius = Some(1.0);
     eye.position = crate::testkit::placed(0xA9B4_0019, spot);
     c.world.objects.insert(eye.guid, eye);
     let mut device = crate::testkit::creature(0x7000_0003, "Portal Device");
@@ -2746,4 +2760,28 @@ fn kivik_lirs_gallery_is_reached_through_the_haven_and_trial_devices() {
             trip.steps
         );
     }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_npc_not_yet_sent_is_waited_for_at_its_spot() {
+    // Kivik Lir's Guardian: flown through the Halls' walls, the body stood at its spot before the
+    // server had sent it, and the way was given up in that frame.
+    use super::npc_step::NPC_LOOK;
+    let (mut c, step) = by_faladha();
+    let faladha = c.world.objects.remove(&0x5000_0741).expect("Faladha");
+    let t0 = Instant::now();
+    let _ = c.travel_npc_wait(&step, t0);
+    let _ = c.travel_npc_wait(&step, t0 + NPC_LOOK / 2);
+    assert!(!c.is_npc_way_refused(7403), "given up before she was sent");
+    // Sent: the step goes on with her.
+    c.world.objects.insert(faladha.guid, faladha);
+    let _ = c.travel_npc_wait(&step, t0 + NPC_LOOK / 2 + Duration::from_secs(1));
+    assert_eq!(c.travel.state.gem_uses, 1, "the note was not handed over");
+    // One never sent is given up once the wait is spent.
+    let (mut c, step) = by_faladha();
+    c.world.objects.remove(&0x5000_0741);
+    let _ = c.travel_npc_wait(&step, t0);
+    let _ = c.travel_npc_wait(&step, t0 + NPC_LOOK);
+    assert!(c.is_npc_way_refused(7403), "never given up");
 }

@@ -117,6 +117,14 @@ impl Client {
             self.travel.step
         );
         self.travel.state.flown = true;
+        // The walk refused on foot is flown now: its refusal no longer stands, as `fly_journey`'s
+        // (Kivik Lir's Odd Looking Vine refused at once after its stretch was flown).
+        if let Some(owner) = self.travel.owner {
+            self.forget_refusals(owner);
+            if !matches!(owner, Owner::Step(_)) {
+                self.forget_refusals(Owner::Journey);
+            }
+        }
         true
     }
 
