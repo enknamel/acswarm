@@ -104,6 +104,22 @@ impl Client {
         true
     }
 
+    /// A stretch of the step's overland corridor with no way on foot (`why`): the step flown
+    /// straight to its end, not the corridor planned round the gap (3.5 km round a mountain to
+    /// the Halls of Metos portal: a_corridor_stretch_with_no_way_on_foot_is_flown). `false` when
+    /// the body may not fly or the step is flown already.
+    pub(super) fn fly_stretch(&mut self, why: &str) -> bool {
+        if !self.movement_rules.limits().noclip || self.travel.state.flown {
+            return false;
+        }
+        tracing::info!(
+            "travel: step {}: {why}; the stretch is flown",
+            self.travel.step
+        );
+        self.travel.state.flown = true;
+        true
+    }
+
     /// A walk step, or the walk to an NPC that opens the way, with no way on foot (`why`), not to
     /// an end no floor holds: the journey flown from here, as nothing is out of a flight's reach
     /// and every other route ends in the same walk (Ayan Baqur's Empty Mug; Kivik Lir's Odd

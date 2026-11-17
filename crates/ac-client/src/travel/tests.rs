@@ -2612,3 +2612,36 @@ fn an_npc_way_with_no_walk_to_it_is_flown() {
     c.refuse_step("no way there: Planner(Unreached)");
     assert!(c.is_journey_flown(), "the step was not flown");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_corridor_stretch_with_no_way_on_foot_is_flown() {
+    // The walk to the Halls of Metos portal met a stretch end the planner could not reach
+    // (Planner(Unreached)), and the corridor was planned round it: 1.5 km became 3.5 km.
+    let holtburg = 0xA9B4_0019;
+    let mut c = crate::testkit::standing_at(holtburg, Vec3::new(84.0, 7.1, 94.0));
+    let me = c.my_position().unwrap();
+    let exit = Place::on_map(Vec2::new(44_170.4, 9_636.1));
+    let mouth = Place::on_map(me.truncate() + Vec2::new(1_400.0, 0.0));
+    let trip = Trip {
+        steps: vec![Step::Portal {
+            name: "Halls of Metos".into(),
+            mouth,
+            exit,
+        }],
+        seconds: 600.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
+    let blocked = Did::blocked("no way there: Planner(Unreached)");
+    // A body that may not fly walks round the gap.
+    c.movement_rules = crate::player::MovementRules::ServerSafe;
+    c.travel.state.stretch = Some(Place::on_map(me.truncate() + Vec2::new(200.0, 0.0)));
+    c.stretch_answered(&blocked);
+    assert!(!c.is_journey_flown(), "flown on a server-safe body");
+    // One that may flies the step.
+    c.movement_rules = crate::player::MovementRules::Unrestricted;
+    c.travel.state.stretch = Some(Place::on_map(me.truncate() + Vec2::new(200.0, 0.0)));
+    c.stretch_answered(&blocked);
+    assert!(c.is_journey_flown(), "the stretch was walked round");
+    assert!(c.travel.state.stretch.is_none());
+}

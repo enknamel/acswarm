@@ -1085,6 +1085,9 @@ impl Client {
             (Did::Done, None) if !portal => {
                 self.travel_next_step();
             }
+            (Did::Blocked(why), Some(_)) if self.fly_stretch(&why.what) => {
+                self.travel.state.stretch = None;
+            }
             (Did::Blocked(why), Some(exit)) => {
                 tracing::info!(
                     "travel: step {}: no way to {:?} on the terrain route ({}); round it",
