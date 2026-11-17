@@ -707,9 +707,22 @@ impl Client {
         flag_seconds: Option<f32>,
     ) -> Option<ac_world::trip::Trip> {
         self.tell_building_cells();
+        let underground = self.underground();
+        let goal = self.planning_place(goal);
+        self.plan_from_here(goal, quests, flag_seconds, underground)
+    }
+
+    /// [`Self::journey_plan_with`] to the planning place `goal`, the buildings told and whether
+    /// the body is `underground` read: what a reading of the client plans (`pursuit::fastest`).
+    pub(crate) fn plan_from_here(
+        &self,
+        goal: Place,
+        quests: &[String],
+        flag_seconds: Option<f32>,
+        underground: bool,
+    ) -> Option<ac_world::trip::Trip> {
         let pl = self.player.as_ref()?;
         let (me, cell) = (pl.world_position(), pl.cell);
-        let underground = self.underground();
         let prefs = ac_world::trip::Prefs {
             flag_seconds,
             ..self.travel_prefs().in_dungeon(underground)
@@ -724,7 +737,6 @@ impl Client {
         };
         let far = ac_world::trip::Prefs::far();
         let from = ac_world::Place { at: me, cell };
-        let goal = self.planning_place(goal);
         let mut ways = self.standing_ways();
         // As if open, a portal only an event puts out: what to start first (`event_way`).
         if flag_seconds.is_some() {

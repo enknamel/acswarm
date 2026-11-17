@@ -184,17 +184,26 @@ impl Client {
     /// one not walked into from its landblock's ground (Ketnan's, under Tusker Island; not the
     /// Gear Knights' excavation). Without the grid, as dungeon.
     pub(crate) fn is_dungeon_cell(&mut self, cell: u32) -> bool {
+        if cell & 0xFFFF < 0x100 || self.travel.dungeon_cells.contains_key(&cell) {
+            return self.is_dungeon_seen(cell);
+        }
+        let dungeon = self.travel_terrain().is_none() || self.is_dungeon_seen(cell);
+        self.travel.dungeon_cells.insert(cell, dungeon);
+        dungeon
+    }
+
+    /// [`Self::is_dungeon_cell`] from the grid as loaded, the answer not kept.
+    pub(crate) fn is_dungeon_seen(&self, cell: u32) -> bool {
         if cell & 0xFFFF < 0x100 {
             return false;
         }
         if let Some(known) = self.travel.dungeon_cells.get(&cell) {
             return *known;
         }
-        let dungeon = self
-            .travel_terrain()
-            .is_none_or(|(grid, _)| grid.is_dungeon_block(cell))
-            || ac_scene::interior::can_walk_in(&self.assets, cell) == Some(false);
-        self.travel.dungeon_cells.insert(cell, dungeon);
-        dungeon
+        self.travel
+            .grid
+            .as_ref()
+            .is_none_or(|grid| grid.is_dungeon_block(cell))
+            || ac_scene::interior::can_walk_in(&self.assets, cell) == Some(false)
     }
 }

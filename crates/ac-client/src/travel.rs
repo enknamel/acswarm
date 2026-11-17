@@ -720,10 +720,15 @@ impl Client {
     /// The place the trip planner is told for `goal`: a building's room is planned as the
     /// ground outside it, whose door is walked through; a dungeon's keeps its cell.
     pub(crate) fn planning_place(&mut self, goal: Place) -> Place {
-        if !goal.is_indoors() {
-            return goal;
+        if goal.is_indoors() {
+            self.is_dungeon_cell(goal.cell);
         }
-        if self.is_dungeon_cell(goal.cell) {
+        self.planning_place_seen(goal)
+    }
+
+    /// [`Self::planning_place`] from the dungeon cells told so far, nothing loaded or kept.
+    pub(crate) fn planning_place_seen(&self, goal: Place) -> Place {
+        if !goal.is_indoors() || self.is_dungeon_seen(goal.cell) {
             return goal;
         }
         Place {
