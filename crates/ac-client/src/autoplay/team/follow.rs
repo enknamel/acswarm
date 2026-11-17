@@ -202,6 +202,7 @@ impl Client {
         self.stop_going(Some(self.step_owner()), "beside the leader");
         if self.autoplay.follow_trip.take().is_some() && self.traveling() {
             self.cancel_travel();
+            self.stop_stretch("beside the leader");
         }
     }
 
@@ -216,8 +217,10 @@ impl Client {
         }
         // The trip alone: a visit riding on it is its own, and plans
         // again once the trip is gone.
+        // Its stretch too, which the body's frame would walk once more before seeing no journey.
         if self.is_follow_journey() {
             self.end_trip();
+            self.stop_stretch("no leader followed");
             let_go = true;
         }
         // A goal with no journey under way is what a failed replan leaves between ticks
