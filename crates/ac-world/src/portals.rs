@@ -745,4 +745,38 @@ mod tests {
             best.rate
         );
     }
+
+    #[test]
+    fn kivik_lirs_strange_device_sends_each_level_band_to_its_gallery_after_the_four_eyes() {
+        // Its use asks each Eye's 30 s stamp held, then sends by level (3416/3417/3418).
+        let bands = |level: u32| -> Vec<&NpcWay> {
+            super::npc_ways()
+                .iter()
+                .filter(|w| w.npc == 28400 && w.usable_by(level, &[]))
+                .collect()
+        };
+        let eyes = [28406, 28407, 28408, 28409];
+        for (level, to) in [(70, 0x0277_012E), (90, 0x0277_0185), (120, 0x0277_01DC)] {
+            let ways = bands(level);
+            assert_eq!(ways.len(), 1, "level {level}: {ways:?}");
+            let way = ways[0];
+            assert_eq!(way.to_cell, to, "level {level}");
+            assert_eq!((way.cell, way.item, way.portal), (0x0276_07D9, None, None));
+            let first: Vec<u32> = way.first.iter().map(|(w, _)| *w).collect();
+            assert_eq!(first, eyes, "the Eyes in the order the device asks");
+            assert!(way
+                .first
+                .iter()
+                .all(|(_, p)| p.cell == 0x0276_07D9 && p.at.distance(way.at) < 10.0));
+        }
+        // And each Haven's device sends on to the Trials (0x0276), its own four Eyes first.
+        let havens: Vec<&NpcWay> = super::npc_ways()
+            .iter()
+            .filter(|w| w.npc == 28399)
+            .collect();
+        assert_eq!(havens.len(), 3);
+        assert!(havens.iter().all(|w| w.to_cell == 0x0276_0372
+            && w.first.len() == 4
+            && w.first.iter().all(|(_, p)| p.cell >> 16 == w.cell >> 16)));
+    }
 }

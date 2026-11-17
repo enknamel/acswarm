@@ -5,7 +5,10 @@
 # portal_wcid 0: a teleport (EmoteType 99, or a sending spell cast). x/y/z local to the cell's
 # landblock. secs: the NPC's emote delays before the portal is summoned or the teleport made.
 # first: placed objects in the NPC's landblock used first, ;-separated wcid:cell:x:y:z, each
-# starting a server event the NPC asks running (Browerk's Portal Device, the Eyes of the Watcher).
+# starting a server event the NPC asks running (Browerk's Portal Device, the Eyes of the Watcher),
+# then, in the order it asks, each stamping a flag it asks held inside the flag's repeat wait
+# (InqQuest: QuestManager.cs:266-276, 334-361): Kivik Lir's Strange Devices and their four Eyes,
+# held 30 s (60 s in the Havens), so the Eyes and the device are used in one go.
 # Regenerate with reference/scripts/data/quests.sh.
 10737,Director's Majordomo,0298010F,200,-440,-17.97,10731,,32,0,10732,02940101,0,-70,0,1,
 12262,Ecorto the Lost Director,7F900000,101.8,110.1,143.06,12271,,55,0,12292,039E02FA,122.4,-897.3,1.5,6,
@@ -671,6 +674,13 @@
 27959,Guardian,5F4E0331,90,-3.75,36.01,0,,0,0,0,5F5101B1,70,-80,0,0,
 27963,Pillar,2A3F010A,108,27,-11.99,27926,,60,0,0,5C4C039E,70,0,0,0,
 28095,King Toad Idol,3F4E0000,112.75,43.99,-0.1,0,buruningressdirelands,0,0,0,017C02AE,130,-120,0,0,
+28399,Strange Device,027302B9,80,-36.28,1.53,0,,0,0,0,02760372,200,-110,0,0,28402:027302AD:65.11:-60:0.4;28403:027302C9:94.89:-60:0.4;28404:027302AC:65.11:-50:0.4;28405:027302C8:94.89:-50:0.4
+28399,Strange Device,027402B9,80,-36.28,1.53,0,,0,0,0,02760372,200,-110,0,0,28402:027402AC:65.11:-50:0.4;28403:027402AD:65.11:-60:0.4;28404:027402C9:94.89:-60:0.4;28405:027402C8:94.89:-50:0.4
+28399,Strange Device,027502B9,80,-36.28,1.53,0,,0,0,0,02760372,200,-110,0,0,28402:027502AC:65.11:-50:0.4;28403:027502C8:94.89:-50:0.4;28404:027502C9:94.89:-60:0.4;28405:027502AD:65.11:-60:0.4
+28400,Strange Device,027607D9,200,-85.65,19.53,0,,0,59,0,027701DC,190,-90,0,0,28406:027607D9:195.11:-90:18;28407:027607D9:204.89:-90:18;28408:027607D9:204.89:-93.19:18;28409:027607D9:195.11:-93.19:18
+28400,Strange Device,027607D9,200,-85.65,19.53,0,,100,0,0,027701DC,190,-90,0,0,28406:027607D9:195.11:-90:18;28407:027607D9:204.89:-90:18;28408:027607D9:204.89:-93.19:18;28409:027607D9:195.11:-93.19:18
+28400,Strange Device,027607D9,200,-85.65,19.53,0,,60,79,0,0277012E,30,-90,0,0,28406:027607D9:195.11:-90:18;28407:027607D9:204.89:-90:18;28408:027607D9:204.89:-93.19:18;28409:027607D9:195.11:-93.19:18
+28400,Strange Device,027607D9,200,-85.65,19.53,0,,80,99,0,02770185,110,-90,0,0,28406:027607D9:195.11:-90:18;28407:027607D9:204.89:-90:18;28408:027607D9:204.89:-93.19:18;28409:027607D9:195.11:-93.19:18
 28410,Eye of the Heights,0276036A,200,-25.11,0,0,fellow:eyekiviklirtrialjump;fellow:statuekiviklirguardiantrial,0,0,0,02760372,200,-110,0,0,
 28411,Eye of the Watcher,0276037E,215.61,-100,0,0,fellow:spokentoeyekiviklirtriallogic;fellow:statuekiviklirguardiantrial,0,0,0,02760372,200,-110,0,0,
 28411,Eye of the Watcher,0276037E,215.61,-100,0,28360,fellow:eyekiviklirtriallogic;fellow:statuekiviklirguardiantrial,0,0,0,02760372,200,-110,0,0,

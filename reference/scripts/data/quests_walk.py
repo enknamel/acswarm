@@ -971,13 +971,57 @@ def event_starters(data, events, cell):
     return sorted(out)
 
 
+def use_stampers(data, never):
+    """Whose use stamps each flag, {flag: {obj}} (lower case), on a path asking nothing but the
+    flag's own wait: Kivik Lir's Eyes of the Watcher, each its EyeKivikLirTrial flag."""
+    out = defaultdict(set)
+    objs = {s["obj"] for s in data.sets.values()
+            if any(a["type"] == STAMP and a["msg"] for a in s["acts"])}
+    for obj in sorted(objs & set(data.placed)):
+        for root in data.by_obj[obj]:
+            if root["cat"] != USE:
+                continue
+            for branches, effects in walk(data, root):
+                r = read_path(data, root, branches, effects, never)
+                if r["unread"] or r["kill"] or r["items"] or r["needs"] or r.get("waiting"):
+                    continue
+                for a in effects:
+                    if a["type"] == STAMP and a["msg"]:
+                        out[qname(a["msg"])].add(obj)
+    return out
+
+
+def stamp_users(data, stampers, flags, npc, place):
+    """For each flag a way asks stamped lately (InqQuest holds only inside the flag's repeat wait:
+    EmoteManager.cs:621-633, QuestManager.cs:266-276, 334-361), the placed object in the NPC's
+    landblock nearest its `place` whose use stamps it, as `wcid:CELL:x:y:z`, in the order asked
+    (Kivik Lir's Strange Device: four Eyes, each held 30 s); None when one has none."""
+    cell, x, y, z = place
+    here = (num(x), num(y), num(z))
+
+    def away(p):
+        return sum((num(a) - b) ** 2 for a, b in zip(p[2:], here))
+
+    out = []
+    for q in flags:
+        at = sorted(((o, pc, px, py, pz) for o in stampers.get(q, ()) if o != npc
+                     for pc, px, py, pz in data.placed.get(o, ()) if pc >> 16 == cell >> 16),
+                    key=lambda p: (away(p), p))
+        if not at:
+            return None
+        o, pc, px, py, pz = at[0]
+        out.append("%d:%08X:%s:%s:%s" % (o, pc, px, py, pz))
+    return out
+
+
 def npc_ways(data, never):
     """Each way a placed NPC opens for whoever hands it an item or uses it: a portal it summons
     (Faladha the Emissary's to Aerlinthe for a 10,000 note) or a teleport. Rows: npc, name, cell,
     x, y, z, item handed (0: a use), flags held first, level band (0: open), portal (0: a teleport),
     to cell, x, y, z, seconds of emote delays first. Paths asking what the client cannot read, a
-    wait or a kill count are out."""
+    wait or a kill count are out; a wait another's use stamps is that use first."""
     out = set()
+    stampers = use_stampers(data, never)
     for obj, places in sorted(data.placed.items()):
         for root in data.by_obj.get(obj, ()):
             if root["cat"] not in (GIVE, USE) or (root["cat"] == GIVE and not root["wcid"]):
@@ -991,7 +1035,7 @@ def npc_ways(data, never):
                 unread = [u for u in r["unread"] if u != EVENT_UNREAD]
                 if unread or r["kill"] or r["timer"] or r["start"] or r["unneeds"]:
                     continue
-                if r.get("waiting") or r.get("event_off") or len(r["items"]) > (root["cat"] == GIVE):
+                if r.get("event_off") or len(r["items"]) > (root["cat"] == GIVE):
                     continue
                 portal, cell, x, y, z, lo, hi, flag = way
                 band_lo = max(r["band"][0], lo)
@@ -1002,8 +1046,10 @@ def npc_ways(data, never):
                 item = root["wcid"] if root["cat"] == GIVE else 0
                 for pc, px, py, pz in places:
                     first = event_starters(data, r["events"], pc)
-                    if first is None:
+                    held = stamp_users(data, stampers, r.get("held", ()), obj, (pc, px, py, pz))
+                    if first is None or held is None:
                         continue
+                    first += held
                     out.add((str(obj), data.name.get(obj, ""), "%08X" % pc, px, py, pz, str(item),
                              ";".join(needs), str(band_lo), str(band_hi), str(portal),
                              "%08X" % cell, x, y, z, "%g" % round(secs, 1),
@@ -1141,6 +1187,8 @@ def read_path(data, root, branches, effects, never):
                 continue
             if ok:
                 r["waiting"] = True  # the giver's reply during the wait: the same quest
+                # Or a way asking it stamped lately by another's use (`stamp_users`).
+                r.setdefault("held", []).append(q)
                 continue
             if r["timer"] and r["timer"] != q:
                 r["unread"].append("another quest's wait")
@@ -2189,7 +2237,10 @@ NPC_WAYS_HEADER = """\
 # portal_wcid 0: a teleport (EmoteType 99, or a sending spell cast). x/y/z local to the cell's
 # landblock. secs: the NPC's emote delays before the portal is summoned or the teleport made.
 # first: placed objects in the NPC's landblock used first, ;-separated wcid:cell:x:y:z, each
-# starting a server event the NPC asks running (Browerk's Portal Device, the Eyes of the Watcher).
+# starting a server event the NPC asks running (Browerk's Portal Device, the Eyes of the Watcher),
+# then, in the order it asks, each stamping a flag it asks held inside the flag's repeat wait
+# (InqQuest: QuestManager.cs:266-276, 334-361): Kivik Lir's Strange Devices and their four Eyes,
+# held 30 s (60 s in the Havens), so the Eyes and the device are used in one go.
 # Regenerate with reference/scripts/data/quests.sh.
 """
 

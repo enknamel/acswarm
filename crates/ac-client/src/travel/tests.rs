@@ -2706,3 +2706,42 @@ fn a_use_the_server_walked_short_of_is_sent_again() {
         "the device used unfuelled"
     );
 }
+
+fn kivik_lirs_gallery_is_reached_through_the_haven_and_trial_devices() {
+    // Blargerton (level 120) hunting Coglock: "~1440 min", no way into 0x0277. Only the Trials'
+    // Strange Device sends there, and only a Haven's device into the Trials, each after its Eyes.
+    let goal = Place {
+        at: ac_world::landblock_origin(0x0277_0129) + Vec3::new(30.0, -40.0, 0.045),
+        cell: 0x0277_0129,
+    };
+    for (cell, local) in [
+        (0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0)),
+        (0x0272_0136, Vec3::new(60.0, -80.0, 0.005)),
+    ] {
+        let mut c = crate::testkit::standing_in_the_field(120, cell, local);
+        let trip = c.plan_trip(goal, false).expect("no trip to Coglock");
+        assert!(trip.seconds < 3_600.0, "{} s", trip.seconds);
+        let npcs: Vec<(u32, Vec<u32>, u32)> = trip
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Npc {
+                    npc, first, exit, ..
+                } => Some((*npc, first.iter().map(|f| f.0).collect(), exit.cell)),
+                _ => None,
+            })
+            .collect();
+        let devices = &npcs[npcs.len() - 2..];
+        assert_eq!(devices[0].0, 28399, "from {cell:08X}: {npcs:?}");
+        assert_eq!(devices[0].1, [28402, 28403, 28404, 28405]);
+        assert_eq!(devices[0].2, 0x0276_0372, "into the Trials");
+        assert_eq!(devices[1].0, 28400, "from {cell:08X}: {npcs:?}");
+        assert_eq!(devices[1].1, [28406, 28407, 28408, 28409]);
+        assert_eq!(devices[1].2, 0x0277_01DC, "level 120's gallery (3418)");
+        assert!(
+            matches!(trip.steps.last(), Some(Step::Walk(p)) if p.cell == goal.cell),
+            "{:?}",
+            trip.steps
+        );
+    }
+}
