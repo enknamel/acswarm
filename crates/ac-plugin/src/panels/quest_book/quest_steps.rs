@@ -414,6 +414,7 @@ pub(crate) fn step_words(step: &PursuitStep, now: u64, place: &dyn Fn(u32) -> St
             )
         }
         PursuitStep::Arena { flag, step } => step.words(flag),
+        PursuitStep::Fellow { quest } => format!("founding a fellowship (it holds {quest})"),
         PursuitStep::Waiting { until } => {
             format!("waits {}", time_left(until.saturating_sub(now)))
         }

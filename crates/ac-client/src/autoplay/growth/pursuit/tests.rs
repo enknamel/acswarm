@@ -5370,3 +5370,85 @@ fn the_sarcophagus_unreached_without_the_crown_is_called_on_with_it() {
         trip.steps
     );
 }
+
+/// Kivik Lir's sarcophagus pursued at level 120, the fellowship seen as `v` and holding `fellow`.
+fn kivik_lir_step(v: &arena::ArenaView, fellow: &[&str]) -> PursuitStep {
+    let mut f = facts(120, &[("receivedkiviklirarmor", true)]);
+    f.fellow = fellow.iter().map(|q| q.to_string()).collect();
+    let p = work_in(
+        &f,
+        &ChainData,
+        None,
+        &|_| false,
+        &|_| Some(20.0),
+        &|_| false,
+        v,
+    );
+    p.lines[0].step.clone()
+}
+
+#[test]
+fn kivik_lirs_leggings_are_had_by_founding_a_fellowship_killing_a_guardian_then_the_use() {
+    // Used alone the sarcophagus curses ("not able to wrest the leggings ... alone"): it asks the
+    // fellowship's KivikLirFinished (InqFellowQuest, EmoteManager.cs:500-517), so one is founded.
+    let mut v = arena::ArenaView::default();
+    let quest = "kiviklirfinished".to_string();
+    assert_eq!(kivik_lir_step(&v, &[]), PursuitStep::Fellow { quest });
+    v.team_unfellowed = true;
+    assert!(matches!(kivik_lir_step(&v, &[]), PursuitStep::Stuck { .. }));
+    // In one, a guardian whose death stamps it on its killer's fellowship is hunted.
+    v.team_unfellowed = false;
+    v.fellowship = true;
+    match kivik_lir_step(&v, &[]) {
+        PursuitStep::Hunt { creature, .. } => {
+            assert!(["Coglock", "Glogluuk", "Plocagruuk"].contains(&creature.as_str()));
+        }
+        other => panic!("a guardian hunted: {other:?}"),
+    }
+    // The kill stamped it: the sarcophagus is used, its curse alone never the way.
+    match kivik_lir_step(&v, &["kiviklirfinished"]) {
+        PursuitStep::HandIn { row, .. } => assert_eq!(row.giver_wcid, 28416),
+        other => panic!("the sarcophagus used: {other:?}"),
+    }
+}
+
+#[test]
+fn a_guardian_killed_in_a_fellowship_earns_it_the_stamp_until_it_is_left() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 120);
+    let cell = 0x0277_0100;
+    let at = ac_world::landblock_origin(cell) + Vec3::new(10.0, 10.0, 0.0);
+    let mut glogluuk = crate::testkit::creature(0x8000_0001, "Glogluuk");
+    glogluuk.weenie_class_id = 28382;
+    glogluuk.position = crate::testkit::placed(cell, at);
+    c.world.objects.insert(glogluuk.guid, glogluuk);
+    // Alone the death stamps no fellowship (EmoteManager.cs:1252-1263).
+    c.note_sought_kill(at, Instant::now());
+    assert!(c.autoplay.growth.fellow_earned.is_empty());
+    // The Fellowship pursuit step founds one of this character alone.
+    let line = PursuitLine {
+        id: "receivedkiviklirarmor".into(),
+        title: "Kivik Lir".into(),
+        step: PursuitStep::Fellow {
+            quest: "kiviklirfinished".into(),
+        },
+        working: true,
+        via: None,
+    };
+    assert_eq!(c.grow_arena(&line, Instant::now()), Some(true));
+    assert!(c.autoplay.founded.is_some());
+    c.world.fellowship = Some(ac_world::Fellowship {
+        name: "acreborn".into(),
+        leader: crate::testkit::ME,
+        ..Default::default()
+    });
+    c.note_sought_kill(at, Instant::now());
+    assert_eq!(c.fellow_quests(), ["kiviklirfinished"]);
+    assert!(crate::quest_log::holds(
+        &c.quest_facts(),
+        "fellow:kiviklirfinished"
+    ));
+    // Its quests live on the fellowship: left or disbanded, they are gone.
+    c.world.fellowship = None;
+    c.refresh_quests(Instant::now());
+    assert!(c.autoplay.growth.fellow_earned.is_empty());
+}

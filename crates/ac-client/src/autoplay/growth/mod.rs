@@ -281,6 +281,9 @@ pub struct State {
     pub(crate) arena_access: Option<Instant>,
     /// The arena bells this character rang where it stands; none once out of every arena.
     pub(crate) arena_rung: Vec<u32>,
+    /// Quests our killing blows stamped on the fellowship we are in, lower case: the client cannot
+    /// read a fellowship's quests. Forgotten out of one (`pursuit::fellow_stamp`).
+    pub(crate) fellow_earned: Vec<String>,
     /// Pursued grounds left for the next or to unload, and when the character was last in or
     /// beside each (`pursuit::sweep`).
     pub(crate) swept: Recent<u32>,

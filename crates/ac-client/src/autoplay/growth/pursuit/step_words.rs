@@ -36,6 +36,7 @@ impl PursuitStep {
                 | PursuitStep::Read { .. }
                 | PursuitStep::GoThrough { .. }
                 | PursuitStep::Arena { .. }
+                | PursuitStep::Fellow { .. }
         )
     }
 
@@ -98,6 +99,7 @@ impl PursuitStep {
                 format!("go through {name} in {place} for the {flag} flag")
             }
             PursuitStep::Arena { flag, step } => step.words(flag),
+            PursuitStep::Fellow { quest } => format!("found a fellowship (it holds {quest})"),
             PursuitStep::Read { name, .. } => format!("read {name}"),
             PursuitStep::Waiting { until } => {
                 let left = until.saturating_sub(now);

@@ -105,6 +105,9 @@ pub enum Blocked {
     Locked { flag: String },
     /// Another quest, not a start talk, stamps what this one needs.
     NeedsFirst { title: String },
+    /// The character's fellowship must hold `quest` first (a `fellow:` need): a creature's death
+    /// stamps it on its killer's fellowship.
+    Fellow { quest: String },
     /// A scroll whose spell this character cannot learn: its school untrained, or short of skill.
     CantLearn,
 }
@@ -188,6 +191,8 @@ pub struct QuestFacts {
     pub held: Vec<String>,
     /// The character's own PropertyInts, which an `intSTAT=VALUE` need asks (AetheriaBitfield).
     pub ints: BTreeMap<u32, i32>,
+    /// Quests the fellowship it is in holds, lower case, which a `fellow:QUEST` need asks.
+    pub fellow: Vec<String>,
     pub log: QuestLog,
     /// Items carried, by weenie class.
     pub carried: BTreeMap<u32, u32>,
@@ -489,6 +494,9 @@ pub(crate) fn holds(facts: &QuestFacts, flag: &str) -> bool {
     if let Some((stat, value)) = ac_world::quests::stat_need(flag) {
         return facts.ints.get(&stat) == Some(&value);
     }
+    if let Some(quest) = ac_world::quests::fellow_need(flag) {
+        return facts.fellow.iter().any(|f| f.eq_ignore_ascii_case(quest));
+    }
     facts.held.iter().any(|h| h.eq_ignore_ascii_case(flag))
         || facts.log.kills.contains_key(&flag.to_ascii_lowercase())
         || stampers(flag)
@@ -515,6 +523,10 @@ fn beyond_level(doing: &[&Row], facts: &QuestFacts) -> Option<Blocked> {
 
 /// The giver to talk to first for `flag`, nearest first, or why the character can't yet.
 fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> QuestState {
+    if let Some(quest) = ac_world::quests::fellow_need(flag) {
+        let quest = quest.to_string();
+        return QuestState::CantYet(Blocked::Fellow { quest });
+    }
     let by = stampers(flag);
     let starts: Vec<&Row> = by
         .iter()
@@ -604,6 +616,13 @@ fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState
             flag: flag.to_string(),
         });
     }
+    // A way that only casts (Kivik Lir's sarcophagus cursing whoever comes alone) completes
+    // nothing while another does more: that one's need is had first.
+    let casts_only = |r: &&Row| r.does == ["spell"];
+    let open: Vec<&Row> = match open.iter().all(casts_only) {
+        true => open,
+        false => open.into_iter().filter(|r| !casts_only(r)).collect(),
+    };
     let taken: Vec<&Row> = open
         .iter()
         .copied()
@@ -898,6 +917,7 @@ impl Client {
             }),
             held: self.travel.quests_done.clone(),
             ints: stats.ints.iter().copied().collect(),
+            fellow: self.fellow_quests(),
             log: self.quest_log.clone(),
             carried,
             config: self.autoplay.config.quests.clone(),
@@ -914,6 +934,7 @@ impl Client {
     /// Work the board out again when [`QUEST_BOARD_EVERY`] has passed, or at once when what it
     /// was worked out for changed, into `quest_board`. A character named waits for its log.
     pub fn refresh_quests(&mut self, now: Instant) {
+        self.forget_fellow_quests();
         let name = self.world.stats.name.trim();
         if !self.ledger_loaded && !name.is_empty() {
             return;

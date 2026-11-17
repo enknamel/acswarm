@@ -287,7 +287,7 @@ impl Client {
         }
     }
 
-    /// The working pursuit's portal or arena step, from `grow_pursuit`.
+    /// The working pursuit's portal, arena or fellowship step, from `grow_pursuit`.
     pub(super) fn grow_arena(&mut self, line: &PursuitLine, now: Instant) -> Option<bool> {
         let said = format!("for {}: {}", line.title, line.step.words(0));
         match &line.step {
@@ -335,12 +335,13 @@ impl Client {
                     Some(true)
                 }
             },
+            PursuitStep::Fellow { .. } => Some(self.found_fellowship(&said, now)),
             _ => None,
         }
     }
 
-    /// A fellowship founded for the arena: by the team's own rule when it leads mates, else one of
-    /// this character alone. True while it waits for it.
+    /// A fellowship founded for the arena or a quest stamped on one: by the team's own rule when
+    /// it leads mates, else one of this character alone. True while it waits for it.
     fn found_fellowship(&mut self, said: &str, now: Instant) -> bool {
         let team = self.autoplay.config.team.clone();
         let gathering = team.enabled && team.fellowship && !self.autoplay.team.mates.is_empty();

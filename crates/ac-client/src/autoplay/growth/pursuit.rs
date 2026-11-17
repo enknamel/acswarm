@@ -20,6 +20,7 @@ use crate::Client;
 
 pub(crate) mod arena;
 mod events;
+mod fellow_stamp;
 mod fetch;
 mod field;
 mod flag_way;
@@ -118,6 +119,8 @@ pub enum PursuitStep {
     },
     /// A step of the arena run for `flag` (`arena`).
     Arena { flag: String, step: arena::Stage },
+    /// Found a fellowship, alone if need be: `quest` is stamped only on one (`fellow_stamp`).
+    Fellow { quest: String },
     /// Read the carried scroll `name` (weenie class `wcid`) for `spell`: no giver, the scroll
     /// reader (`autoplay_learn_scrolls`) reads it while nothing else is on.
     Read { wcid: u32, name: String, spell: u32 },
@@ -493,6 +496,9 @@ impl Ask<'_> {
                 stuck(format!("its givers take {band}; this character is {level}"))
             }
             QuestState::CantYet(Blocked::Locked { flag }) => return self.flag_step(flag, 0),
+            QuestState::CantYet(Blocked::Fellow { quest }) => {
+                return self.fellow_step(&line.id, quest)
+            }
             QuestState::CantYet(Blocked::NeedsFirst { title }) => {
                 stuck(format!("{} comes first", title.trim()))
             }
@@ -1079,6 +1085,7 @@ impl Client {
         }
         self.note_event_kill(at, now);
         self.note_flag_kill(at);
+        self.note_fellow_kill(at);
     }
 
     /// A pursued hunt's creature in fight reach deleted by the server: destroyed, so its drop is
@@ -1358,9 +1365,9 @@ impl Client {
             | PursuitStep::GiveTo { .. }
             | PursuitStep::Combine { .. } => self.grow_fetch(&line, now),
             PursuitStep::UseHere { .. } => self.grow_field(&line, now),
-            PursuitStep::GoThrough { .. } | PursuitStep::Arena { .. } => {
-                self.grow_arena(&line, now)
-            }
+            PursuitStep::GoThrough { .. }
+            | PursuitStep::Arena { .. }
+            | PursuitStep::Fellow { .. } => self.grow_arena(&line, now),
             _ => None,
         }
     }
