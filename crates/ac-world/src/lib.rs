@@ -308,6 +308,8 @@ pub struct WorldObject {
     pub max_stack_size: u32,
     /// How the item is used and on what (see `usable`).
     pub usable: u32,
+    /// How near a use must be, edge to edge (metres; ACE `UseRadius`, 0.6 unsent).
+    pub use_radius: Option<f32>,
     /// Burden units, 0 unless sent.
     pub burden: u32,
     /// Item slots and side-pack slots of a container (or of the player).

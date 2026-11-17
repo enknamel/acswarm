@@ -57,6 +57,7 @@ impl World {
                     combat_use: oc.combat_use,
                     max_stack_size: oc.max_stack_size,
                     usable: oc.usable,
+                    use_radius: oc.use_radius,
                     burden: oc.burden,
                     items_capacity: oc.items_capacity,
                     containers_capacity: oc.containers_capacity,

@@ -207,6 +207,8 @@ pub struct ObjectCreate {
     pub max_stack_size: u32,
     /// ACE `Usable`: how the item is used and on what (see `usable`).
     pub usable: u32,
+    /// How near a use must be, edge to edge (metres; ACE `UseRadius`, 0.6 unsent).
+    pub use_radius: Option<f32>,
     /// Burden units (weight), 0 unless sent.
     pub burden: u32,
     /// A container's item slots and side-pack slots (a player: the main
@@ -331,6 +333,8 @@ pub struct WeenieDesc {
     pub max_stack_size: u32,
     /// ACE `Usable`: how the item is used and on what (see `usable`).
     pub usable: u32,
+    /// How near a use must be, edge to edge (metres; ACE `UseRadius`, 0.6 unsent).
+    pub use_radius: Option<f32>,
     /// Burden units (weight), 0 unless sent.
     pub burden: u32,
     /// A container's item slots and side-pack slots (a player: the main
@@ -388,9 +392,11 @@ impl WeenieDesc {
         } else {
             0
         };
-        if weenie_flags & USE_RADIUS != 0 {
-            r.f32()?;
-        }
+        let use_radius = if weenie_flags & USE_RADIUS != 0 {
+            Some(r.f32()?)
+        } else {
+            None
+        };
         if weenie_flags & TARGET_TYPE != 0 {
             r.u32()?;
         }
@@ -552,6 +558,7 @@ impl WeenieDesc {
             max_structure,
             max_stack_size,
             usable,
+            use_radius,
             burden,
             items_capacity,
             containers_capacity,
@@ -767,6 +774,7 @@ impl ObjectCreate {
             max_structure,
             max_stack_size,
             usable,
+            use_radius,
             burden,
             items_capacity,
             containers_capacity,
@@ -815,6 +823,7 @@ impl ObjectCreate {
             max_structure,
             max_stack_size,
             usable,
+            use_radius,
             burden,
             items_capacity,
             containers_capacity,

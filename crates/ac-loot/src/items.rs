@@ -1881,6 +1881,7 @@ mod tests {
             max_structure: 0,
             max_stack_size: 1,
             usable: 0,
+            use_radius: None,
             burden: 60,
             items_capacity: 0,
             containers_capacity: 0,
