@@ -98,6 +98,17 @@ each floor of the Empyrean Facility (0x8904) has four side fields (`ef<UL|ML|LL>
 `clears` its four wisps) and a centre needing them, the middle and lower centres also
 AetheriaBitfield (322) at 1 and 3, set by the floor above (to 1, 3, 7).
 
+An InqFellowQuest (58) asks the quests of the character's fellowship (EmoteManager.cs:500-517):
+its success is a need `fellow:QUEST` when one stamp holds from then on (no quest row, a wait, or at
+most one solve: QuestManager.cs:266-276, 334-362), its failure ("a fellowship without QUEST") and
+its no-fellowship reply (QuestNoFellow, 30) stay unread. A creature whose Death set runs
+StampFellowQuest (61) is its `fellow:QUEST` kill source: the set runs for the last damager
+(EmoteManager.cs:1998-2008) and stamps that one's fellowship (EmoteManager.cs:1252-1263), whose
+quests live on the Fellowship object alone (Fellowship.cs:67). Autoplay founds a fellowship, alone
+if need be (Player_Fellowship.cs:19-31), kills a stamper in it and remembers the stamp till it
+leaves (`pursuit/fellow_stamp.rs`): Kivik Lir's sarcophagus (28416), Liazk Itzi's and Hizk Ri's.
+A middle level band failed is read once the band is known: a ladder's rungs failed on the way.
+
 Rows that differ only in the giver's placement are one row; the placements are
 `quest_givers.csv`. A random reply's sets (probability < 1) that differ only in what they give are
 one row whose `gives` lists every alternative.

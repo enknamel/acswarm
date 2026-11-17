@@ -578,3 +578,39 @@ fn the_aetheria_fields_are_used_with_the_aligned_stone_after_their_wisps_die() {
     // The stone itself is asked of Cypher the Apprentice.
     assert!(sources_of(&Want::Item(42710)).any(|s| s.kind == Yield::Npc && s.wcid == 42716));
 }
+
+#[test]
+fn kivik_lirs_sarcophagus_asks_its_fellowship_stamped_by_a_guardians_death() {
+    // The use checks ReceivedKivikLirArmor, then the fellowship's KivikLirFinished (InqFellowQuest),
+    // then the level ladder 60-79, 80-99, 100 up, read through the rungs failed on the way.
+    let asks = |r: &&Row| {
+        r.needs
+            .iter()
+            .any(|n| fellow_need(n) == Some("kiviklirfinished"))
+    };
+    let bands: Vec<(u32, u32)> = rows_of("receivedkiviklirarmor")
+        .filter(asks)
+        .map(|r| (r.min_level, r.max_level))
+        .collect();
+    assert_eq!(bands, [(60, 79), (80, 99), (100, 0)]);
+    let gives: Vec<&[(u32, u32)]> = rows_of("receivedkiviklirarmor")
+        .filter(asks)
+        .map(|r| r.gives.as_slice())
+        .collect();
+    assert_eq!(gives, [&[(28337, 1)], &[(28338, 1)], &[(28339, 1)]]);
+    for r in rows_of("receivedkiviklirarmor").filter(asks) {
+        assert_eq!(
+            (r.giver_wcid, r.kind, r.hand),
+            (28416, Kind::Talk, Handing::Talk)
+        );
+        assert!(!r.has_unread(), "{:?}", r.unread);
+        assert_eq!(r.repeat, Repeat::After(72_000));
+    }
+    // Any of three guardians' deaths stamps it on the killer's fellowship (Death sets, type 61).
+    let by: Vec<&Source> = sources_of(&Want::Fellow("kiviklirfinished".into())).collect();
+    assert!(by.iter().all(|s| s.kind == Yield::Kill), "{by:?}");
+    let mut wcids: Vec<u32> = by.iter().map(|s| s.wcid).collect();
+    wcids.sort_unstable();
+    assert_eq!(wcids, [28381, 28382, 28384]);
+    assert_eq!(fellow_need("kiviklirfinished"), None);
+}

@@ -238,7 +238,11 @@ pub fn flag_givers(flag: &str) -> Vec<FlagBy> {
         .iter()
         .filter(|u| u.flag.eq_ignore_ascii_case(flag))
         .map(FlagBy::Unlock);
-    let want = Want::Flag(flag.to_ascii_lowercase());
+    // A `fellow:` need's stampers are its killers, as a flag's (stamped on their fellowship).
+    let want = match crate::quests::fellow_need(flag) {
+        Some(quest) => Want::Fellow(quest.to_ascii_lowercase()),
+        None => Want::Flag(flag.to_ascii_lowercase()),
+    };
     let of = |kind| crate::quests::sources_of(&want).filter(move |s| s.kind == kind);
     unlocks
         .chain(crate::quests::stamped_by(flag).map(FlagBy::Quest))

@@ -13,8 +13,10 @@
 # are open. xp is fixed; xp_level is a share of the XP to the next level, clamped to
 # xp_min/xp_max when not 0. share: all, none or allegiance. gives: wcid:count;..., and for a
 # random reply every alternative |-separated (an empty one gives nothing). stamps and needs:
-# quest flags, or intSTAT=VALUE (a character stat set to, or asked to be, that value). repeat:
-# seconds before another solve, 0 any time, -1 once; timer: the quest its wait is kept under.
+# quest flags, or intSTAT=VALUE (a character stat set to, or asked to be, that value); a need
+# may be fellow:QUEST, the quest stamped on the character's fellowship (InqFellowQuest; its
+# stampers are quest_sources.csv's fellow:QUEST rows). repeat: seconds before another solve, 0
+# any time, -1 once; timer: the quest its wait is kept under.
 # item, item_type (hex), item_value: the wanted item. luminance: what the path awards. does:
 # what the path does (xp, item, flag, spell, skill, luminance, title, teleport, takes, stat,
 # contract, enlightenment, type N). unread: conditions the client cannot check, |-separated
@@ -46,9 +48,9 @@ aerbaxcompletedwait,talk,Players wait time to receive rewards for Aerbax Citadel
 aerbaxcompletedwait,talk,Players wait time to receive rewards for Aerbax Citadel,37042,talk,,0,0,0,0,1,0,400000000,allegiance,20630:8,aerbaxshadowdefeatedrepeat;aerbaxcompletedwait,72000,aerbaxcompletedwait,aerbaxshadowdefeated;aerbaxcitadelrewards1;aerbaxcitadelrewards2,,,,25000,xp;item;flag;luminance;title,
 aerbaxcompletedwait,talk,Players wait time to receive rewards for Aerbax Citadel,37042,talk,,0,0,0,0,1,0,400000000,allegiance,20630:8;38919:1;37111:1,aerbaxshadowdefeatedrepeat;aerbaxcompletedwait;aerbaxcitadelrewards2,72000,aerbaxcompletedwait,aerbaxshadowdefeated;aerbaxcitadelrewards1,,,,25000,xp;item;flag;luminance;title,
 aerbaxcompletedwait,talk,Players wait time to receive rewards for Aerbax Citadel,37042,talk,,0,0,0,0,1,0,400000000,allegiance,20630:8;38919:1;36948:1,aerbaxshadowdefeatedrepeat;aerbaxcompletedwait;aerbaxcitadelrewards1,72000,aerbaxcompletedwait,aerbaxshadowdefeated,,,,25000,xp;item;flag;luminance;title,
-aerbaxplatformaccess,talk,Player has started Aerbax Citadel,37050,talk,,0,0,0,0,0,0,0,none,,aerbaxplatformaccess,3600,aerbaxplatformaccess,,,,,0,flag;teleport,a check of type 58
+aerbaxplatformaccess,talk,Player has started Aerbax Citadel,37050,talk,,0,0,0,0,0,0,0,none,,aerbaxplatformaccess,3600,aerbaxplatformaccess,fellow:aerbaxcitadelfellowstart,,,,0,flag;teleport,
 aerbaxsprodigalbanderling_wait,start,Player has completed Aerbaxs Prodigal Banderling Quest,35344,talk,,0,120,0,0,0,0,0,none,,aerbaxsprodigalbanderling_start,0,,,,,,0,flag,
-aerbaxsprodigalbanderling_wait,talk,Player has completed Aerbaxs Prodigal Banderling Quest,35343,talk,,0,0,0,0,0,0,0,none,,,72000,aerbaxsprodigalbanderling_wait,aerbaxsprodigalbanderling_start,,,,0,flag;type 66,a check of type 58
+aerbaxsprodigalbanderling_wait,talk,Player has completed Aerbaxs Prodigal Banderling Quest,35343,talk,,0,0,0,0,0,0,0,none,,,72000,aerbaxsprodigalbanderling_wait,aerbaxsprodigalbanderling_start,,,,0,flag;type 66,a fellowship without aerbaxsprodigalbanderling_fellow
 aerbaxsprodigalbanderling_wait,item,Player has completed Aerbaxs Prodigal Banderling Quest,35344,give,87338,1,0,0,0,0.05,0,16241572,allegiance,35345:1,aerbaxsprodigalbanderling_wait;guardwinterbornflag,72000,shardofharraagsdaggerpickuptimer,,Shard of Harraag's Dagger,80,0,12000,xp;item;flag;luminance;takes,
 aerbaxsprodigallugian_flag,item,Player is flagged for Prodigal Lugian portion of lockbox,9406,give,36678,1,0,0,0,0,0,0,none,,aerbaxsprodigallugian_flag,0,,,Royal Summons,80,10,0,flag;takes,
 aerbaxsprodigallugian_repeat,item,Player has completed Prodigal Lugian at least once,9406,give,36682,1,0,0,0,0.5,0,162415717,allegiance,36642:1,aurutisitemupgrade_flag;aerbaxsprodigallugian_wait;aerbaxsprodigallugian_repeat,-1,aerbaxsprodigallugian_repeat,,Sigil of Linvak Tukal,80,10,15000,xp;item;flag;luminance;title;takes,
@@ -675,16 +677,16 @@ collectorfletchingghanewbie,item,You have turned in a newbie fletching arts&craf
 collectorfletchingsholow,item,You have turned in a Low fletching arts&crafts item.,28190,give,5352,1,0,0,0,0,0,0,none,7374:1,collectorfletchingsholow,72000,collectorfletchingsholow,,Bundle of Greater Lightning Arrowheads,8000000,250,0,item;flag;skill;takes,
 collectorfletchingshomid,item,You have turned in a Mid fletching arts&crafts item.,28925,give,28910,1,0,0,0,0,0,0,none,2625:1;2625:1;2625:1,collectorfletchingshomid,72000,collectorfletchingshomid,,Hollow Atlatl Dartshaft,80,10,0,item;flag;skill;takes,
 collectorfletchingshonewbie,item,You have turned in a newbie fletching arts&crafts item.,27748,give,5340,1,0,0,0,0,0,0,none,2623:1,collectorfletchingshonewbie,72000,collectorfletchingshonewbie,,Bundle of Acid Arrowheads,8000000,150,0,item;flag;skill;takes,
-coloarenafiveaccess,talk,Access to Colo Arena Five,34727,talk,,0,0,0,0,0,0,0,none,,coloarenafiveaccess,3600,coloarenafiveaccess,,,,,0,flag;spell,a check of type 58
-coloarenafiveaccess,talk,Access to Colo Arena Five,34728,talk,,0,80,0,0,0,0,0,none,,,3600,coloarenafiveaccess,,,,,0,spell,a check of type 58
-coloarenafouraccess,talk,Access to Colo Arena Four,34727,talk,,0,0,0,0,0,0,0,none,,coloarenafouraccess,3600,coloarenafouraccess,,,,,0,flag;spell,a check of type 58
-coloarenafouraccess,talk,Access to Colo Arena Four,34728,talk,,0,80,0,0,0,0,0,none,,coloarenafouraccess,3600,coloarenafouraccess,,,,,0,flag;spell,a check of type 58
-coloarenaoneaccess,talk,Access to Colo Arena One,34727,talk,,0,0,0,0,0,0,0,none,,coloarenaoneaccess,3600,coloarenaoneaccess,,,,,0,flag;spell,a check of type 58
-coloarenaoneaccess,talk,Access to Colo Arena One,34728,talk,,0,80,0,0,0,0,0,none,,coloarenaoneaccess,3600,coloarenaoneaccess,,,,,0,flag;spell,a check of type 58
-coloarenathreeaccess,talk,Access to Colo Arena Three,34727,talk,,0,0,0,0,0,0,0,none,,coloarenathreeaccess,3600,coloarenathreeaccess,,,,,0,flag;spell,a check of type 58
-coloarenathreeaccess,talk,Access to Colo Arena Three,34728,talk,,0,80,0,0,0,0,0,none,,coloarenathreeaccess,3600,coloarenathreeaccess,,,,,0,flag;spell,a check of type 58
-coloarenatwoaccess,talk,Access to Colo Arena Two,34727,talk,,0,0,0,0,0,0,0,none,,coloarenatwoaccess,3600,coloarenatwoaccess,,,,,0,flag;spell,a check of type 58
-coloarenatwoaccess,talk,Access to Colo Arena Two,34728,talk,,0,80,0,0,0,0,0,none,,coloarenatwoaccess,3600,coloarenatwoaccess,,,,,0,flag;spell,a check of type 58
+coloarenafiveaccess,talk,Access to Colo Arena Five,34727,talk,,0,0,0,0,0,0,0,none,,coloarenafiveaccess,3600,coloarenafiveaccess,fellow:coloarenafiveaccess,,,,0,flag;spell,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess|a fellowship without coloarenatwoaccess|a fellowship without coloarenathreeaccess|a fellowship without coloarenafouraccess
+coloarenafiveaccess,talk,Access to Colo Arena Five,34728,talk,,0,80,0,0,0,0,0,none,,,3600,coloarenafiveaccess,fellow:coloarenafiveaccess,,,,0,spell,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess|a fellowship without coloarenatwoaccess|a fellowship without coloarenathreeaccess|a fellowship without coloarenafouraccess
+coloarenafouraccess,talk,Access to Colo Arena Four,34727,talk,,0,0,0,0,0,0,0,none,,coloarenafouraccess,3600,coloarenafouraccess,fellow:coloarenafouraccess,,,,0,flag;spell,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess|a fellowship without coloarenatwoaccess|a fellowship without coloarenathreeaccess
+coloarenafouraccess,talk,Access to Colo Arena Four,34728,talk,,0,80,0,0,0,0,0,none,,coloarenafouraccess,3600,coloarenafouraccess,fellow:coloarenafouraccess,,,,0,flag;spell,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess|a fellowship without coloarenatwoaccess|a fellowship without coloarenathreeaccess
+coloarenaoneaccess,talk,Access to Colo Arena One,34727,talk,,0,0,0,0,0,0,0,none,,coloarenaoneaccess,3600,coloarenaoneaccess,fellow:coloarenaoneaccess,,,,0,flag;spell,a fellowship without isplayerinfellow?
+coloarenaoneaccess,talk,Access to Colo Arena One,34728,talk,,0,80,0,0,0,0,0,none,,coloarenaoneaccess,3600,coloarenaoneaccess,fellow:coloarenaoneaccess,,,,0,flag;spell,a fellowship without isplayerinfellow?
+coloarenathreeaccess,talk,Access to Colo Arena Three,34727,talk,,0,0,0,0,0,0,0,none,,coloarenathreeaccess,3600,coloarenathreeaccess,fellow:coloarenathreeaccess,,,,0,flag;spell,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess|a fellowship without coloarenatwoaccess
+coloarenathreeaccess,talk,Access to Colo Arena Three,34728,talk,,0,80,0,0,0,0,0,none,,coloarenathreeaccess,3600,coloarenathreeaccess,fellow:coloarenathreeaccess,,,,0,flag;spell,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess|a fellowship without coloarenatwoaccess
+coloarenatwoaccess,talk,Access to Colo Arena Two,34727,talk,,0,0,0,0,0,0,0,none,,coloarenatwoaccess,3600,coloarenatwoaccess,fellow:coloarenatwoaccess,,,,0,flag;spell,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess
+coloarenatwoaccess,talk,Access to Colo Arena Two,34728,talk,,0,80,0,0,0,0,0,none,,coloarenatwoaccess,3600,coloarenatwoaccess,fellow:coloarenatwoaccess,,,,0,flag;spell,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess
 coloredportalleverpull,talk,Player counter for how many levers pulled in Rynthid Assessment.,52071,talk,,0,0,0,0,0,0,0,none,,coloredportalleverpull;coloredportalleverpullcompleted,0,,coloredportal4blue,,,,0,flag,solve-count ranges
 coloredportalleverpull,talk,Player counter for how many levers pulled in Rynthid Assessment.,52071,talk,,0,0,0,0,0,0,0,none,,coloredportalleverpull,0,,,,,,0,flag;teleport,solve-count ranges
 coloredportalleverpull,talk,Player counter for how many levers pulled in Rynthid Assessment.,52071,talk,,0,0,0,0,0,0,0,none,,coloredportalleverpull,0,,coloredportal3blue,,,,0,flag,solve-count ranges
@@ -766,50 +768,50 @@ completedtempleixirzi,talk,Player has defeated the Temple of Ixir Zi.,26541,talk
 completedtempleixirzi,talk,Player has defeated the Temple of Ixir Zi.,26569,talk,,0,0,0,0,0,0,0,none,26599:1,completedtempleixirzi,72000,completedtempleixirzi,defeatedibrexijikti,,,,0,item;flag,
 completedtempleixirzi,talk,Player has defeated the Temple of Ixir Zi.,26569,talk,,0,0,0,0,0,0,0,none,26600:1,completedtempleixirzi,72000,completedtempleixirzi,defeatedjexkiki,,,,0,item;flag,only without defeatedibrexijikti
 completedtempleixirzi,talk,Player has defeated the Temple of Ixir Zi.,26569,talk,,0,0,0,0,0,0,0,none,26601:1,completedtempleixirzi,72000,completedtempleixirzi,defeatedkixktixri,,,,0,item;flag,only without defeatedibrexijikti|only without defeatedjexkiki
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,40,59,0,0,0,0,none,27175:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,40,59,0,0,0,0,none,27175:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,60,79,0,0,0,0,none,27176:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,60,79,0,0,0,0,none,27176:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,80,99,0,0,0,0,none,27177:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,80,99,0,0,0,0,none,27177:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,100,0,0,0,0,0,none,27178:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,100,0,0,0,0,0,none,27178:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,40,59,0,0,0,0,none,27179:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,40,59,0,0,0,0,none,27179:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,60,79,0,0,0,0,none,27180:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,60,79,0,0,0,0,none,27180:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,80,99,0,0,0,0,none,27181:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,80,99,0,0,0,0,none,27181:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,100,0,0,0,0,0,none,27182:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,100,0,0,0,0,0,none,27182:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,40,59,0,0,0,0,none,27183:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,40,59,0,0,0,0,none,27183:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,60,79,0,0,0,0,none,27184:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,60,79,0,0,0,0,none,27184:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,80,99,0,0,0,0,none,27185:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,80,99,0,0,0,0,none,27185:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,100,0,0,0,0,0,none,27186:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,100,0,0,0,0,0,none,27186:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,40,59,0,0,0,0,none,27187:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,40,59,0,0,0,0,none,27187:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,60,79,0,0,0,0,none,27188:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,60,79,0,0,0,0,none,27188:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,80,99,0,0,0,0,none,27189:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,80,99,0,0,0,0,none,27189:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,100,0,0,0,0,0,none,27190:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,100,0,0,0,0,0,none,27190:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58|two level bands
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27151,talk,,0,0,0,0,0,0,0,none,27194:1;27193:1;27192:1;27191:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27151,talk,,0,0,0,0,0,0,0,none,27194:1;27193:1;27192:1;27191:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27152,talk,,0,0,0,0,0,0,0,none,27198:1;27197:1;27196:1;27195:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27152,talk,,0,0,0,0,0,0,0,none,27198:1;27197:1;27196:1;27195:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27153,talk,,0,0,0,0,0,0,0,none,27202:1;27201:1;27200:1;27199:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27153,talk,,0,0,0,0,0,0,0,none,27202:1;27201:1;27200:1;27199:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27154,talk,,0,0,0,0,0,0,0,none,27206:1;27205:1;27204:1;27203:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27154,talk,,0,0,0,0,0,0,0,none,27206:1;27205:1;27204:1;27203:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27155,talk,,0,0,0,0,0,0,0,none,27210:1;27209:1;27208:1;27207:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27155,talk,,0,0,0,0,0,0,0,none,27210:1;27209:1;27208:1;27207:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27156,talk,,0,0,0,0,0,0,0,none,27214:1;27213:1;27212:1;27211:1,completedtempleliazk,72000,completedtempleliazk,,,,,0,item;flag,a check of type 58
-completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27156,talk,,0,0,0,0,0,0,0,none,27214:1;27213:1;27212:1;27211:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,a check of type 58
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,40,59,0,0,0,0,none,27175:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,40,59,0,0,0,0,none,27175:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,60,79,0,0,0,0,none,27176:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,60,79,0,0,0,0,none,27176:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,80,99,0,0,0,0,none,27177:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,80,99,0,0,0,0,none,27177:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,100,0,0,0,0,0,none,27178:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27146,talk,,0,100,0,0,0,0,0,none,27178:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,40,59,0,0,0,0,none,27179:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,40,59,0,0,0,0,none,27179:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,60,79,0,0,0,0,none,27180:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,60,79,0,0,0,0,none,27180:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,80,99,0,0,0,0,none,27181:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,80,99,0,0,0,0,none,27181:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,100,0,0,0,0,0,none,27182:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27147,talk,,0,100,0,0,0,0,0,none,27182:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,40,59,0,0,0,0,none,27183:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,40,59,0,0,0,0,none,27183:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,60,79,0,0,0,0,none,27184:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,60,79,0,0,0,0,none,27184:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,80,99,0,0,0,0,none,27185:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,80,99,0,0,0,0,none,27185:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,100,0,0,0,0,0,none,27186:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27148,talk,,0,100,0,0,0,0,0,none,27186:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,40,59,0,0,0,0,none,27187:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,40,59,0,0,0,0,none,27187:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,60,79,0,0,0,0,none,27188:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,60,79,0,0,0,0,none,27188:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,80,99,0,0,0,0,none,27189:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,80,99,0,0,0,0,none,27189:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,100,0,0,0,0,0,none,27190:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27149,talk,,0,100,0,0,0,0,0,none,27190:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27151,talk,,0,0,0,0,0,0,0,none,27194:1;27193:1;27192:1;27191:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27151,talk,,0,0,0,0,0,0,0,none,27194:1;27193:1;27192:1;27191:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27152,talk,,0,0,0,0,0,0,0,none,27198:1;27197:1;27196:1;27195:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27152,talk,,0,0,0,0,0,0,0,none,27198:1;27197:1;27196:1;27195:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27153,talk,,0,0,0,0,0,0,0,none,27202:1;27201:1;27200:1;27199:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27153,talk,,0,0,0,0,0,0,0,none,27202:1;27201:1;27200:1;27199:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27154,talk,,0,0,0,0,0,0,0,none,27206:1;27205:1;27204:1;27203:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27154,talk,,0,0,0,0,0,0,0,none,27206:1;27205:1;27204:1;27203:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27155,talk,,0,0,0,0,0,0,0,none,27210:1;27209:1;27208:1;27207:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27155,talk,,0,0,0,0,0,0,0,none,27210:1;27209:1;27208:1;27207:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27156,talk,,0,0,0,0,0,0,0,none,27214:1;27213:1;27212:1;27211:1,completedtempleliazk,72000,completedtempleliazk,fellow:liazkbeaten,,,,0,item;flag,
+completedtempleliazk,talk,Player has received a reward for Liazk Itzi's temple.,27156,talk,,0,0,0,0,0,0,0,none,27214:1;27213:1;27212:1;27211:1,completedtempleliazk,72000,completedtempleliazk,liazkbeaten,,,,0,item;flag,no fellowship
 contractquestcounter_0511,item,Complete contracts from the Contract Brokers for extra rewards,9406,give,30830,1,0,0,25000000,0,0,0,none,20630:4,contractquestcounter_0511,72000,infiltrationnoteacquired0205,,Coda,2000,0,0,xp;item;flag;takes,a check of type 20|a check of type 102
 coppercogtrooperkillcount,start,kill count,41570,talk,,0,30,0,0,0,0,0,none,,coppercogtrooperkillcount,0,,,,,,0,flag,
 coppercogtrooperkillcount,kill,kill count,41570,talk,coppercogtrooperkillcount,25,30,0,1000000,0,0,0,none,,coppercogtrooperkilltask,72000,coppercogtrooperkilltask,coppercogtrooperkillcount,,,,0,xp;flag,
@@ -923,7 +925,7 @@ crystallinemarkerstart,talk,Started Crystalline Markers Quest,40097,talk,,0,0,0,
 crystallineshardturninwait,item,Turned in Crystalline Shard Wait timer,40099,give,40100,1,0,0,50000,0,0,0,none,,crystallineshardturnin;crystallineshardturninwait,72000,crystallineshardturninwait,,Crystalline Shard,80,0,0,xp;flag;takes,solve-count ranges
 crystallineshardturninwait,item,Turned in Crystalline Shard Wait timer,40099,give,40100,1,0,0,50000,0,0,0,none,,crystallineshardturnin,72000,crystallineshardturninwait,,Crystalline Shard,80,0,0,xp;flag;takes,solve-count ranges
 crystallineskilltest10109wait,talk,Found Crystalline Bound Wisp,40098,talk,,0,0,0,0,0.35,0,10000000,allegiance,39984:1,crystallineskilltest10109wait,72000,crystallineskilltest10109wait,,,,,0,xp;item;flag;spell,
-crystallordhuntercomplete,talk,You've received a key from Tahuirea.,27280,talk,,0,0,0,0,0,0,0,none,27279:1,crystallordhuntercomplete,172800,crystallordhuntercomplete,,,,,0,item;flag,a check of type 58
+crystallordhuntercomplete,talk,You've received a key from Tahuirea.,27280,talk,,0,0,0,0,0,0,0,none,27279:1,crystallordhuntercomplete,172800,crystallordhuntercomplete,fellow:fellowshipcrystallordslayerquest,,,,0,item;flag,
 dainalive,talk,Lady Dain thinks Gareth Dain is dead.,25584,talk,,0,0,0,0,0,0,0,none,,talkedtoladydain,72000,dainalive,,,,,0,flag,another quest's wait
 dainalive,talk,Lady Dain thinks Gareth Dain is dead.,25585,talk,,0,0,0,0,0,0,0,none,,talkedtodaliuskendmar,72000,dainalive,,,,,0,flag,another quest's wait
 dainalive,item,Lady Dain thinks Gareth Dain is dead.,25584,give,25592,1,0,0,0,0,0,0,none,25592:1,,72000,dainalive,,A Poorly Translated Journal,2000,90,0,item;takes,another quest's wait
@@ -1018,15 +1020,15 @@ direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; t
 direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,1,5,79,1000000,0,0,0,all,,,72000,direchamptokenwait,direchamptoken_first;direchampbanderling,Dire Champion Token,80,0,0,xp;flag;takes,not carrying Dire Champion Token
 direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,1,5,79,1000000,0,0,0,all,,,72000,direchamptokenwait,direchamptoken_first,Dire Champion Token,80,0,0,xp;flag;takes,not carrying Dire Champion Token
 direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,1,5,79,1000000,0,0,0,all,,direchamptoken_first,72000,direchamptokenwait,,Dire Champion Token,80,0,0,xp;flag;takes,not carrying Dire Champion Token
-direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,100,80,99,200000000,0,0,0,all,,,72000,direchamptokenwait,direchampbanderling,Dire Champion Token,80,0,0,xp;flag;takes,a check of type 75|two level bands
-direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,100,80,99,200000000,0,0,0,all,,,72000,direchamptokenwait,,Dire Champion Token,80,0,0,xp;flag;takes,a check of type 75|two level bands
-direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,10,80,99,20000000,0,0,0,all,,,72000,direchamptokenwait,,Dire Champion Token,80,0,0,xp;flag;takes,not carrying Dire Champion Token|a check of type 75|two level bands
-direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,1,80,99,2000000,0,0,0,all,,,72000,direchamptokenwait,direchamptoken_first,Dire Champion Token,80,0,0,xp;flag;takes,not carrying Dire Champion Token|two level bands
-direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,1,80,99,0,0,0,0,none,,direchamptoken_first,72000,direchamptokenwait,,Dire Champion Token,80,0,0,flag;takes,not carrying Dire Champion Token|two level bands
-direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,100,100,119,266700000,0,0,0,all,,,72000,direchamptokenwait,,Dire Champion Token,80,0,0,xp;flag;takes,a check of type 75|two level bands
-direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,10,100,119,0,0,0,0,none,,,72000,direchamptokenwait,,Dire Champion Token,80,0,0,flag;takes,not carrying Dire Champion Token|a check of type 75|two level bands
-direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,1,100,119,0,0,0,0,none,,,72000,direchamptokenwait,direchamptoken_first,Dire Champion Token,80,0,0,flag;takes,not carrying Dire Champion Token|two level bands
-direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,100,120,139,0,0,0,0,none,,,72000,direchamptokenwait,,Dire Champion Token,80,0,0,flag;takes,a check of type 75|two level bands
+direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,100,80,99,200000000,0,0,0,all,,,72000,direchamptokenwait,direchampbanderling,Dire Champion Token,80,0,0,xp;flag;takes,a check of type 75
+direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,100,80,99,200000000,0,0,0,all,,,72000,direchamptokenwait,,Dire Champion Token,80,0,0,xp;flag;takes,a check of type 75
+direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,10,80,99,20000000,0,0,0,all,,,72000,direchamptokenwait,,Dire Champion Token,80,0,0,xp;flag;takes,not carrying Dire Champion Token|a check of type 75
+direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,1,80,99,2000000,0,0,0,all,,,72000,direchamptokenwait,direchamptoken_first,Dire Champion Token,80,0,0,xp;flag;takes,not carrying Dire Champion Token
+direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,1,80,99,0,0,0,0,none,,direchamptoken_first,72000,direchamptokenwait,,Dire Champion Token,80,0,0,flag;takes,not carrying Dire Champion Token
+direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,100,100,119,266700000,0,0,0,all,,,72000,direchamptokenwait,,Dire Champion Token,80,0,0,xp;flag;takes,a check of type 75
+direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,10,100,119,0,0,0,0,none,,,72000,direchamptokenwait,,Dire Champion Token,80,0,0,flag;takes,not carrying Dire Champion Token|a check of type 75
+direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,1,100,119,0,0,0,0,none,,,72000,direchamptokenwait,direchamptoken_first,Dire Champion Token,80,0,0,flag;takes,not carrying Dire Champion Token
+direchamptokenwait,item,Player wait timer for tokens turn in to Aun Javhalrea; the Game Warden.,36866,give,36867,100,120,139,0,0,0,0,none,,,72000,direchamptokenwait,,Dire Champion Token,80,0,0,flag;takes,a check of type 75
 direlandsminecommandersgemgiven,item,Given the Direlands Mine Commander's Gem to Qumasha,32618,give,73066,1,0,0,0,0,0,0,none,73067:1,direlandsminecommandersgemgiven,72000,direlandsminecommandersgempickuptimer,,Direlands Mine Commander's Gem,80,0,0,item;flag;takes,
 diremattekarkillcount,start,Dire Mattekar Kill Counter,31652,talk,,0,20,0,0,0,0,0,none,,diremattekarkillcount,0,,,,,,0,flag,
 diremattekarkillcount,kill,Dire Mattekar Kill Counter,31652,talk,diremattekarkillcount,10,20,0,2000000,0,0,0,none,31612:1,diremattekarkilltask,72000,diremattekarkilltask,diremattekarkillcount,,,,0,xp;item;flag;title,
@@ -1837,39 +1839,39 @@ gaerlandefeated,talk,Player has finished the Gaerlan quest and can receive a rew
 gaerlandefeated,talk,Player has finished the Gaerlan quest and can receive a reward.,46937,talk,,0,0,0,0,0.3,0,370000000,allegiance,46949:1;46959:1,gaerlandefeated,72000,gaerlandefeated,gaerlancrit;gaerlansword,,,,15000,xp;item;flag;luminance,another quest's wait|a check of type 45
 gaerlandefeated,talk,Player has finished the Gaerlan quest and can receive a reward.,46937,talk,,0,0,0,0,0.3,0,370000000,allegiance,46949:1;46959:1,gaerlandefeated,72000,gaerlandefeated,gaerlancrit,,,,15000,xp;item;flag;luminance,another quest's wait|a check of type 45
 gaerlanpreamble,item,Player has given the ornate seal to the ornate pillar,21493,give,21921,1,0,0,0,0,0,0,none,,gaerlanpreamble,0,,,Imbued Ornate Seal,80,0,0,flag;spell;takes,
-gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,12050,give,46959,1,0,149,0,0,0,0,none,46959:1,,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,item;takes,two level bands
+gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,12050,give,46959,1,0,79,0,0,0,0,none,46959:1,,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,item;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,12050,give,21434,1,1,40,0,1,0,3000000,allegiance,20629:2,gaerlanswordturnin,72000,gaerlanswordturnin,,Iasparailaun,1,50000,0,xp;item;flag;title;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,12050,give,21434,1,41,79,0,0.6,0,20000000,allegiance,20629:2,gaerlanswordturnin,72000,gaerlanswordturnin,,Iasparailaun,1,50000,0,xp;item;flag;title;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,12050,give,21434,1,80,0,22000000,0,0,0,none,20629:2,gaerlanswordturnin,72000,gaerlanswordturnin,,Iasparailaun,1,50000,0,xp;item;flag;title;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,12050,give,46959,1,80,149,90000000,0,0,0,none,20630:5,gaerlanswordturnin,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,xp;item;flag;title;takes,
-gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,12050,give,46959,1,150,0,100000000,0,0,0,none,20630:5,gaerlanswordturnin,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,xp;item;flag;title;takes,two level bands
-gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,24577,give,46959,1,0,149,0,0,0,0,none,46959:1,,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,item;takes,two level bands
+gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,12050,give,46959,1,150,0,100000000,0,0,0,none,20630:5,gaerlanswordturnin,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,xp;item;flag;title;takes,
+gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,24577,give,46959,1,0,79,0,0,0,0,none,46959:1,,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,item;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,24577,give,21434,1,1,40,0,1,0,3000000,allegiance,20629:2,gaerlanswordturnin,72000,gaerlanswordturnin,,Iasparailaun,1,50000,0,xp;item;flag;title;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,24577,give,21434,1,41,79,0,0.6,0,20000000,allegiance,20629:2,gaerlanswordturnin,72000,gaerlanswordturnin,,Iasparailaun,1,50000,0,xp;item;flag;title;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,24577,give,21434,1,80,0,22000000,0,0,0,none,20629:2,gaerlanswordturnin,72000,gaerlanswordturnin,,Iasparailaun,1,50000,0,xp;item;flag;title;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,24577,give,46959,1,80,149,90000000,0,0,0,none,20630:5,gaerlanswordturnin,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,xp;item;flag;title;takes,
-gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,24577,give,46959,1,150,0,100000000,0,0,0,none,20630:5,gaerlanswordturnin,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,xp;item;flag;title;takes,two level bands
-gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,49604,give,46959,1,0,149,0,0,0,0,none,46959:1,,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,item;takes,two level bands
+gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,24577,give,46959,1,150,0,100000000,0,0,0,none,20630:5,gaerlanswordturnin,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,xp;item;flag;title;takes,
+gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,49604,give,46959,1,0,79,0,0,0,0,none,46959:1,,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,item;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,49604,give,21434,1,1,40,0,1,0,3000000,allegiance,20629:2,gaerlanswordturnin,72000,gaerlanswordturnin,,Iasparailaun,1,50000,0,xp;item;flag;title;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,49604,give,21434,1,41,79,0,0.6,0,20000000,allegiance,20629:2,gaerlanswordturnin,72000,gaerlanswordturnin,,Iasparailaun,1,50000,0,xp;item;flag;title;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,49604,give,21434,1,80,0,22000000,0,0,0,none,20629:2,gaerlanswordturnin,72000,gaerlanswordturnin,,Iasparailaun,1,50000,0,xp;item;flag;title;takes,
 gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,49604,give,46959,1,80,149,90000000,0,0,0,none,20630:5,gaerlanswordturnin,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,xp;item;flag;title;takes,
-gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,49604,give,46959,1,150,0,100000000,0,0,0,none,20630:5,gaerlanswordturnin,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,xp;item;flag;title;takes,two level bands
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52800,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52800,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52800,talk,,0,0,0,500000000,0,0,0,none,52784:1;52797:5,gauntletrewardwait;gauntletwinscounter,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,65000,xp;item;flag;luminance;title,a check of type 58|a check of type 75|solve-count ranges
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52800,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage11complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52800,talk,,0,0,0,0,0,0,0,none,,,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52801,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52801,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52801,talk,,0,0,0,500000000,0,0,0,none,52784:1;52797:5,gauntletrewardwait;gauntletwinscounter,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,65000,xp;item;flag;luminance;title,a check of type 58|a check of type 75|solve-count ranges
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52801,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage11complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52801,talk,,0,0,0,0,0,0,0,none,,,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52802,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52802,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52802,talk,,0,0,0,500000000,0,0,0,none,52784:1;52797:5,gauntletrewardwait;gauntletwinscounter,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,65000,xp;item;flag;luminance;title,a check of type 58|a check of type 75|solve-count ranges
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52802,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage11complete,,,,0,flag,a check of type 58|a check of type 75
-gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52802,talk,,0,0,0,0,0,0,0,none,,,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,a check of type 58|a check of type 75
+gaerlanswordturnin,item,Player can only turn in the sword 1 time every 1 days,49604,give,46959,1,150,0,100000000,0,0,0,none,20630:5,gaerlanswordturnin,72000,gaerlanswordturnin,,Modified Iasparailaun,1,50000,0,xp;item;flag;title;takes,
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52800,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,0,flag,a fellowship without gauntletarena1ch|a fellowship without gauntletarena2ch|a check of type 75
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52800,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,a fellowship without gauntletarena1ch|a fellowship without gauntletarena2ch|a check of type 75|no fellowship
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52800,talk,,0,0,0,500000000,0,0,0,none,52784:1;52797:5,gauntletrewardwait;gauntletwinscounter,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,65000,xp;item;flag;luminance;title,no fellowship|a check of type 75|solve-count ranges
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52800,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage11complete,,,,0,flag,no fellowship|a check of type 75
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52800,talk,,0,0,0,0,0,0,0,none,,,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,no fellowship|a check of type 75
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52801,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,0,flag,a fellowship without gauntletarena1ew|a fellowship without gauntletarena2ew|a check of type 75
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52801,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,a fellowship without gauntletarena1ew|a fellowship without gauntletarena2ew|a check of type 75|no fellowship
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52801,talk,,0,0,0,500000000,0,0,0,none,52784:1;52797:5,gauntletrewardwait;gauntletwinscounter,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,65000,xp;item;flag;luminance;title,no fellowship|a check of type 75|solve-count ranges
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52801,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage11complete,,,,0,flag,no fellowship|a check of type 75
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52801,talk,,0,0,0,0,0,0,0,none,,,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,no fellowship|a check of type 75
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52802,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,0,flag,a fellowship without gauntletarena1rb|a fellowship without gauntletarena2rb|a check of type 75
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52802,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,a fellowship without gauntletarena1rb|a fellowship without gauntletarena2rb|a check of type 75|no fellowship
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52802,talk,,0,0,0,500000000,0,0,0,none,52784:1;52797:5,gauntletrewardwait;gauntletwinscounter,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage12complete,,,,65000,xp;item;flag;luminance;title,no fellowship|a check of type 75|solve-count ranges
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52802,talk,,0,0,0,0,0,0,0,none,,gauntletrewardwait,72000,gauntletrewardwait,gauntletstage0complete;gauntletstage11complete,,,,0,flag,no fellowship|a check of type 75
+gauntletrewardwait,talk,Player claimed rewards in Gauntlet.,52802,talk,,0,0,0,0,0,0,0,none,,,72000,gauntletrewardwait,gauntletstage0complete,,,,0,flag,no fellowship|a check of type 75
 gavecoloredstoneexcess,item,Handed in too many Colored Stones in Trial of the Mind,36714,give,36672,1,0,0,0,0,0,0,none,36672:1,gaveredstone;gavecoloredstoneexcess,-1,gavecoloredstoneexcess,,Red Stone,80,0,0,item;flag;takes,asks a flag it stamps itself: gaveredstone|asks a flag it stamps itself: gavecoloredstoneexcess
 gavecoloredstoneexcess,item,Handed in too many Colored Stones in Trial of the Mind,36715,give,36672,1,0,0,0,0,0,0,none,36672:1,gavenbucketredstone;gavecoloredstoneexcess,-1,gavecoloredstoneexcess,stonebagcomplete,Red Stone,80,0,0,item;flag;takes,asks a flag it stamps itself: gavenbucketredstone|asks a flag it stamps itself: gavecoloredstoneexcess
 gavecoloredstoneexcess,item,Handed in too many Colored Stones in Trial of the Mind,36715,give,36673,1,0,0,0,0,0,0,none,36673:1,gavenbucketwhitestone;gavecoloredstoneexcess,-1,gavecoloredstoneexcess,stonebagcomplete,White Stone,80,0,0,item;flag;takes,asks a flag it stamps itself: gavenbucketwhitestone|asks a flag it stamps itself: gavecoloredstoneexcess
@@ -1880,8 +1882,9 @@ gavecoloredstoneexcess,item,Handed in too many Colored Stones in Trial of the Mi
 gavecoloredstoneexcess,item,Handed in too many Colored Stones in Trial of the Mind,36716,give,36674,1,0,0,0,0,0,0,none,36674:1,gavesbucketyellowstone;gavecoloredstoneexcess,-1,gavecoloredstoneexcess,stonebagcomplete,Yellow Stone,80,0,0,item;flag;takes,asks a flag it stamps itself: gavesbucketyellowstone|asks a flag it stamps itself: gavecoloredstoneexcess
 gavecoloredstoneexcess,item,Handed in too many Colored Stones in Trial of the Mind,36717,give,36673,1,0,0,0,0,0,0,none,36673:1,gavewhitestone;gavecoloredstoneexcess,-1,gavecoloredstoneexcess,,White Stone,80,0,0,item;flag;takes,asks a flag it stamps itself: gavewhitestone|asks a flag it stamps itself: gavecoloredstoneexcess
 gavecoloredstoneexcess,item,Handed in too many Colored Stones in Trial of the Mind,36718,give,36674,1,0,0,0,0,0,0,none,36674:1,gaveyellowstone;gavecoloredstoneexcess,-1,gavecoloredstoneexcess,,Yellow Stone,80,0,0,item;flag;takes,asks a flag it stamps itself: gaveyellowstone|asks a flag it stamps itself: gavecoloredstoneexcess
-gaveeastgateharmoniccrystal,item,Player has turned in East Gate Harmonic Crystal,37042,give,37059,1,0,0,0,0,0,0,none,,gaveeastgateharmoniccrystal,0,,gavenorthgateharmoniccrystal,East Gate Harmonic Crystal,800,10,0,flag;takes;type 66,a check of type 58
-gaveeastgateharmoniccrystal,item,Player has turned in East Gate Harmonic Crystal,37042,give,37059,1,0,0,0,0,0,0,none,37061:1,gaveeastgateharmoniccrystal,0,,gavenorthgateharmoniccrystal;gavewestgateharmoniccrystal,East Gate Harmonic Crystal,800,10,0,item;flag;takes,a check of type 58
+gaveeastgateharmoniccrystal,item,Player has turned in East Gate Harmonic Crystal,37042,give,37059,1,0,0,0,0,0,0,none,,gaveeastgateharmoniccrystal,0,,gavenorthgateharmoniccrystal;gavewestgateharmoniccrystal;fellow:isplayerinfellow?,East Gate Harmonic Crystal,800,10,0,flag;takes,
+gaveeastgateharmoniccrystal,item,Player has turned in East Gate Harmonic Crystal,37042,give,37059,1,0,0,0,0,0,0,none,,gaveeastgateharmoniccrystal,0,,gavenorthgateharmoniccrystal,East Gate Harmonic Crystal,800,10,0,flag;takes;type 66,a fellowship without isplayerinfellow?
+gaveeastgateharmoniccrystal,item,Player has turned in East Gate Harmonic Crystal,37042,give,37059,1,0,0,0,0,0,0,none,37061:1,gaveeastgateharmoniccrystal,0,,gavenorthgateharmoniccrystal;gavewestgateharmoniccrystal,East Gate Harmonic Crystal,800,10,0,item;flag;takes,no fellowship
 gaveeastgateharmoniccrystal,item,Player has turned in East Gate Harmonic Crystal,37042,give,37059,1,0,0,0,0,0,0,none,,gaveeastgateharmoniccrystal,0,,gavewestgateharmoniccrystal,East Gate Harmonic Crystal,800,10,0,flag;takes,only without gavenorthgateharmoniccrystal
 gaveeastgateharmoniccrystal,item,Player has turned in East Gate Harmonic Crystal,37042,give,37059,1,0,0,0,0,0,0,none,,gaveeastgateharmoniccrystal,0,,,East Gate Harmonic Crystal,800,10,0,flag;takes,only without gavenorthgateharmoniccrystal|only without gavewestgateharmoniccrystal
 gaveevilcouch,talk,Player was given the Evil Couch,22088,talk,,0,0,0,143000,0,0,0,all,22117:1,gaveevilcouch,72000,gaveevilcouch,nullifiedsarcophagus,,,,0,xp;item;flag,
@@ -1913,8 +1916,9 @@ gavenbucketwhitestone,item,White Stone hand in Trial of the Mind,36715,give,3667
 gavenbucketyellowstone,item,Yellow Stone hand in Trial of the Mind,36715,give,36674,1,0,0,0,0,0,0,none,36674:1,gavenbucketyellowstone;gavecoloredstoneexcess;trialofthemind_attempts,0,,stonebagcomplete,Yellow Stone,80,0,0,item;flag;takes,asks a flag it stamps itself: gavenbucketyellowstone|asks a flag it stamps itself: gavecoloredstoneexcess
 gavenbucketyellowstone,item,Yellow Stone hand in Trial of the Mind,36715,give,36674,1,0,0,0,0,0,0,none,,gavenbucketyellowstone,-1,gavenbucketyellowstone,stonebagcomplete;gavenbucketredstone,Yellow Stone,80,0,0,flag;takes,asks a flag it stamps itself: gavenbucketyellowstone|only without gavenbucketredstone
 gavenbucketyellowstone,item,Yellow Stone hand in Trial of the Mind,36715,give,36674,1,0,0,0,0,0,0,none,,gavenbucketyellowstone,-1,gavenbucketyellowstone,stonebagcomplete,Yellow Stone,80,0,0,flag;takes,asks a flag it stamps itself: gavenbucketyellowstone|only without gavenbucketredstone
-gavenorthgateharmoniccrystal,item,Player has turned in North Gate Harmonic Crystal,37042,give,37060,1,0,0,0,0,0,0,none,,gavenorthgateharmoniccrystal,0,,gaveeastgateharmoniccrystal,North Gate Harmonic Crystal,800,10,0,flag;takes;type 66,a check of type 58
-gavenorthgateharmoniccrystal,item,Player has turned in North Gate Harmonic Crystal,37042,give,37060,1,0,0,0,0,0,0,none,37061:1,gavenorthgateharmoniccrystal,0,,gaveeastgateharmoniccrystal;gavewestgateharmoniccrystal,North Gate Harmonic Crystal,800,10,0,item;flag;takes,a check of type 58
+gavenorthgateharmoniccrystal,item,Player has turned in North Gate Harmonic Crystal,37042,give,37060,1,0,0,0,0,0,0,none,,gavenorthgateharmoniccrystal,0,,gaveeastgateharmoniccrystal;gavewestgateharmoniccrystal;fellow:isplayerinfellow?,North Gate Harmonic Crystal,800,10,0,flag;takes,
+gavenorthgateharmoniccrystal,item,Player has turned in North Gate Harmonic Crystal,37042,give,37060,1,0,0,0,0,0,0,none,,gavenorthgateharmoniccrystal,0,,gaveeastgateharmoniccrystal,North Gate Harmonic Crystal,800,10,0,flag;takes;type 66,a fellowship without isplayerinfellow?
+gavenorthgateharmoniccrystal,item,Player has turned in North Gate Harmonic Crystal,37042,give,37060,1,0,0,0,0,0,0,none,37061:1,gavenorthgateharmoniccrystal,0,,gaveeastgateharmoniccrystal;gavewestgateharmoniccrystal,North Gate Harmonic Crystal,800,10,0,item;flag;takes,no fellowship
 gavenorthgateharmoniccrystal,item,Player has turned in North Gate Harmonic Crystal,37042,give,37060,1,0,0,0,0,0,0,none,,gavenorthgateharmoniccrystal,0,,gavewestgateharmoniccrystal,North Gate Harmonic Crystal,800,10,0,flag;takes,only without gaveeastgateharmoniccrystal
 gavenorthgateharmoniccrystal,item,Player has turned in North Gate Harmonic Crystal,37042,give,37060,1,0,0,0,0,0,0,none,,gavenorthgateharmoniccrystal,0,,,North Gate Harmonic Crystal,800,10,0,flag;takes,only without gaveeastgateharmoniccrystal|only without gavewestgateharmoniccrystal
 gavenotethorstenarmor1,talk,Player has been given the note for Brontynn,15810,talk,,0,20,0,0,0,0,0,none,15806:1;15813:1,gavenotethorstenarmor1,72000,gavenotethorstenarmor1,,,,,0,item;flag,
@@ -1930,8 +1934,9 @@ gavesbucketyellowstone,item,Yellow Stone hand in Trial of the Mind,36716,give,36
 gavesbucketyellowstone,item,Yellow Stone hand in Trial of the Mind,36716,give,36674,1,0,0,0,0,0,0,none,,gavesbucketyellowstone,-1,gavesbucketyellowstone,stonebagcomplete,Yellow Stone,80,0,0,flag;takes,asks a flag it stamps itself: gavesbucketyellowstone|only without gavesbucketredstone
 gavetuningfork,item,quest timer,11202,give,51157,1,0,0,0,0,0,0,none,,gavetuningfork,72000,gavetuningfork,,Tuning Fork,80,250,0,flag;takes,
 gaveunframedderethmap,item,Player has given unframed Dereth Map to Gharu Furniture Master.,12239,give,20197,1,0,0,0,0,0,0,none,,gaveunframedderethmap,0,,,Unframed map of Dereth,80,1500,0,flag;takes,
-gavewestgateharmoniccrystal,item,Player has turned in West Gate Harmonic Crystal,37042,give,37061,1,0,0,0,0,0,0,none,,gavewestgateharmoniccrystal,0,,gaveeastgateharmoniccrystal,West Gate Harmonic Crystal,800,10,0,flag;takes;type 66,a check of type 58
-gavewestgateharmoniccrystal,item,Player has turned in West Gate Harmonic Crystal,37042,give,37061,1,0,0,0,0,0,0,none,37061:1,gavewestgateharmoniccrystal,0,,gaveeastgateharmoniccrystal;gavenorthgateharmoniccrystal,West Gate Harmonic Crystal,800,10,0,item;flag;takes,a check of type 58
+gavewestgateharmoniccrystal,item,Player has turned in West Gate Harmonic Crystal,37042,give,37061,1,0,0,0,0,0,0,none,,gavewestgateharmoniccrystal,0,,gaveeastgateharmoniccrystal;gavenorthgateharmoniccrystal;fellow:isplayerinfellow?,West Gate Harmonic Crystal,800,10,0,flag;takes,
+gavewestgateharmoniccrystal,item,Player has turned in West Gate Harmonic Crystal,37042,give,37061,1,0,0,0,0,0,0,none,,gavewestgateharmoniccrystal,0,,gaveeastgateharmoniccrystal,West Gate Harmonic Crystal,800,10,0,flag;takes;type 66,a fellowship without isplayerinfellow?
+gavewestgateharmoniccrystal,item,Player has turned in West Gate Harmonic Crystal,37042,give,37061,1,0,0,0,0,0,0,none,37061:1,gavewestgateharmoniccrystal,0,,gaveeastgateharmoniccrystal;gavenorthgateharmoniccrystal,West Gate Harmonic Crystal,800,10,0,item;flag;takes,no fellowship
 gavewestgateharmoniccrystal,item,Player has turned in West Gate Harmonic Crystal,37042,give,37061,1,0,0,0,0,0,0,none,,gavewestgateharmoniccrystal,0,,gavenorthgateharmoniccrystal,West Gate Harmonic Crystal,800,10,0,flag;takes,only without gaveeastgateharmoniccrystal
 gavewestgateharmoniccrystal,item,Player has turned in West Gate Harmonic Crystal,37042,give,37061,1,0,0,0,0,0,0,none,,gavewestgateharmoniccrystal,0,,,West Gate Harmonic Crystal,800,10,0,flag;takes,only without gaveeastgateharmoniccrystal|only without gavenorthgateharmoniccrystal
 gavewhitestone,item,White Stone hand in Trial of the Mind,36717,give,36673,1,0,0,0,0,0,0,none,36673:1,gavewhitestone;gavecoloredstoneexcess;trialofthemind_attempts,0,,,White Stone,80,0,0,item;flag;takes,asks a flag it stamps itself: gavewhitestone|asks a flag it stamps itself: gavecoloredstoneexcess
@@ -5618,10 +5623,12 @@ give:28340,item,Small Bloodstone Fragment,28426,give,28340,1,0,0,0,0,0,0,none,,,
 give:28341,item,Fused Bloodstone Chunk,28426,give,28341,1,0,0,0,0,0,0,none,,,0,,,Fused Bloodstone Chunk,800,0,0,spell;takes,
 give:28342,item,Small Bloodstone Shard,28426,give,28342,1,0,0,0,0,0,0,none,,,0,,,Small Bloodstone Shard,800,0,0,spell;takes,
 give:28343,item,Sharp Bloodstone Fragment,28426,give,28343,1,0,0,0,0,0,0,none,,,0,,,Sharp Bloodstone Fragment,800,0,0,spell;takes,
-give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,,Bloodstone Emblem,800,0,0,spell;takes,a check of type 58
-give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,,Bloodstone Emblem,800,0,0,flag;takes,a check of type 58
-give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,,Bloodstone Emblem,800,0,0,flag;spell;takes,a check of type 58
-give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,,Bloodstone Emblem,800,0,0,takes,a check of type 58
+give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtrialarena,Bloodstone Emblem,800,0,0,spell;takes,
+give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtrialjump,Bloodstone Emblem,800,0,0,flag;takes,a fellowship without eyekiviklirtrialarena
+give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtriallogic,Bloodstone Emblem,800,0,0,flag;takes,a fellowship without eyekiviklirtrialarena|a fellowship without eyekiviklirtrialjump
+give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial,Bloodstone Emblem,800,0,0,flag;spell;takes,a fellowship without eyekiviklirtrialarena|a fellowship without eyekiviklirtrialjump|a fellowship without eyekiviklirtriallogic
+give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial,Bloodstone Emblem,800,0,0,takes,a fellowship without eyekiviklirtrialarena|a fellowship without eyekiviklirtrialjump|no fellowship
+give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,,Bloodstone Emblem,800,0,0,takes,a fellowship without statuekiviklirguardiantrial|no fellowship
 give:28346,item,Emblem of Blackened Blood,28425,give,28346,1,0,0,0,0,0,0,none,,,0,,,Emblem of Blackened Blood,800,0,0,flag;spell;takes,
 give:28347,item,Emblem of Time's Wrath,28425,give,28347,1,0,0,0,0,0,0,none,,,0,,,Emblem of Time's Wrath,800,0,0,flag;takes,
 give:28348,item,Emblem of Aged Blood,28425,give,28348,1,0,0,0,0,0,0,none,,,0,,,Emblem of Aged Blood,800,0,0,flag;takes,
@@ -5632,10 +5639,12 @@ give:28356,item,Emblem of Sclavus Sight,28425,give,28356,1,0,0,0,0,0,0,none,,,0,
 give:28357,item,Emblem of Ages Past,28425,give,28357,1,0,0,0,0,0,0,none,,,0,,,Emblem of Ages Past,800,0,0,flag;takes,
 give:28358,item,Emblem of Serpent's Hold,28425,give,28358,1,0,0,0,0,0,0,none,,,0,,,Emblem of Serpent's Hold,800,0,0,flag;takes,
 give:28359,item,Emblem of Blackened Weald,28425,give,28359,1,0,0,0,0,0,0,none,,,0,,,Emblem of Blackened Weald,800,0,0,flag;takes,
-give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,0,spell;takes,a check of type 58
-give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,0,flag;takes,a check of type 58
-give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,0,flag;spell;takes,a check of type 58
-give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,0,takes,a check of type 58
+give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtriallogic,Satchel,800,0,0,spell;takes,
+give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtrialjump,Satchel,800,0,0,flag;takes,a fellowship without eyekiviklirtriallogic
+give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtrialarena,Satchel,800,0,0,flag;takes,a fellowship without eyekiviklirtriallogic|a fellowship without eyekiviklirtrialjump
+give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial,Satchel,800,0,0,flag;spell;takes,a fellowship without eyekiviklirtriallogic|a fellowship without eyekiviklirtrialjump|a fellowship without eyekiviklirtrialarena
+give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial,Satchel,800,0,0,takes,a fellowship without eyekiviklirtriallogic|a fellowship without eyekiviklirtrialjump|no fellowship
+give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,0,takes,a fellowship without statuekiviklirguardiantrial|no fellowship
 give:28361,item,Satchel,28411,give,28361,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,0,spell;takes,
 give:28362,item,Satchel,28411,give,28362,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,0,spell;takes,
 give:28363,item,Satchel,28411,give,28363,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,0,spell;takes,
@@ -8517,8 +8526,14 @@ give:34378,item,Marked Candy Wrapper,33939,give,34378,1,0,0,0,0,0,0,none,34381:1
 give:34381:71883,item,Small Sack of Penguin Treats for Partially-eaten Cookie,34383,give,34381,1,0,0,0,0,0,0,none,71883:1,,0,,,Small Sack of Penguin Treats,80,10,0,item;takes,
 give:34381:none,item,Small Sack of Penguin Treats for nothing,33939,give,34381,1,0,0,0,0,0,0,none,,,0,,,Small Sack of Penguin Treats,80,10,0,takes,
 give:344,item,Silifi,24000,give,344,1,0,0,0,0,0,0,none,,,0,,,Silifi,1,460,0,spell;takes,
-give:34449:34449,item,Colosseum Ticket for Colosseum Ticket,34441,give,34449,1,0,0,0,0,0,0,none,34449:1,,0,,,Colosseum Ticket,80,6,0,item;takes,a check of type 58
-give:34449:none,item,Colosseum Ticket for nothing,34441,give,34449,1,0,0,0,0,0,0,none,,,0,,,Colosseum Ticket,80,6,0,takes,a check of type 58
+give:34449:34449,item,Colosseum Ticket for Colosseum Ticket,34441,give,34449,1,0,0,0,0,0,0,none,34449:1,,0,,fellow:coloarenaoneaccess,Colosseum Ticket,80,6,0,item;takes,a fellowship without isplayerinfellow?
+give:34449:34449,item,Colosseum Ticket for Colosseum Ticket,34441,give,34449,1,0,0,0,0,0,0,none,34449:1,,0,,fellow:coloarenatwoaccess,Colosseum Ticket,80,6,0,item;takes,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess
+give:34449:34449,item,Colosseum Ticket for Colosseum Ticket,34441,give,34449,1,0,0,0,0,0,0,none,34449:1,,0,,fellow:coloarenathreeaccess,Colosseum Ticket,80,6,0,item;takes,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess|a fellowship without coloarenatwoaccess
+give:34449:34449,item,Colosseum Ticket for Colosseum Ticket,34441,give,34449,1,0,0,0,0,0,0,none,34449:1,,0,,fellow:coloarenafouraccess,Colosseum Ticket,80,6,0,item;takes,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess|a fellowship without coloarenatwoaccess|a fellowship without coloarenathreeaccess
+give:34449:34449,item,Colosseum Ticket for Colosseum Ticket,34441,give,34449,1,0,0,0,0,0,0,none,34449:1,,0,,fellow:coloarenafiveaccess,Colosseum Ticket,80,6,0,item;takes,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess|a fellowship without coloarenatwoaccess|a fellowship without coloarenathreeaccess|a fellowship without coloarenafouraccess
+give:34449:34449,item,Colosseum Ticket for Colosseum Ticket,34441,give,34449,1,0,0,0,0,0,0,none,34449:1,,0,,,Colosseum Ticket,80,6,0,item;takes,no fellowship
+give:34449:none,item,Colosseum Ticket for nothing,34441,give,34449,1,0,0,0,0,0,0,none,,,0,,fellow:isplayerinfellow?,Colosseum Ticket,80,6,0,takes,
+give:34449:none,item,Colosseum Ticket for nothing,34441,give,34449,1,0,0,0,0,0,0,none,,,0,,,Colosseum Ticket,80,6,0,takes,a fellowship without isplayerinfellow?|a fellowship without coloarenaoneaccess|a fellowship without coloarenatwoaccess|a fellowship without coloarenathreeaccess|a fellowship without coloarenafouraccess|a fellowship without coloarenafiveaccess|no fellowship
 give:34451,item,Demon Swarm Matron Token,34441,give,34451,1,0,0,0,0.25,0,52598758,allegiance,35804:1,,72000,pickedupdemonswarmmatrontoken,,Demon Swarm Matron Token,80,0,0,xp;item;title;takes,
 give:34452:35807,item,Gladiator Diemos Token for Gladiator Diemos Statue,34441,give,34452,1,0,0,0,0,0,0,none,35807:1;35808:1,,518400,pickedupmarkerboss10x,,Gladiator Diemos Token,80,0,0,item;title;takes,
 give:34452:none,item,Gladiator Diemos Token for nothing,53451,give,34452,1,0,0,0,0,0,0,none,,,518400,pickedupmarkerboss10x,,Gladiator Diemos Token,80,0,0,takes,solve-count ranges
@@ -8666,21 +8681,38 @@ give:36061,item,Reflection of Aukherea,36081,give,36061,1,0,0,0,0,0,0,none,,,0,,
 give:36061,item,Reflection of Aukherea,36081,give,36061,1,0,0,0,0,0,0,none,,,0,,,Reflection of Aukherea,80,0,0,takes;type 81,a check of type 80
 give:36062,item,Reflection of Khekierea,36082,give,36062,1,0,0,0,0,0,0,none,,,0,,,Reflection of Khekierea,80,0,0,takes,a check of type 80
 give:36062,item,Reflection of Khekierea,36082,give,36062,1,0,0,0,0,0,0,none,,,0,,,Reflection of Khekierea,80,0,0,takes;type 81,a check of type 80
-give:36063,item,Reflection of Claude,36117,give,36063,1,0,0,0,0,0,0,none,,,0,,,Reflection of Claude,80,0,0,spell;takes,a check of type 82|a check of type 58
-give:36063,item,Reflection of Claude,36117,give,36063,1,0,0,0,0,0,0,none,,,0,,,Reflection of Claude,80,0,0,takes,a check of type 82
-give:36065,item,Virindi Essence,36115,give,36065,1,0,0,0,0,0,0,none,,,0,,,Virindi Essence,80,0,0,spell;takes,a check of type 58
-give:36067:36067,item,Atuakeh Dust for Atuakeh Dust,36114,give,36067,1,0,0,0,0,0,0,none,36067:1,,0,,,Atuakeh Dust,80,500,0,item;takes,a check of type 58|a check of type 75
-give:36067:none,item,Atuakeh Dust for flag and spell and type 66,36114,give,36067,1,0,0,0,0,0,0,none,,,0,,,Atuakeh Dust,80,500,0,takes,a check of type 58|a check of type 75|a check of type 51
-give:36067:none,item,Atuakeh Dust for flag and spell and type 66,36114,give,36067,1,0,0,0,0,0,0,none,,,0,,,Atuakeh Dust,80,500,0,flag;spell;takes;type 66,a check of type 58|a check of type 75|a check of type 51
-give:36068,item,Essence of Loyalty,36116,give,36068,1,0,0,0,0,0,0,none,,,0,,,Essence of Loyalty,80,0,0,takes;type 81;type 83,a check of type 80|a check of type 58
+give:36063,item,Reflection of Claude,36117,give,36063,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest1,Reflection of Claude,80,0,0,spell;takes,a check of type 82
+give:36063,item,Reflection of Claude,36117,give,36063,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest2,Reflection of Claude,80,0,0,spell;takes,a check of type 82|a fellowship without visionquest1
+give:36063,item,Reflection of Claude,36117,give,36063,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest3,Reflection of Claude,80,0,0,spell;takes,a check of type 82|a fellowship without visionquest1|a fellowship without visionquest2
+give:36063,item,Reflection of Claude,36117,give,36063,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest4,Reflection of Claude,80,0,0,spell;takes,a check of type 82|a fellowship without visionquest1|a fellowship without visionquest2|a fellowship without visionquest3
+give:36063,item,Reflection of Claude,36117,give,36063,1,0,0,0,0,0,0,none,,,0,,,Reflection of Claude,80,0,0,spell;takes,a check of type 82|a fellowship without visionquest1|a fellowship without visionquest2|a fellowship without visionquest3|a fellowship without visionquest4
+give:36063,item,Reflection of Claude,36117,give,36063,1,0,0,0,0,0,0,none,,,0,,,Reflection of Claude,80,0,0,takes,a check of type 82|a fellowship without visionquest1|a fellowship without visionquest2|a fellowship without visionquest3|no fellowship
+give:36065,item,Virindi Essence,36115,give,36065,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest1,Virindi Essence,80,0,0,spell;takes,
+give:36065,item,Virindi Essence,36115,give,36065,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest2,Virindi Essence,80,0,0,spell;takes,a fellowship without visionquest1
+give:36065,item,Virindi Essence,36115,give,36065,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest3,Virindi Essence,80,0,0,spell;takes,a fellowship without visionquest1|a fellowship without visionquest2
+give:36065,item,Virindi Essence,36115,give,36065,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest4,Virindi Essence,80,0,0,spell;takes,a fellowship without visionquest1|a fellowship without visionquest2|a fellowship without visionquest3
+give:36065,item,Virindi Essence,36115,give,36065,1,0,0,0,0,0,0,none,,,0,,,Virindi Essence,80,0,0,spell;takes,a fellowship without visionquest1|a fellowship without visionquest2|a fellowship without visionquest3|a fellowship without visionquest4
+give:36065,item,Virindi Essence,36115,give,36065,1,0,0,0,0,0,0,none,,,0,,,Virindi Essence,80,0,0,takes,a fellowship without visionquest1|a fellowship without visionquest2|a fellowship without visionquest3|no fellowship
+give:36067:36067,item,Atuakeh Dust for Atuakeh Dust,36114,give,36067,1,0,0,0,0,0,0,none,36067:1,,0,,fellow:visionquestaccess,Atuakeh Dust,80,500,0,item;takes,a check of type 75
+give:36067:36067,item,Atuakeh Dust for Atuakeh Dust,36114,give,36067,1,0,0,0,0,0,0,none,36067:1,,0,,,Atuakeh Dust,80,500,0,item;takes,a fellowship without visionquestaccess|a check of type 75|no fellowship
+give:36067:none,item,Atuakeh Dust for flag and spell and type 66,36114,give,36067,1,0,0,0,0,0,0,none,,,0,,fellow:visionquestaccess,Atuakeh Dust,80,500,0,takes,a check of type 75|a check of type 51
+give:36067:none,item,Atuakeh Dust for flag and spell and type 66,36114,give,36067,1,0,0,0,0,0,0,none,,,0,,fellow:visionquestaccess,Atuakeh Dust,80,500,0,flag;spell;takes;type 66,a check of type 75|a check of type 51
+give:36067:none,item,Atuakeh Dust for flag and spell and type 66,36114,give,36067,1,0,0,0,0,0,0,none,,,0,,,Atuakeh Dust,80,500,0,takes,a fellowship without visionquestaccess|a check of type 75|a check of type 51
+give:36067:none,item,Atuakeh Dust for flag and spell and type 66,36114,give,36067,1,0,0,0,0,0,0,none,,,0,,,Atuakeh Dust,80,500,0,flag;spell;takes;type 66,a fellowship without visionquestaccess|a check of type 75|a check of type 51
+give:36068,item,Essence of Loyalty,36116,give,36068,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest1,Essence of Loyalty,80,0,0,takes;type 81;type 83,a check of type 80
+give:36068,item,Essence of Loyalty,36116,give,36068,1,0,0,0,0,0,0,none,,,0,,,Essence of Loyalty,80,0,0,takes;type 81;type 83,a check of type 80|a fellowship without visionquest1|no fellowship
 give:36068,item,Essence of Loyalty,36116,give,36068,1,0,0,0,0,0,0,none,,,0,,,Essence of Loyalty,80,0,0,takes;type 81,a check of type 80
-give:36069,item,Essence of Conformity,36116,give,36069,1,0,0,0,0,0,0,none,,,0,,,Essence of Conformity,80,0,0,takes;type 81;type 83,a check of type 80|a check of type 58
+give:36069,item,Essence of Conformity,36116,give,36069,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest1,Essence of Conformity,80,0,0,takes;type 81;type 83,a check of type 80
+give:36069,item,Essence of Conformity,36116,give,36069,1,0,0,0,0,0,0,none,,,0,,,Essence of Conformity,80,0,0,takes;type 81;type 83,a check of type 80|a fellowship without visionquest1|no fellowship
 give:36069,item,Essence of Conformity,36116,give,36069,1,0,0,0,0,0,0,none,,,0,,,Essence of Conformity,80,0,0,takes;type 81,a check of type 80
-give:36070,item,Essence of Order,36116,give,36070,1,0,0,0,0,0,0,none,,,0,,,Essence of Order,80,0,0,takes;type 81;type 83,a check of type 80|a check of type 58
+give:36070,item,Essence of Order,36116,give,36070,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest1,Essence of Order,80,0,0,takes;type 81;type 83,a check of type 80
+give:36070,item,Essence of Order,36116,give,36070,1,0,0,0,0,0,0,none,,,0,,,Essence of Order,80,0,0,takes;type 81;type 83,a check of type 80|a fellowship without visionquest1|no fellowship
 give:36070,item,Essence of Order,36116,give,36070,1,0,0,0,0,0,0,none,,,0,,,Essence of Order,80,0,0,takes;type 81,a check of type 80
-give:36071,item,Essence of Selflessness,36116,give,36071,1,0,0,0,0,0,0,none,,,0,,,Essence of Selflessness,80,0,0,takes;type 81;type 83,a check of type 80|a check of type 58
+give:36071,item,Essence of Selflessness,36116,give,36071,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest1,Essence of Selflessness,80,0,0,takes;type 81;type 83,a check of type 80
+give:36071,item,Essence of Selflessness,36116,give,36071,1,0,0,0,0,0,0,none,,,0,,,Essence of Selflessness,80,0,0,takes;type 81;type 83,a check of type 80|a fellowship without visionquest1|no fellowship
 give:36071,item,Essence of Selflessness,36116,give,36071,1,0,0,0,0,0,0,none,,,0,,,Essence of Selflessness,80,0,0,takes;type 81,a check of type 80
-give:36072,item,Essence of Stasis,36116,give,36072,1,0,0,0,0,0,0,none,,,0,,,Essence of Stasis,80,0,0,takes;type 81;type 83,a check of type 80|a check of type 58
+give:36072,item,Essence of Stasis,36116,give,36072,1,0,0,0,0,0,0,none,,,0,,fellow:visionquest1,Essence of Stasis,80,0,0,takes;type 81;type 83,a check of type 80
+give:36072,item,Essence of Stasis,36116,give,36072,1,0,0,0,0,0,0,none,,,0,,,Essence of Stasis,80,0,0,takes;type 81;type 83,a check of type 80|a fellowship without visionquest1|no fellowship
 give:36072,item,Essence of Stasis,36116,give,36072,1,0,0,0,0,0,0,none,,,0,,,Essence of Stasis,80,0,0,takes;type 81,a check of type 80
 give:36073,item,Reflection of Sang Nen-Kai,36557,give,36073,1,0,0,0,0,0,0,none,,,0,,,Reflection of Sang Nen-Kai,80,0,0,takes,a check of type 80
 give:36073,item,Reflection of Sang Nen-Kai,36557,give,36073,1,0,0,0,0,0,0,none,,,0,,,Reflection of Sang Nen-Kai,80,0,0,takes;type 81,a check of type 80
@@ -11202,12 +11234,21 @@ give:52790:52797,item,Blue Society Band for Gauntlet Coin,52802,give,52790,1,0,0
 give:52790:none,item,Blue Society Band for nothing,52800,give,52790,1,0,0,0,0,0,0,none,,,0,,,Blue Society Band,8,5000,0,takes,a check of type 75|not carrying Blue Society Band
 give:52790:none,item,Blue Society Band for nothing,52801,give,52790,1,0,0,0,0,0,0,none,,,0,,,Blue Society Band,8,5000,0,takes,a check of type 75|not carrying Blue Society Band
 give:52790:none,item,Blue Society Band for nothing,52802,give,52790,1,0,0,0,0,0,0,none,,,0,,,Blue Society Band,8,5000,0,takes,a check of type 75|not carrying Blue Society Band
-give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52800,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,,Gauntlet Ticket,80,10,0,item;takes,a check of type 58
-give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52801,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,,Gauntlet Ticket,80,10,0,item;takes,a check of type 58
-give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52802,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,,Gauntlet Ticket,80,10,0,item;takes,a check of type 58
-give:52796:none,item,Gauntlet Ticket for nothing,52800,give,52796,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Ticket,80,10,0,takes,a check of type 58|a check of type 51
-give:52796:none,item,Gauntlet Ticket for nothing,52801,give,52796,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Ticket,80,10,0,takes,a check of type 58|a check of type 51
-give:52796:none,item,Gauntlet Ticket for nothing,52802,give,52796,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Ticket,80,10,0,takes,a check of type 58|a check of type 51
+give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52800,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,fellow:gauntletarena1ch,Gauntlet Ticket,80,10,0,item;takes,a fellowship without isplayerinfellow?
+give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52800,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,fellow:gauntletarena2ch,Gauntlet Ticket,80,10,0,item;takes,a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ch
+give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52800,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,,Gauntlet Ticket,80,10,0,item;takes,no fellowship
+give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52801,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,fellow:gauntletarena1ew,Gauntlet Ticket,80,10,0,item;takes,a fellowship without isplayerinfellow?
+give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52801,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,fellow:gauntletarena2ew,Gauntlet Ticket,80,10,0,item;takes,a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ew
+give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52801,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,,Gauntlet Ticket,80,10,0,item;takes,no fellowship
+give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52802,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,fellow:gauntletarena1rb,Gauntlet Ticket,80,10,0,item;takes,a fellowship without isplayerinfellow?
+give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52802,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,fellow:gauntletarena2rb,Gauntlet Ticket,80,10,0,item;takes,a fellowship without isplayerinfellow?|a fellowship without gauntletarena1rb
+give:52796:52796,item,Gauntlet Ticket for Gauntlet Ticket,52802,give,52796,1,0,0,0,0,0,0,none,52796:1,,0,,,Gauntlet Ticket,80,10,0,item;takes,no fellowship
+give:52796:none,item,Gauntlet Ticket for nothing,52800,give,52796,1,0,0,0,0,0,0,none,,,0,,fellow:isplayerinfellow?,Gauntlet Ticket,80,10,0,takes,
+give:52796:none,item,Gauntlet Ticket for nothing,52800,give,52796,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Ticket,80,10,0,takes,a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ch|a fellowship without gauntletarena2ch|a check of type 51|no fellowship
+give:52796:none,item,Gauntlet Ticket for nothing,52801,give,52796,1,0,0,0,0,0,0,none,,,0,,fellow:isplayerinfellow?,Gauntlet Ticket,80,10,0,takes,
+give:52796:none,item,Gauntlet Ticket for nothing,52801,give,52796,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Ticket,80,10,0,takes,a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ew|a fellowship without gauntletarena2ew|a check of type 51|no fellowship
+give:52796:none,item,Gauntlet Ticket for nothing,52802,give,52796,1,0,0,0,0,0,0,none,,,0,,fellow:isplayerinfellow?,Gauntlet Ticket,80,10,0,takes,
+give:52796:none,item,Gauntlet Ticket for nothing,52802,give,52796,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Ticket,80,10,0,takes,a fellowship without isplayerinfellow?|a fellowship without gauntletarena1rb|a fellowship without gauntletarena2rb|a check of type 51|no fellowship
 give:52815:52797,item,Holcha's Head for Gauntlet Coin,52800,give,52815,1,0,0,100000000,0,0,0,all,52797:1,,72000,holchashead_pickup,,Holcha's Head,80,0,7500,xp;item;luminance;title;takes,
 give:52815:52797,item,Holcha's Head for Gauntlet Coin,52801,give,52815,1,0,0,100000000,0,0,0,all,52797:1,,72000,holchashead_pickup,,Holcha's Head,80,0,7500,xp;item;luminance;title;takes,
 give:52815:52797,item,Holcha's Head for Gauntlet Coin,52802,give,52815,1,0,0,100000000,0,0,0,all,52797:1,,72000,holchashead_pickup,,Holcha's Head,80,0,7500,xp;item;luminance;title;takes,
@@ -12956,17 +12997,29 @@ give:8780,item,Dark Singularity,8767,give,8780,1,0,0,0,0,0,0,none,8780:1,,0,,,Da
 give:8781,item,Dark Crucible,8765,give,8781,1,0,0,0,0,0,0,none,8782:1,,0,,,Dark Crucible,800,0,0,item;takes,
 give:8781,item,Dark Crucible,8766,give,8781,1,0,0,0,0,0,0,none,8782:1,,0,,,Dark Crucible,800,0,0,item;takes,
 give:8781,item,Dark Crucible,8767,give,8781,1,0,0,0,0,0,0,none,8782:1,,0,,,Dark Crucible,800,0,0,item;takes,
-give:87869,item,Gauntlet Guest Ticket,52802,give,87869,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a check of type 58
-give:87869,item,Gauntlet Guest Ticket,52802,give,87869,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a check of type 58
+give:87869,item,Gauntlet Guest Ticket,52802,give,87869,1,0,0,0,0,0,0,none,,,0,,fellow:isplayerinfellow?,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75
+give:87869,item,Gauntlet Guest Ticket,52802,give,87869,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena1rb,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?
+give:87869,item,Gauntlet Guest Ticket,52802,give,87869,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena2rb,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1rb
+give:87869,item,Gauntlet Guest Ticket,52802,give,87869,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1rb|a fellowship without gauntletarena2rb
+give:87869,item,Gauntlet Guest Ticket,52802,give,87869,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1rb|no fellowship
 give:87869,item,Gauntlet Guest Ticket,52802,give,87869,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,spell;takes,a check of type 75|not carrying Gauntlet Guest Ticket
-give:87870,item,Gauntlet Guest Ticket,52802,give,87870,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a check of type 58
-give:87870,item,Gauntlet Guest Ticket,52802,give,87870,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a check of type 58
+give:87870,item,Gauntlet Guest Ticket,52802,give,87870,1,0,0,0,0,0,0,none,,,0,,fellow:isplayerinfellow?,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75
+give:87870,item,Gauntlet Guest Ticket,52802,give,87870,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena1rb,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?
+give:87870,item,Gauntlet Guest Ticket,52802,give,87870,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena2rb,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1rb
+give:87870,item,Gauntlet Guest Ticket,52802,give,87870,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1rb|a fellowship without gauntletarena2rb
+give:87870,item,Gauntlet Guest Ticket,52802,give,87870,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1rb|no fellowship
 give:87870,item,Gauntlet Guest Ticket,52802,give,87870,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,spell;takes,a check of type 75|not carrying Gauntlet Guest Ticket
-give:87871,item,Gauntlet Guest Ticket,52800,give,87871,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a check of type 58
-give:87871,item,Gauntlet Guest Ticket,52800,give,87871,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a check of type 58
+give:87871,item,Gauntlet Guest Ticket,52800,give,87871,1,0,0,0,0,0,0,none,,,0,,fellow:isplayerinfellow?,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75
+give:87871,item,Gauntlet Guest Ticket,52800,give,87871,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena1ch,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?
+give:87871,item,Gauntlet Guest Ticket,52800,give,87871,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena2ch,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ch
+give:87871,item,Gauntlet Guest Ticket,52800,give,87871,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ch|a fellowship without gauntletarena2ch
+give:87871,item,Gauntlet Guest Ticket,52800,give,87871,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ch|no fellowship
 give:87871,item,Gauntlet Guest Ticket,52800,give,87871,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,spell;takes,a check of type 75|not carrying Gauntlet Guest Ticket
-give:87872,item,Gauntlet Guest Ticket,52800,give,87872,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a check of type 58
-give:87872,item,Gauntlet Guest Ticket,52800,give,87872,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a check of type 58
+give:87872,item,Gauntlet Guest Ticket,52800,give,87872,1,0,0,0,0,0,0,none,,,0,,fellow:isplayerinfellow?,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75
+give:87872,item,Gauntlet Guest Ticket,52800,give,87872,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena1ch,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?
+give:87872,item,Gauntlet Guest Ticket,52800,give,87872,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena2ch,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ch
+give:87872,item,Gauntlet Guest Ticket,52800,give,87872,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ch|a fellowship without gauntletarena2ch
+give:87872,item,Gauntlet Guest Ticket,52800,give,87872,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ch|no fellowship
 give:87872,item,Gauntlet Guest Ticket,52800,give,87872,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,spell;takes,a check of type 75|not carrying Gauntlet Guest Ticket
 give:8793:8799,item,Great Work Soul Crystal Shard for Great Work Staff of the Lightbringer,8766,give,8793,1,0,0,0,0,0,0,none,8799:1,,72000,shardsoulcrystal,,Great Work Soul Crystal Shard,800,0,0,item;takes,
 give:8793:8799,item,Great Work Soul Crystal Shard for Great Work Staff of the Lightbringer,8767,give,8793,1,0,0,0,0,0,0,none,8799:1,,72000,shardsoulcrystal,,Great Work Soul Crystal Shard,800,0,0,item;takes,
@@ -12986,11 +13039,17 @@ give:8797:8808,item,Shendolain Soul Crystal Shard for Shendolain Helm of the Lig
 give:8798:8803,item,Herald's Soul Crystal Shard for Herald's Staff of the Lightbringer,8766,give,8798,1,0,0,0,0,0,0,none,8803:1,,72000,shardsoulcrystal,,Herald's Soul Crystal Shard,800,0,0,item;takes,
 give:8798:8803,item,Herald's Soul Crystal Shard for Herald's Staff of the Lightbringer,8767,give,8798,1,0,0,0,0,0,0,none,8803:1,,72000,shardsoulcrystal,,Herald's Soul Crystal Shard,800,0,0,item;takes,
 give:8798:8809,item,Herald's Soul Crystal Shard for Herald's Helm of the Lightbringer,8765,give,8798,1,0,0,0,0,0,0,none,8809:1,,72000,shardsoulcrystal,,Herald's Soul Crystal Shard,800,0,0,item;takes,
-give:88051,item,Gauntlet Guest Ticket,52801,give,88051,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a check of type 58
-give:88051,item,Gauntlet Guest Ticket,52801,give,88051,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a check of type 58
+give:88051,item,Gauntlet Guest Ticket,52801,give,88051,1,0,0,0,0,0,0,none,,,0,,fellow:isplayerinfellow?,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75
+give:88051,item,Gauntlet Guest Ticket,52801,give,88051,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena1ew,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?
+give:88051,item,Gauntlet Guest Ticket,52801,give,88051,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena2ew,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ew
+give:88051,item,Gauntlet Guest Ticket,52801,give,88051,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ew|a fellowship without gauntletarena2ew
+give:88051,item,Gauntlet Guest Ticket,52801,give,88051,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ew|no fellowship
 give:88051,item,Gauntlet Guest Ticket,52801,give,88051,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,spell;takes,a check of type 75|not carrying Gauntlet Guest Ticket
-give:88052,item,Gauntlet Guest Ticket,52801,give,88052,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a check of type 58
-give:88052,item,Gauntlet Guest Ticket,52801,give,88052,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a check of type 58
+give:88052,item,Gauntlet Guest Ticket,52801,give,88052,1,0,0,0,0,0,0,none,,,0,,fellow:isplayerinfellow?,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75
+give:88052,item,Gauntlet Guest Ticket,52801,give,88052,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena1ew,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?
+give:88052,item,Gauntlet Guest Ticket,52801,give,88052,1,0,0,0,0,0,0,none,,,0,,fellow:gauntletarena2ew,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ew
+give:88052,item,Gauntlet Guest Ticket,52801,give,88052,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,flag;takes;type 66,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ew|a fellowship without gauntletarena2ew
+give:88052,item,Gauntlet Guest Ticket,52801,give,88052,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,takes,a check of type 75|a fellowship without isplayerinfellow?|a fellowship without gauntletarena1ew|no fellowship
 give:88052,item,Gauntlet Guest Ticket,52801,give,88052,1,0,0,0,0,0,0,none,,,0,,,Gauntlet Guest Ticket,80,10,0,spell;takes,a check of type 75|not carrying Gauntlet Guest Ticket
 give:88068,item,Tch'Keryk the Emissary's Severed Head,39474,give,88068,1,0,0,95000000,0,0,0,all,38456:1,,0,,,Tch'Keryk the Emissary's Severed Head,80,0,0,xp;item;title;takes,
 give:88068,item,Tch'Keryk the Emissary's Severed Head,39475,give,88068,1,0,0,95000000,0,0,0,all,38456:1,,0,,,Tch'Keryk the Emissary's Severed Head,80,0,0,xp;item;title;takes,
@@ -13564,11 +13623,11 @@ heawindreavekillcount,kill,Hea Windreave Kill Counter,32109,talk,heawindreavekil
 helpedjonas,item,You've helped out Jonas.,27317,give,27314,1,0,0,0,1,35000000,50000000,allegiance,,helpedjonas,72000,gotrustedbrasskey,,Rusted Brass Key,80,10,0,xp;flag;takes,
 hizkribeaten,talk,You beat the temple of Hizk Ri.,27955,talk,,0,0,0,0,0,0,0,none,,hizkribeaten,0,,,,,,0,flag;spell,
 hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27937,talk,,0,60,79,0,0,0,0,none,27972:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,
-hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27937,talk,,0,80,99,0,0,0,0,none,27973:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,two level bands
-hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27937,talk,,0,100,0,0,0,0,0,none,27974:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,two level bands
+hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27937,talk,,0,80,99,0,0,0,0,none,27973:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,
+hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27937,talk,,0,100,0,0,0,0,0,none,27974:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,
 hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27960,talk,,0,60,79,0,0,0,0,none,27975:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,
-hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27960,talk,,0,80,99,0,0,0,0,none,27976:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,two level bands
-hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27960,talk,,0,100,0,0,0,0,0,none,27977:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,two level bands
+hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27960,talk,,0,80,99,0,0,0,0,none,27976:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,
+hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27960,talk,,0,100,0,0,0,0,0,none,27977:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,
 hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,27969,talk,,0,0,0,0,0,0,0,none,27932:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,
 hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,28311,talk,,0,0,0,0,0,0,0,none,28286:1;28285:1;28284:1;28283:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,
 hizkricomplete,talk,You've completed the Hizk Ri quest with a fellowship.,28312,talk,,0,0,0,0,0,0,0,none,28290:1;28289:1;28288:1;28287:1,hizkricomplete,72000,hizkricomplete,hizkribeaten,,,,0,item;flag,
@@ -13596,9 +13655,9 @@ hizkrientrancefail,item,You've failed the entrance exam to Hizk Ri's temple.,279
 hizkrieye2,talk,You have selected the correct eye in the Gauntlet.,27942,talk,,0,0,0,0,0,0,0,none,,hizkrieye2,0,,,,,,0,flag;spell,
 hizkrieye3,talk,You have selected the correct eye in the Gauntlet.,27943,talk,,0,0,0,0,0,0,0,none,,hizkrieye3,0,,,,,,0,flag;spell,
 hizkrieye4,talk,You have selected the correct eye in the Gauntlet.,27944,talk,,0,0,0,0,0,0,0,none,,hizkrieye4,0,,,,,,0,flag;spell,
-hizkrisarcophagus,talk,You've claimed the reward from the Sarcophagus of Hizk Ri.,27970,talk,,0,60,79,0,0,0,0,none,27912:1;27909:1,hizkrisarcophagus,72000,hizkrisarcophagus,,,,,0,item;flag,a check of type 58
-hizkrisarcophagus,talk,You've claimed the reward from the Sarcophagus of Hizk Ri.,27970,talk,,0,80,99,0,0,0,0,none,27913:1;27910:1,hizkrisarcophagus,72000,hizkrisarcophagus,,,,,0,item;flag,a check of type 58|two level bands
-hizkrisarcophagus,talk,You've claimed the reward from the Sarcophagus of Hizk Ri.,27970,talk,,0,100,0,0,0,0,0,none,27914:1;27911:1,hizkrisarcophagus,72000,hizkrisarcophagus,,,,,0,item;flag,a check of type 58|two level bands
+hizkrisarcophagus,talk,You've claimed the reward from the Sarcophagus of Hizk Ri.,27970,talk,,0,60,79,0,0,0,0,none,27912:1;27909:1,hizkrisarcophagus,72000,hizkrisarcophagus,fellow:hizkrifinished,,,,0,item;flag,
+hizkrisarcophagus,talk,You've claimed the reward from the Sarcophagus of Hizk Ri.,27970,talk,,0,80,99,0,0,0,0,none,27913:1;27910:1,hizkrisarcophagus,72000,hizkrisarcophagus,fellow:hizkrifinished,,,,0,item;flag,
+hizkrisarcophagus,talk,You've claimed the reward from the Sarcophagus of Hizk Ri.,27970,talk,,0,100,0,0,0,0,0,none,27914:1;27911:1,hizkrisarcophagus,72000,hizkrisarcophagus,fellow:hizkrifinished,,,,0,item;flag,
 holtburgcomplete,item,Player has completed the Yaraq Regicide Quest,14413,give,14445,1,0,0,0,0,0,0,none,,portalasugertemplepermissiongiven,72000,holtburgcomplete,,A Cryptic Note,2000,0,0,flag;takes,
 holtburggreetinggiven,item,Rylanan has said hello to player,14413,give,14443,1,0,0,0,0,0,0,none,,holtburggreetinggiven,0,,,Dame Tsaya's Letter to Sir Rylanan,2000,0,0,flag;takes,
 holtburggreetinggiven,item,Rylanan has said hello to player,14413,give,14444,1,0,0,0,0,0,0,none,,holtburggreetinggiven,0,,,Dame Tsaya's Letter to Sir Rylanan,2000,0,0,flag;takes,only without lettertsaya2given
@@ -13969,11 +14028,11 @@ kireecomplete,talk,You've completed the Kiree quest.,29770,talk,,0,0,0,0,0,0,0,n
 kireecomplete,talk,You've completed the Kiree quest.,29770,talk,,0,0,0,15000000,0,0,0,none,,kireecomplete;kireekilled,72000,kireecomplete,kireebeaten,,,,0,xp;flag,a random reply
 kiviklirbeaten,talk,You've used the Eye.,28427,talk,,0,0,0,0,0,0,0,none,,kiviklirbeaten,0,,,,,,0,flag;spell,
 kiviklircompleted,talk,You've used the Eye.,28401,talk,,0,60,79,0,0,0,0,none,28393:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,
-kiviklircompleted,talk,You've used the Eye.,28401,talk,,0,80,99,0,0,0,0,none,28394:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,two level bands
-kiviklircompleted,talk,You've used the Eye.,28401,talk,,0,100,0,0,0,0,0,none,28395:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,two level bands
+kiviklircompleted,talk,You've used the Eye.,28401,talk,,0,80,99,0,0,0,0,none,28394:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,
+kiviklircompleted,talk,You've used the Eye.,28401,talk,,0,100,0,0,0,0,0,none,28395:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,
 kiviklircompleted,talk,You've used the Eye.,28412,talk,,0,60,79,0,0,0,0,none,28396:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,
-kiviklircompleted,talk,You've used the Eye.,28412,talk,,0,80,99,0,0,0,0,none,28397:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,two level bands
-kiviklircompleted,talk,You've used the Eye.,28412,talk,,0,100,0,0,0,0,0,none,28398:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,two level bands
+kiviklircompleted,talk,You've used the Eye.,28412,talk,,0,80,99,0,0,0,0,none,28397:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,
+kiviklircompleted,talk,You've used the Eye.,28412,talk,,0,100,0,0,0,0,0,none,28398:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,
 kiviklircompleted,talk,You've used the Eye.,28417,talk,,0,0,0,0,0,0,0,none,28560:1;28559:1;28558:1;28557:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,
 kiviklircompleted,talk,You've used the Eye.,28418,talk,,0,0,0,0,0,0,0,none,28564:1;28563:1;28562:1;28561:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,
 kiviklircompleted,talk,You've used the Eye.,28419,talk,,0,0,0,0,0,0,0,none,28568:1;28567:1;28566:1;28565:1,kiviklircompleted,72000,kiviklircompleted,kiviklirbeaten,,,,0,item;flag,
@@ -14060,7 +14119,8 @@ lettergarsh,talk,Player has recieved LetterGarsh.,25484,talk,,0,0,0,0,0,0,0,none
 letterrylanan2given,item,Player has delivered the full letter to Rylanan.,14415,give,14422,1,0,0,15000,0,0,0,all,14444:1;9324:1;9324:1;9324:1,letterrylanan2given;yaraqcomplete;regicidehusk,72000,huskregicidepickup,regicideuniform;regicidespherule,Human Husk,80,0,0,xp;item;flag;takes,
 letterrylanan2given,item,Player has delivered the full letter to Rylanan.,14415,give,14422,1,0,0,10000,0,0,0,all,14444:1;3670:1;3670:1;3670:1,letterrylanan2given;yaraqcomplete;regicidehusk,72000,huskregicidepickup,regicideuniform,Human Husk,80,0,0,xp;item;flag;takes,only without regicidespherule
 lettertenshin2given,item,Player has delivered the full letter to Tenshin.,14413,give,14424,1,0,0,10000,0,0,0,all,14440:1;3670:1;3670:1;3670:1,lettertenshin2given;holtburgcomplete;regicidespherule,72000,spheruleregicidepickup,regicidehusk,Glass Spherule,80,0,0,xp;item;flag;takes,only without regicideuniform
-liazkbeaten,talk,Player defeated the tests of Liazk Itzi's Temple.,27169,talk,,0,0,0,0,0,0,0,none,,liazkbeaten,0,,,,,,0,flag;spell,a check of type 58|asks a flag it stamps itself: liazkbeaten
+liazkbeaten,talk,Player defeated the tests of Liazk Itzi's Temple.,27169,talk,,0,0,0,0,0,0,0,none,,liazkbeaten,0,,fellow:liazkbeaten,,,,0,flag;spell,
+liazkbeaten,talk,Player defeated the tests of Liazk Itzi's Temple.,27169,talk,,0,0,0,0,0,0,0,none,,liazkbeaten,0,,,,,,0,flag;spell,no fellowship|asks a flag it stamps itself: liazkbeaten
 lightningcloud_0713,talk,quest timer,51603,talk,,0,0,0,0,0,0,0,none,51593:1,lightningcloud_0713,72000,lightningcloud_0713,,,,,0,item;flag;spell,
 littoralsiraluunkillcount,start,Littoral Siraluun Kill Counter,32108,talk,,0,0,0,0,0,0,0,none,,littoralsiraluunkillcount,0,,,,,,0,flag,
 littoralsiraluunkillcount,kill,Littoral Siraluun Kill Counter,32108,talk,littoralsiraluunkillcount,25,0,0,0,1.33,0,1250000,allegiance,32113:1,littoralsiraluunkilltask,72000,littoralsiraluunkilltask,littoralsiraluunkillcount,,,,0,xp;item;flag;title,
@@ -14985,13 +15045,13 @@ receivedarcanepedestal,item,Player has been given Arcane Pedestal and cannot pic
 receivedarcanepedestal,item,Player has been given Arcane Pedestal and cannot pick up more for 2 weeks.,20204,give,19254,1,0,0,0,0,0,0,none,19254:1,,72000,receivedarcanepedestal,turnedinimagingcrystal,Bronze Spring from a Statue,80,0,0,item;takes,only without turnedindais
 receivedarcanepedestal,item,Player has been given Arcane Pedestal and cannot pick up more for 2 weeks.,20204,give,19254,1,0,0,0,0,0,0,none,19254:1,,72000,receivedarcanepedestal,,Bronze Spring from a Statue,80,0,0,item;takes,only without turnedinimagingcrystal
 receiveddecorationderethmapunframed,talk,Player has been given unframed Dereth Map and cannot pick up more for 2 weeks.,20203,talk,,0,0,0,0,0,0,0,none,20197:1,receiveddecorationderethmapunframed,72000,receiveddecorationderethmapunframed,,,,,0,item;flag,
-receivedkiviklirarmor,talk,You've used the Eye.,28416,talk,,0,0,0,0,0,0,0,none,,,72000,receivedkiviklirarmor,,,,,0,spell,a check of type 58
-receivedkiviklirarmor,talk,You've used the Eye.,28416,talk,,0,60,79,0,0,0,0,none,28337:1,receivedkiviklirarmor,72000,receivedkiviklirarmor,,,,,0,item;flag;spell,a check of type 58
-receivedkiviklirarmor,talk,You've used the Eye.,28416,talk,,0,80,99,0,0,0,0,none,28338:1,receivedkiviklirarmor,72000,receivedkiviklirarmor,,,,,0,item;flag;spell,a check of type 58|two level bands
-receivedkiviklirarmor,talk,You've used the Eye.,28416,talk,,0,100,0,0,0,0,0,none,28339:1,receivedkiviklirarmor,72000,receivedkiviklirarmor,,,,,0,item;flag;spell,a check of type 58|two level bands
-receivedliazkarmor,talk,Player has received the armor for Liazk Itzi's temple.,27150,talk,,0,40,69,0,0,0,0,none,27128:1,receivedliazkarmor,72000,receivedliazkarmor,,,,,0,item;flag,a check of type 58
-receivedliazkarmor,talk,Player has received the armor for Liazk Itzi's temple.,27150,talk,,0,70,99,0,0,0,0,none,27129:1,receivedliazkarmor,72000,receivedliazkarmor,,,,,0,item;flag,a check of type 58|two level bands
-receivedliazkarmor,talk,Player has received the armor for Liazk Itzi's temple.,27150,talk,,0,100,0,0,0,0,0,none,27130:1,receivedliazkarmor,72000,receivedliazkarmor,,,,,0,item;flag,a check of type 58|two level bands
+receivedkiviklirarmor,talk,You've used the Eye.,28416,talk,,0,0,0,0,0,0,0,none,,,72000,receivedkiviklirarmor,,,,,0,spell,a fellowship without kiviklirfinished|no fellowship
+receivedkiviklirarmor,talk,You've used the Eye.,28416,talk,,0,60,79,0,0,0,0,none,28337:1,receivedkiviklirarmor,72000,receivedkiviklirarmor,fellow:kiviklirfinished,,,,0,item;flag;spell,
+receivedkiviklirarmor,talk,You've used the Eye.,28416,talk,,0,80,99,0,0,0,0,none,28338:1,receivedkiviklirarmor,72000,receivedkiviklirarmor,fellow:kiviklirfinished,,,,0,item;flag;spell,
+receivedkiviklirarmor,talk,You've used the Eye.,28416,talk,,0,100,0,0,0,0,0,none,28339:1,receivedkiviklirarmor,72000,receivedkiviklirarmor,fellow:kiviklirfinished,,,,0,item;flag;spell,
+receivedliazkarmor,talk,Player has received the armor for Liazk Itzi's temple.,27150,talk,,0,40,69,0,0,0,0,none,27128:1,receivedliazkarmor,72000,receivedliazkarmor,fellow:liazkbeaten,,,,0,item;flag,
+receivedliazkarmor,talk,Player has received the armor for Liazk Itzi's temple.,27150,talk,,0,70,99,0,0,0,0,none,27129:1,receivedliazkarmor,72000,receivedliazkarmor,fellow:liazkbeaten,,,,0,item;flag,
+receivedliazkarmor,talk,Player has received the armor for Liazk Itzi's temple.,27150,talk,,0,100,0,0,0,0,0,none,27130:1,receivedliazkarmor,72000,receivedliazkarmor,fellow:liazkbeaten,,,,0,item;flag,
 receivedpieceofpaper,talk,Player has received the Piece of Paper from Pile of Stained Papers.,87731,talk,,0,0,0,0,0,0,0,none,35618:1,receivedpieceofpaper,-1,receivedpieceofpaper,aerbaxsprodigalmosswartstarted,,,,0,item;flag,
 receivedthorstenarmorarmor,item,Player has completed obtaining replica of Thorsten's Armor,15811,give,15818,1,0,0,0,0,0,0,none,11936:1,receivedthorstenarmorarmor,0,,,Wax Mould,80,0,0,item;flag;takes,
 receivedthorstenaxe,item,Player has completed obtaining replica of Thorsten's Axe,15812,give,15819,1,0,0,0,0,0,0,none,15822:1,receivedthorstenaxe,0,,,Wax Mould,80,0,0,item;flag;takes,
@@ -15658,123 +15718,123 @@ talk:21497,start,Talk to Wind,21516,talk,,0,0,0,0,0,0,0,none,,riddlefail2,0,,has
 talk:21497,talk,Talk to Bed,21497,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlebed,,,,0,item;flag;spell,two level bands
 talk:21497,talk,Talk to Bed,21497,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlebed|only without riddlefail
 talk:21497,talk,Talk to Bed,21497,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlebed,,,,0,item;flag;spell,
-talk:21497,talk,Talk to Bed,21497,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlebed,,,,0,item;flag;spell,two level bands
-talk:21497,talk,Talk to Bed,21497,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlebed,,,,0,item;flag;spell,two level bands
-talk:21497,talk,Talk to Bed,21497,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlebed,,,,0,item;flag;spell,two level bands
+talk:21497,talk,Talk to Bed,21497,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlebed,,,,0,item;flag;spell,
+talk:21497,talk,Talk to Bed,21497,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlebed,,,,0,item;flag;spell,
+talk:21497,talk,Talk to Bed,21497,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlebed,,,,0,item;flag;spell,
 talk:21498,talk,Talk to Black,21498,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddleblack,,,,0,item;flag;spell,two level bands
 talk:21498,talk,Talk to Black,21498,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddleblack|only without riddlefail
 talk:21498,talk,Talk to Black,21498,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddleblack,,,,0,item;flag;spell,
-talk:21498,talk,Talk to Black,21498,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddleblack,,,,0,item;flag;spell,two level bands
-talk:21498,talk,Talk to Black,21498,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddleblack,,,,0,item;flag;spell,two level bands
-talk:21498,talk,Talk to Black,21498,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddleblack,,,,0,item;flag;spell,two level bands
+talk:21498,talk,Talk to Black,21498,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddleblack,,,,0,item;flag;spell,
+talk:21498,talk,Talk to Black,21498,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddleblack,,,,0,item;flag;spell,
+talk:21498,talk,Talk to Black,21498,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddleblack,,,,0,item;flag;spell,
 talk:21499,talk,Talk to Coffin,21499,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlecoffin,,,,0,item;flag;spell,two level bands
 talk:21499,talk,Talk to Coffin,21499,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlecoffin|only without riddlefail
 talk:21499,talk,Talk to Coffin,21499,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlecoffin,,,,0,item;flag;spell,
-talk:21499,talk,Talk to Coffin,21499,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlecoffin,,,,0,item;flag;spell,two level bands
-talk:21499,talk,Talk to Coffin,21499,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlecoffin,,,,0,item;flag;spell,two level bands
-talk:21499,talk,Talk to Coffin,21499,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlecoffin,,,,0,item;flag;spell,two level bands
+talk:21499,talk,Talk to Coffin,21499,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlecoffin,,,,0,item;flag;spell,
+talk:21499,talk,Talk to Coffin,21499,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlecoffin,,,,0,item;flag;spell,
+talk:21499,talk,Talk to Coffin,21499,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlecoffin,,,,0,item;flag;spell,
 talk:21500,talk,Talk to Darkness,21500,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddledarkness,,,,0,item;flag;spell,two level bands
 talk:21500,talk,Talk to Darkness,21500,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddledarkness|only without riddlefail
 talk:21500,talk,Talk to Darkness,21500,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddledarkness,,,,0,item;flag;spell,
-talk:21500,talk,Talk to Darkness,21500,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddledarkness,,,,0,item;flag;spell,two level bands
-talk:21500,talk,Talk to Darkness,21500,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddledarkness,,,,0,item;flag;spell,two level bands
-talk:21500,talk,Talk to Darkness,21500,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddledarkness,,,,0,item;flag;spell,two level bands
+talk:21500,talk,Talk to Darkness,21500,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddledarkness,,,,0,item;flag;spell,
+talk:21500,talk,Talk to Darkness,21500,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddledarkness,,,,0,item;flag;spell,
+talk:21500,talk,Talk to Darkness,21500,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddledarkness,,,,0,item;flag;spell,
 talk:21501,talk,Talk to Death,21501,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddledeath,,,,0,item;flag;spell,two level bands
 talk:21501,talk,Talk to Death,21501,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddledeath|only without riddlefail
 talk:21501,talk,Talk to Death,21501,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddledeath,,,,0,item;flag;spell,
-talk:21501,talk,Talk to Death,21501,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddledeath,,,,0,item;flag;spell,two level bands
-talk:21501,talk,Talk to Death,21501,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddledeath,,,,0,item;flag;spell,two level bands
-talk:21501,talk,Talk to Death,21501,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddledeath,,,,0,item;flag;spell,two level bands
+talk:21501,talk,Talk to Death,21501,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddledeath,,,,0,item;flag;spell,
+talk:21501,talk,Talk to Death,21501,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddledeath,,,,0,item;flag;spell,
+talk:21501,talk,Talk to Death,21501,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddledeath,,,,0,item;flag;spell,
 talk:21502,talk,Talk to E,21502,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlee,,,,0,item;flag;spell,two level bands
 talk:21502,talk,Talk to E,21502,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlee|only without riddlefail
 talk:21502,talk,Talk to E,21502,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlee,,,,0,item;flag;spell,
-talk:21502,talk,Talk to E,21502,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlee,,,,0,item;flag;spell,two level bands
-talk:21502,talk,Talk to E,21502,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlee,,,,0,item;flag;spell,two level bands
-talk:21502,talk,Talk to E,21502,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlee,,,,0,item;flag;spell,two level bands
+talk:21502,talk,Talk to E,21502,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlee,,,,0,item;flag;spell,
+talk:21502,talk,Talk to E,21502,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlee,,,,0,item;flag;spell,
+talk:21502,talk,Talk to E,21502,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlee,,,,0,item;flag;spell,
 talk:21503,talk,Talk to Eyes,21503,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddleeyes,,,,0,item;flag;spell,two level bands
 talk:21503,talk,Talk to Eyes,21503,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddleeyes|only without riddlefail
 talk:21503,talk,Talk to Eyes,21503,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddleeyes,,,,0,item;flag;spell,
-talk:21503,talk,Talk to Eyes,21503,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddleeyes,,,,0,item;flag;spell,two level bands
-talk:21503,talk,Talk to Eyes,21503,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddleeyes,,,,0,item;flag;spell,two level bands
-talk:21503,talk,Talk to Eyes,21503,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddleeyes,,,,0,item;flag;spell,two level bands
+talk:21503,talk,Talk to Eyes,21503,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddleeyes,,,,0,item;flag;spell,
+talk:21503,talk,Talk to Eyes,21503,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddleeyes,,,,0,item;flag;spell,
+talk:21503,talk,Talk to Eyes,21503,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddleeyes,,,,0,item;flag;spell,
 talk:21504,talk,Talk to Flame,21504,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddleflame,,,,0,item;flag;spell,two level bands
 talk:21504,talk,Talk to Flame,21504,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddleflame|only without riddlefail
 talk:21504,talk,Talk to Flame,21504,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddleflame,,,,0,item;flag;spell,
-talk:21504,talk,Talk to Flame,21504,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddleflame,,,,0,item;flag;spell,two level bands
-talk:21504,talk,Talk to Flame,21504,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddleflame,,,,0,item;flag;spell,two level bands
-talk:21504,talk,Talk to Flame,21504,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddleflame,,,,0,item;flag;spell,two level bands
+talk:21504,talk,Talk to Flame,21504,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddleflame,,,,0,item;flag;spell,
+talk:21504,talk,Talk to Flame,21504,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddleflame,,,,0,item;flag;spell,
+talk:21504,talk,Talk to Flame,21504,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddleflame,,,,0,item;flag;spell,
 talk:21505,talk,Talk to Hole,21505,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlehole,,,,0,item;flag;spell,two level bands
 talk:21505,talk,Talk to Hole,21505,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlehole|only without riddlefail
 talk:21505,talk,Talk to Hole,21505,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlehole,,,,0,item;flag;spell,
-talk:21505,talk,Talk to Hole,21505,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlehole,,,,0,item;flag;spell,two level bands
-talk:21505,talk,Talk to Hole,21505,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlehole,,,,0,item;flag;spell,two level bands
-talk:21505,talk,Talk to Hole,21505,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlehole,,,,0,item;flag;spell,two level bands
+talk:21505,talk,Talk to Hole,21505,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlehole,,,,0,item;flag;spell,
+talk:21505,talk,Talk to Hole,21505,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlehole,,,,0,item;flag;spell,
+talk:21505,talk,Talk to Hole,21505,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlehole,,,,0,item;flag;spell,
 talk:21506,talk,Talk to Hope,21506,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlehope,,,,0,item;flag;spell,two level bands
 talk:21506,talk,Talk to Hope,21506,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlehope|only without riddlefail
 talk:21506,talk,Talk to Hope,21506,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlehope,,,,0,item;flag;spell,
-talk:21506,talk,Talk to Hope,21506,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlehope,,,,0,item;flag;spell,two level bands
-talk:21506,talk,Talk to Hope,21506,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlehope,,,,0,item;flag;spell,two level bands
-talk:21506,talk,Talk to Hope,21506,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlehope,,,,0,item;flag;spell,two level bands
+talk:21506,talk,Talk to Hope,21506,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlehope,,,,0,item;flag;spell,
+talk:21506,talk,Talk to Hope,21506,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlehope,,,,0,item;flag;spell,
+talk:21506,talk,Talk to Hope,21506,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlehope,,,,0,item;flag;spell,
 talk:21507,talk,Talk to Man,21507,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddleman,,,,0,item;flag;spell,two level bands
 talk:21507,talk,Talk to Man,21507,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddleman|only without riddlefail
 talk:21507,talk,Talk to Man,21507,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddleman,,,,0,item;flag;spell,
-talk:21507,talk,Talk to Man,21507,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddleman,,,,0,item;flag;spell,two level bands
-talk:21507,talk,Talk to Man,21507,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddleman,,,,0,item;flag;spell,two level bands
-talk:21507,talk,Talk to Man,21507,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddleman,,,,0,item;flag;spell,two level bands
+talk:21507,talk,Talk to Man,21507,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddleman,,,,0,item;flag;spell,
+talk:21507,talk,Talk to Man,21507,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddleman,,,,0,item;flag;spell,
+talk:21507,talk,Talk to Man,21507,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddleman,,,,0,item;flag;spell,
 talk:21508,talk,Talk to Mushroom,21508,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlemushroom,,,,0,item;flag;spell,two level bands
 talk:21508,talk,Talk to Mushroom,21508,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlemushroom|only without riddlefail
 talk:21508,talk,Talk to Mushroom,21508,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlemushroom,,,,0,item;flag;spell,
-talk:21508,talk,Talk to Mushroom,21508,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlemushroom,,,,0,item;flag;spell,two level bands
-talk:21508,talk,Talk to Mushroom,21508,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlemushroom,,,,0,item;flag;spell,two level bands
-talk:21508,talk,Talk to Mushroom,21508,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlemushroom,,,,0,item;flag;spell,two level bands
+talk:21508,talk,Talk to Mushroom,21508,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlemushroom,,,,0,item;flag;spell,
+talk:21508,talk,Talk to Mushroom,21508,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlemushroom,,,,0,item;flag;spell,
+talk:21508,talk,Talk to Mushroom,21508,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlemushroom,,,,0,item;flag;spell,
 talk:21509,talk,Talk to Nothing,21509,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlenothing,,,,0,item;flag;spell,two level bands
 talk:21509,talk,Talk to Nothing,21509,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlenothing|only without riddlefail
 talk:21509,talk,Talk to Nothing,21509,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlenothing,,,,0,item;flag;spell,
-talk:21509,talk,Talk to Nothing,21509,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlenothing,,,,0,item;flag;spell,two level bands
-talk:21509,talk,Talk to Nothing,21509,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlenothing,,,,0,item;flag;spell,two level bands
-talk:21509,talk,Talk to Nothing,21509,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlenothing,,,,0,item;flag;spell,two level bands
+talk:21509,talk,Talk to Nothing,21509,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlenothing,,,,0,item;flag;spell,
+talk:21509,talk,Talk to Nothing,21509,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlenothing,,,,0,item;flag;spell,
+talk:21509,talk,Talk to Nothing,21509,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlenothing,,,,0,item;flag;spell,
 talk:21510,talk,Talk to Ring,21510,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlering,,,,0,item;flag;spell,two level bands
 talk:21510,talk,Talk to Ring,21510,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlering|only without riddlefail
 talk:21510,talk,Talk to Ring,21510,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlering,,,,0,item;flag;spell,
-talk:21510,talk,Talk to Ring,21510,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlering,,,,0,item;flag;spell,two level bands
-talk:21510,talk,Talk to Ring,21510,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlering,,,,0,item;flag;spell,two level bands
-talk:21510,talk,Talk to Ring,21510,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlering,,,,0,item;flag;spell,two level bands
+talk:21510,talk,Talk to Ring,21510,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlering,,,,0,item;flag;spell,
+talk:21510,talk,Talk to Ring,21510,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlering,,,,0,item;flag;spell,
+talk:21510,talk,Talk to Ring,21510,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlering,,,,0,item;flag;spell,
 talk:21511,talk,Talk to Silence,21511,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlesilence,,,,0,item;flag;spell,two level bands
 talk:21511,talk,Talk to Silence,21511,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlesilence|only without riddlefail
 talk:21511,talk,Talk to Silence,21511,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlesilence,,,,0,item;flag;spell,
-talk:21511,talk,Talk to Silence,21511,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlesilence,,,,0,item;flag;spell,two level bands
-talk:21511,talk,Talk to Silence,21511,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlesilence,,,,0,item;flag;spell,two level bands
-talk:21511,talk,Talk to Silence,21511,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlesilence,,,,0,item;flag;spell,two level bands
+talk:21511,talk,Talk to Silence,21511,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlesilence,,,,0,item;flag;spell,
+talk:21511,talk,Talk to Silence,21511,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlesilence,,,,0,item;flag;spell,
+talk:21511,talk,Talk to Silence,21511,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlesilence,,,,0,item;flag;spell,
 talk:21512,talk,Talk to Stars,21512,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlestars,,,,0,item;flag;spell,two level bands
 talk:21512,talk,Talk to Stars,21512,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlestars|only without riddlefail
 talk:21512,talk,Talk to Stars,21512,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlestars,,,,0,item;flag;spell,
-talk:21512,talk,Talk to Stars,21512,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlestars,,,,0,item;flag;spell,two level bands
-talk:21512,talk,Talk to Stars,21512,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlestars,,,,0,item;flag;spell,two level bands
-talk:21512,talk,Talk to Stars,21512,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlestars,,,,0,item;flag;spell,two level bands
+talk:21512,talk,Talk to Stars,21512,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlestars,,,,0,item;flag;spell,
+talk:21512,talk,Talk to Stars,21512,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlestars,,,,0,item;flag;spell,
+talk:21512,talk,Talk to Stars,21512,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlestars,,,,0,item;flag;spell,
 talk:21513,talk,Talk to Sunlight,21513,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlesunlight,,,,0,item;flag;spell,two level bands
 talk:21513,talk,Talk to Sunlight,21513,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlesunlight|only without riddlefail
 talk:21513,talk,Talk to Sunlight,21513,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlesunlight,,,,0,item;flag;spell,
-talk:21513,talk,Talk to Sunlight,21513,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlesunlight,,,,0,item;flag;spell,two level bands
-talk:21513,talk,Talk to Sunlight,21513,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlesunlight,,,,0,item;flag;spell,two level bands
-talk:21513,talk,Talk to Sunlight,21513,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlesunlight,,,,0,item;flag;spell,two level bands
+talk:21513,talk,Talk to Sunlight,21513,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlesunlight,,,,0,item;flag;spell,
+talk:21513,talk,Talk to Sunlight,21513,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlesunlight,,,,0,item;flag;spell,
+talk:21513,talk,Talk to Sunlight,21513,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlesunlight,,,,0,item;flag;spell,
 talk:21514,talk,Talk to Time,21514,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddletime,,,,0,item;flag;spell,two level bands
 talk:21514,talk,Talk to Time,21514,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddletime|only without riddlefail
 talk:21514,talk,Talk to Time,21514,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddletime,,,,0,item;flag;spell,
-talk:21514,talk,Talk to Time,21514,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddletime,,,,0,item;flag;spell,two level bands
-talk:21514,talk,Talk to Time,21514,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddletime,,,,0,item;flag;spell,two level bands
-talk:21514,talk,Talk to Time,21514,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddletime,,,,0,item;flag;spell,two level bands
+talk:21514,talk,Talk to Time,21514,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddletime,,,,0,item;flag;spell,
+talk:21514,talk,Talk to Time,21514,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddletime,,,,0,item;flag;spell,
+talk:21514,talk,Talk to Time,21514,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddletime,,,,0,item;flag;spell,
 talk:21515,talk,Talk to Tomorrow,21515,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddletomorrow,,,,0,item;flag;spell,two level bands
 talk:21515,talk,Talk to Tomorrow,21515,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddletomorrow|only without riddlefail
 talk:21515,talk,Talk to Tomorrow,21515,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddletomorrow,,,,0,item;flag;spell,
-talk:21515,talk,Talk to Tomorrow,21515,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddletomorrow,,,,0,item;flag;spell,two level bands
-talk:21515,talk,Talk to Tomorrow,21515,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddletomorrow,,,,0,item;flag;spell,two level bands
-talk:21515,talk,Talk to Tomorrow,21515,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddletomorrow,,,,0,item;flag;spell,two level bands
+talk:21515,talk,Talk to Tomorrow,21515,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddletomorrow,,,,0,item;flag;spell,
+talk:21515,talk,Talk to Tomorrow,21515,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddletomorrow,,,,0,item;flag;spell,
+talk:21515,talk,Talk to Tomorrow,21515,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddletomorrow,,,,0,item;flag;spell,
 talk:21516,talk,Talk to Wind,21516,talk,,0,0,0,0,0,0,0,none,21378:1,,0,,riddlewind,,,,0,item;flag;spell,two level bands
 talk:21516,talk,Talk to Wind,21516,talk,,0,0,0,0,0,0,0,none,,,0,,hassphinxriddle;riddlefail2,,,,0,flag;spell,only without riddlewind|only without riddlefail
 talk:21516,talk,Talk to Wind,21516,talk,,0,20,39,0,0,0,0,none,21378:1,,0,,riddlewind,,,,0,item;flag;spell,
-talk:21516,talk,Talk to Wind,21516,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlewind,,,,0,item;flag;spell,two level bands
-talk:21516,talk,Talk to Wind,21516,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlewind,,,,0,item;flag;spell,two level bands
-talk:21516,talk,Talk to Wind,21516,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlewind,,,,0,item;flag;spell,two level bands
+talk:21516,talk,Talk to Wind,21516,talk,,0,40,59,0,0,0,0,none,21378:1,,0,,riddlewind,,,,0,item;flag;spell,
+talk:21516,talk,Talk to Wind,21516,talk,,0,60,79,0,0,0,0,none,21378:1,,0,,riddlewind,,,,0,item;flag;spell,
+talk:21516,talk,Talk to Wind,21516,talk,,0,80,149,0,0,0,0,none,21378:1,,0,,riddlewind,,,,0,item;flag;spell,
 talk:22467,talk,Talk to Judgment Statue,22467,talk,,0,0,0,0,0,0,0,none,,,0,,oswaldlogicwrong,,,,0,flag;spell,
 talk:22467,talk,Talk to Judgment Statue,22467,talk,,0,0,0,0,0,0,0,none,24152:1,,0,,mumuright;shimshimright;poporight;caocaoright,,,,0,item;flag;spell,only without oswaldlogicwrong
 talk:22499,talk,Talk to Babysitter,22499,talk,,0,0,0,0,0,0,0,none,22450:1;22452:1;22451:1;22453:1,,0,,,,,,0,item;flag,
@@ -15790,8 +15850,11 @@ talk:25450,talk,Talk to A small pile of rocks,25450,talk,,0,0,0,0,0,0,0,none,254
 talk:25711,talk,Talk to Argyle,25711,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag;spell,
 talk:25717,talk,Talk to Guard Chandler Hammett,25717,talk,,0,0,0,0,0,0,0,none,32254:1,,0,,roadsundercoverantius,,,,0,item;flag;spell,
 talk:25719,talk,Talk to Graven Idol,25719,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
-talk:26548,talk,Talk to Arbiter,26548,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58
-talk:26548,talk,Talk to Arbiter,26548,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag,a check of type 58
+talk:26548,talk,Talk to Arbiter,26548,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templearbiterspoken;fellow:templewitcomplete;fellow:templeappeasementcomplete;fellow:templecunningcomplete,,,,0,spell,
+talk:26548,talk,Talk to Arbiter,26548,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templearbiterspoken;fellow:templewitcomplete;fellow:templeappeasementcomplete,,,,0,spell,a fellowship without templecunningcomplete
+talk:26548,talk,Talk to Arbiter,26548,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templearbiterspoken;fellow:templewitcomplete,,,,0,spell,a fellowship without templeappeasementcomplete
+talk:26548,talk,Talk to Arbiter,26548,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templearbiterspoken,,,,0,spell,a fellowship without templewitcomplete
+talk:26548,talk,Talk to Arbiter,26548,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag,a fellowship without templearbiterspoken
 talk:26558,talk,Talk to Guardian of the Crypt,26558,talk,,0,70,99,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:26559,talk,Talk to Guardian of the Crypt,26559,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:26560,talk,Talk to Guardian of the Crypt,26560,talk,,0,100,0,0,0,0,0,none,,,0,,,,,,0,spell,
@@ -15799,8 +15862,8 @@ talk:26561,talk,Talk to Guardian of the Crypt,26561,talk,,0,0,0,0,0,0,0,none,,,0
 talk:26562,talk,Talk to Guardian of the Crypt,26562,talk,,0,40,69,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:26563,talk,Talk to Guardian of the Crypt,26563,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:26564,talk,Talk to Guardian of the High Matriarch,26564,talk,,0,40,69,0,0,0,0,none,,,0,,,,,,0,spell,
-talk:26564,talk,Talk to Guardian of the High Matriarch,26564,talk,,0,70,99,0,0,0,0,none,,,0,,,,,,0,spell,two level bands
-talk:26564,talk,Talk to Guardian of the High Matriarch,26564,talk,,0,100,0,0,0,0,0,none,,,0,,,,,,0,spell,two level bands
+talk:26564,talk,Talk to Guardian of the High Matriarch,26564,talk,,0,70,99,0,0,0,0,none,,,0,,,,,,0,spell,
+talk:26564,talk,Talk to Guardian of the High Matriarch,26564,talk,,0,100,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:26571,talk,Talk to Eye of the Watcher,26571,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 51
 talk:26572,talk,Talk to Eye of the Watcher,26572,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 51
 talk:26573,talk,Talk to Eye of the Watcher,26573,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 51
@@ -15815,13 +15878,16 @@ talk:26584,talk,Talk to Eye of the Watcher,26584,talk,,0,0,0,0,0,0,0,none,,,0,,,
 talk:26585,talk,Talk to Eye of the Watcher,26585,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 51
 talk:26586,talk,Talk to Offering Urn,26586,talk,,0,0,0,0,0,0,0,none,26504:1,,0,,templewitchosen,,,,0,item,
 talk:26587,talk,Talk to Odd Looking Vine,26587,talk,,0,40,0,0,0,0,0,none,,,0,,,,,,0,spell,
-talk:26635,talk,Talk to Offering Table,26635,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58|a random reply
-talk:26635,talk,Talk to Offering Table,26635,talk,,0,0,0,0,0,0,0,none,26505:1,,0,,templeappeasementchosen,,,,0,item,a check of type 58|a random reply
+talk:26635,talk,Talk to Offering Table,26635,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a fellowship without templeappeasementcomplete|a random reply
+talk:26635,talk,Talk to Offering Table,26635,talk,,0,0,0,0,0,0,0,none,26505:1,,0,,templeappeasementchosen,,,,0,item,a fellowship without templeappeasementcomplete|a random reply
 talk:26668,talk,Talk to Offering Urn,26668,talk,,0,0,0,0,0,0,0,none,26504:1,,0,,templewitchosen,,,,0,item,
 talk:26669,talk,Talk to Offering Urn,26669,talk,,0,0,0,0,0,0,0,none,26504:1,,0,,templewitchosen,,,,0,item,
-talk:27157,talk,Talk to Eye of the Watcher,27157,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag;spell,a check of type 58
-talk:27158,talk,Talk to Eye of the Watcher,27158,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag;spell,a check of type 58
-talk:27159,talk,Talk to Eye of the Watcher,27159,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag;spell,a check of type 58
+talk:27157,talk,Talk to Eye of the Watcher,27157,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templeliazka,,,,0,flag;spell,
+talk:27157,talk,Talk to Eye of the Watcher,27157,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag;spell,a fellowship without templeliazka
+talk:27158,talk,Talk to Eye of the Watcher,27158,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templeliazkb,,,,0,flag;spell,
+talk:27158,talk,Talk to Eye of the Watcher,27158,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag;spell,a fellowship without templeliazkb
+talk:27159,talk,Talk to Eye of the Watcher,27159,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templeliazkc,,,,0,flag;spell,
+talk:27159,talk,Talk to Eye of the Watcher,27159,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag;spell,a fellowship without templeliazkc
 talk:27161,talk,Talk to Guardian,27161,talk,,0,40,59,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:27162,talk,Talk to Guardian,27162,talk,,0,60,79,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:27163,talk,Talk to Guardian,27163,talk,,0,80,99,0,0,0,0,none,,,0,,,,,,0,spell,
@@ -15830,10 +15896,10 @@ talk:27165,talk,Talk to Guardian,27165,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell
 talk:27166,talk,Talk to Guardian of the High Matriarch,27166,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:27167,talk,Talk to Guardian,27167,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:27168,talk,Talk to Guardian,27168,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
-talk:27170,talk,Talk to Strange Device,27170,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58
-talk:27171,talk,Talk to Strange Device,27171,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58
-talk:27172,talk,Talk to Strange Device,27172,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58
-talk:27173,talk,Talk to Strange Device,27173,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58
+talk:27170,talk,Talk to Strange Device,27170,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templeliazka;fellow:templeliazkb;fellow:templeliazkc,,,,0,spell,
+talk:27171,talk,Talk to Strange Device,27171,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templeliazka;fellow:templeliazkb;fellow:templeliazkc,,,,0,spell,
+talk:27172,talk,Talk to Strange Device,27172,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templeliazka;fellow:templeliazkb;fellow:templeliazkc,,,,0,spell,
+talk:27173,talk,Talk to Strange Device,27173,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:templeliazka;fellow:templeliazkb;fellow:templeliazkc,,,,0,spell,
 talk:27174,talk,Talk to Odd Looking Vine,27174,talk,,0,40,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:27238,talk,Talk to Guardian,27238,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:27239,talk,Talk to Guardian,27239,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
@@ -15880,24 +15946,28 @@ talk:27954,talk,Talk to Guardian,27954,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell
 talk:27959,talk,Talk to Guardian,27959,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:28094,talk,Talk to Ydnew,28094,talk,,0,0,0,0,0,0,0,none,,,0,,roadsundercoverantius,,,,0,flag;spell,
 talk:28095,talk,Talk to King Toad Idol,28095,talk,,0,0,0,0,0,0,0,none,,,0,,buruningressdirelands,,,,0,spell,
-talk:28410,talk,Talk to Eye of the Heights,28410,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58
-talk:28410,talk,Talk to Eye of the Heights,28410,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag,a check of type 58
-talk:28410,talk,Talk to Eye of the Heights,28410,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag;spell,a check of type 58
-talk:28411,talk,Talk to Eye of the Watcher,28411,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58
-talk:28411,talk,Talk to Eye of the Watcher,28411,talk,,0,0,0,0,0,0,0,none,28374:1,,0,,,,,,0,item;flag,a check of type 58
-talk:28415,talk,Talk to Offering Urn,28415,talk,,0,0,0,0,0,0,0,none,28345:1,,0,,,,,,0,item,a check of type 58
+talk:28410,talk,Talk to Eye of the Heights,28410,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtrialjump,,,,0,spell,
+talk:28410,talk,Talk to Eye of the Heights,28410,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtriallogic,,,,0,flag,a fellowship without eyekiviklirtrialjump
+talk:28410,talk,Talk to Eye of the Heights,28410,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtrialarena,,,,0,flag,a fellowship without eyekiviklirtrialjump|a fellowship without eyekiviklirtriallogic
+talk:28410,talk,Talk to Eye of the Heights,28410,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial,,,,0,flag;spell,a fellowship without eyekiviklirtrialjump|a fellowship without eyekiviklirtriallogic|a fellowship without eyekiviklirtrialarena
+talk:28411,talk,Talk to Eye of the Watcher,28411,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:spokentoeyekiviklirtriallogic,,,,0,spell,
+talk:28411,talk,Talk to Eye of the Watcher,28411,talk,,0,0,0,0,0,0,0,none,28374:1,,0,,fellow:statuekiviklirguardiantrial,,,,0,item;flag,a fellowship without spokentoeyekiviklirtriallogic
+talk:28415,talk,Talk to Offering Urn,28415,talk,,0,0,0,0,0,0,0,none,28345:1,,0,,fellow:spokentoeyekiviklirtriallogic,,,,0,item,
 talk:28422,talk,Talk to Guardian,28422,talk,,0,60,79,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:28423,talk,Talk to Guardian,28423,talk,,0,80,99,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:28424,talk,Talk to Guardian,28424,talk,,0,100,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:28425,start,Talk to Guardian,28425,talk,,0,0,0,0,0,0,0,none,,statuekiviklirguardianantechamber,0,,,,,,0,flag,
 talk:28425,talk,Talk to Guardian,28425,talk,,0,0,0,0,0,0,0,none,,,0,,statuekiviklirguardianantechamber,,,,0,flag,
-talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,0,99,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58|two level bands
-talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag,a check of type 58
-talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,60,79,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58
-talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,80,99,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58|two level bands
-talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,100,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58|two level bands
-talk:28428,talk,Talk to Guardian of the Trials,28428,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58
-talk:28428,talk,Talk to Guardian of the Trials,28428,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag,a check of type 58
+talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,0,59,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:spokentostatuekiviklirarena,,,,0,spell,
+talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial,,,,0,flag,a fellowship without spokentostatuekiviklirarena
+talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,60,79,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:spokentostatuekiviklirarena,,,,0,spell,
+talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,80,99,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:spokentostatuekiviklirarena,,,,0,spell,
+talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,100,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:spokentostatuekiviklirarena,,,,0,spell,
+talk:28428,talk,Talk to Guardian of the Trials,28428,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtrialjump;fellow:eyekiviklirtriallogic;fellow:eyekiviklirtrialarena,,,,0,spell,
+talk:28428,talk,Talk to Guardian of the Trials,28428,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtrialjump;fellow:eyekiviklirtriallogic,,,,0,spell,a fellowship without eyekiviklirtrialarena
+talk:28428,talk,Talk to Guardian of the Trials,28428,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial;fellow:eyekiviklirtrialjump,,,,0,spell,a fellowship without eyekiviklirtriallogic
+talk:28428,talk,Talk to Guardian of the Trials,28428,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:statuekiviklirguardiantrial,,,,0,spell,a fellowship without eyekiviklirtrialjump
+talk:28428,talk,Talk to Guardian of the Trials,28428,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,flag,a fellowship without statuekiviklirguardiantrial
 talk:28429,talk,Talk to Conveyor of the Arena,28429,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:28430,talk,Talk to Odd Looking Vine,28430,talk,,0,60,0,0,0,0,0,none,,,0,,,,,,0,spell,
 talk:29035,talk,Talk to Sealed Door,29035,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of stat 134|a random reply
@@ -16036,7 +16106,7 @@ talk:35478,talk,Talk to Kresovus' Lockbox,35478,talk,,0,0,0,0,0,0,0,none,,,0,,to
 talk:35478,talk,Talk to Kresovus' Lockbox,35478,talk,,0,0,0,0,0,0,0,none,,,0,,aerbaxsprodigallugian_start;aerbaxsprodigallugian_repeat,,,,0,teleport,only without totheartenergycagedown
 talk:35478,talk,Talk to Kresovus' Lockbox,35478,talk,,0,0,0,0,0,0,0,none,,,0,,aerbaxsprodigallugian_start,,,,0,teleport,only without totheartenergycagedown|only without aerbaxsprodigallugian_repeat
 talk:35478,talk,Talk to Kresovus' Lockbox,35478,talk,,0,0,0,0,0,0,0,none,,,0,,burrecall_start,,,,0,teleport,only without totheartenergycagedown|only without aerbaxsprodigallugian_start
-talk:35486,talk,Talk to Harraag's Hideout,35486,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,teleport,a check of type 58
+talk:35486,talk,Talk to Harraag's Hideout,35486,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:aerbaxsprodigalbanderling_fellow,,,,0,teleport,
 talk:35858,talk,Talk to Shrine of Black Water,35858,talk,,0,0,0,0,0,0,0,none,,,0,,shrineofblackwater_flag,,,,0,spell,
 talk:35870,talk,Talk to The Master,35870,talk,,0,0,0,0,0,0,0,none,,,0,,accessboss18,,,,0,spell,
 talk:35962,talk,Talk to Havala bint Mylos,35962,talk,,0,0,0,0,0,0,0,none,35963:1,,0,,,,,,0,item,
@@ -16050,8 +16120,8 @@ talk:36696,talk,Talk to Pillar of the Mind,36696,talk,,0,0,0,0,0,0,0,none,,,0,,t
 talk:36780,talk,Talk to Quiddity Seed,36780,talk,,0,130,0,0,0,0,0,none,,,0,,,,,,0,teleport,
 talk:36925,start,Talk to Emissary of Asheron,37065,talk,,0,130,0,0,0,0,0,none,,quiddityseedquestflag,0,,,,,,0,flag,
 talk:36925,talk,Talk to Ithaenc Quiddity Seed,36925,talk,,0,0,0,0,0,0,0,none,,,0,,quiddityseedquestflag,,,,0,teleport,
-talk:36926,talk,Talk to Shade of Dule,36926,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 58
-talk:36926,talk,Talk to Shade of Dule,36926,talk,,0,0,0,0,0,0,0,none,,,0,,shadeofduleportal,,,,0,spell,a check of type 58
+talk:36926,talk,Talk to Shade of Dule,36926,talk,,0,0,0,0,0,0,0,none,,,0,,fellow:shadeofduleportalfellow,,,,0,spell,
+talk:36926,talk,Talk to Shade of Dule,36926,talk,,0,0,0,0,0,0,0,none,,,0,,shadeofduleportal,,,,0,spell,no fellowship
 talk:37094,talk,Talk to Southern Resonating Crystal,37094,talk,,0,0,0,0,0,0,0,none,,,0,,southernresonatingcrystalflag,,,,0,teleport,
 talk:37095,talk,Talk to Northern Resonating Crystal,37095,talk,,0,0,0,0,0,0,0,none,,,0,,northernresonatingcrystalflag,,,,0,teleport,
 talk:37149,talk,Talk to Jester's Prison Portal,37149,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,0,spell,a check of type 75
@@ -16567,8 +16637,8 @@ taskspawnpoolswait,talk,TaskSpawnPoolsWait,38227,talk,,0,0,0,0,0,0,0,none,,tasks
 taskspawnpoolswait,talk,TaskSpawnPoolsWait,38273,talk,,0,0,0,0,0,0,0,none,,taskspawnpoolsstarted,72000,taskspawnpoolswait,,,,,0,flag,a check of stat 288
 taskspawnpoolswait,talk,TaskSpawnPoolsWait,38279,talk,,0,0,0,0,0,0,0,none,,taskspawnpoolsstarted,72000,taskspawnpoolswait,,,,,0,flag,a check of stat 289
 temoscepterwait,item,Cooldown for Temo Scepter Turn In,37603,give,80301,1,0,0,0,0.1,0,13782125,allegiance,37619:1,temoscepterwait,72000,temoscepterwait,,Scepter of Menilesh,80,0,0,xp;item;flag;takes,
-templeappeasementchosen,talk,Player has been chosen to solve the Appeasement puzzle.,26546,talk,,0,0,0,0,0,0,0,none,26506:1,templeappeasementchosen,0,,,,,,0,item;flag,a check of type 58
-templecunningchosen,talk,Player has been chosen to solve the Cunning puzzle.,26550,talk,,0,0,0,0,0,0,0,none,26645:1,templecunningchosen,0,,,,,,0,item;flag,a check of type 58
+templeappeasementchosen,talk,Player has been chosen to solve the Appeasement puzzle.,26546,talk,,0,0,0,0,0,0,0,none,26506:1,templeappeasementchosen,0,,fellow:templearbiterspoken,,,,0,item;flag,a fellowship without templeappeasementcomplete|a fellowship without templeappeasementspoken
+templecunningchosen,talk,Player has been chosen to solve the Cunning puzzle.,26550,talk,,0,0,0,0,0,0,0,none,26645:1,templecunningchosen,0,,fellow:templearbiterspoken,,,,0,item;flag,a fellowship without templecunningcomplete|a fellowship without templecunningspoken
 templeeastwing,item,Flagged to enter the Temple East wing,32493,give,32498,1,0,0,0,0,0,0,none,32499:1,templeeastwing,72000,axeofkorogaith,,Axe of Korogaith,1,0,0,item;flag;takes,
 templeenlightenmentbistort,talk,Skill sellback quest.,22753,talk,,0,25,0,0,0,0,0,none,,templeenlightenmentbistort,0,,,,,,0,flag,a random reply
 templeenlightenmentcomfrey,talk,Skill sellback quest.,22753,talk,,0,25,0,0,0,0,0,none,,templeenlightenmentcomfrey,0,,,,,,0,flag,a random reply
@@ -16601,14 +16671,14 @@ templeforgetfulnesssaffron,talk,Skill sellback quest.,22754,talk,,0,25,0,0,0,0,0
 templeforgetfulnessvervain,talk,Skill sellback quest.,22754,talk,,0,25,0,0,0,0,0,none,,templeforgetfulnessvervain,0,,,,,,0,flag,a random reply
 templeforgetfulnesswormwood,talk,Skill sellback quest.,22754,talk,,0,25,0,0,0,0,0,none,,templeforgetfulnesswormwood,0,,,,,,0,flag,a random reply
 templeforgetfulnessyarrow,talk,Skill sellback quest.,22754,talk,,0,25,0,0,0,0,0,none,,templeforgetfulnessyarrow,0,,,,,,0,flag,a random reply
-templeliazka,talk,Liazk feeder A has taken a sacrifice.,27157,talk,,0,0,0,0,0,0,0,none,,templeliazka,45,templeliazka,,,,,0,flag;spell,a check of type 58
-templeliazkb,talk,Liazk feeder B has taken a sacrifice.,27158,talk,,0,0,0,0,0,0,0,none,,templeliazkb,45,templeliazkb,,,,,0,flag;spell,a check of type 58
-templeliazkc,talk,Liazk feeder C has taken a sacrifice.,27159,talk,,0,0,0,0,0,0,0,none,,templeliazkc,45,templeliazkc,,,,,0,flag;spell,a check of type 58
+templeliazka,talk,Liazk feeder A has taken a sacrifice.,27157,talk,,0,0,0,0,0,0,0,none,,templeliazka,45,templeliazka,,,,,0,flag;spell,no fellowship
+templeliazkb,talk,Liazk feeder B has taken a sacrifice.,27158,talk,,0,0,0,0,0,0,0,none,,templeliazkb,45,templeliazkb,,,,,0,flag;spell,no fellowship
+templeliazkc,talk,Liazk feeder C has taken a sacrifice.,27159,talk,,0,0,0,0,0,0,0,none,,templeliazkc,45,templeliazkc,,,,,0,flag;spell,no fellowship
 templenorthwing,item,Flagged to enter the Temple North wing,32493,give,32496,1,0,0,0,0,0,0,none,32497:1,templenorthwing,72000,spearofbaranaith,,Spear of Baranaith,1,0,0,item;flag;takes,
-templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26501:1,templereceivedshirt,72000,templereceivedshirt,,,,,0,item;flag,a check of type 58
-templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26502:1,templereceivedshirt,72000,templereceivedshirt,,,,,0,item;flag,a check of type 58
-templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26503:1,templereceivedshirt,72000,templereceivedshirt,,,,,0,item;flag,a check of type 58
-templewitchosen,talk,Player has been chosen to solve the Wit puzzle.,26566,talk,,0,0,0,0,0,0,0,none,26511:1,templewitchosen,0,,,,,,0,item;flag,a check of type 58
+templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26501:1,templereceivedshirt,72000,templereceivedshirt,fellow:templekilledibrexijikti,,,,0,item;flag,
+templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26502:1,templereceivedshirt,72000,templereceivedshirt,fellow:templekilledjexkiki,,,,0,item;flag,a fellowship without templekilledibrexijikti
+templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26503:1,templereceivedshirt,72000,templereceivedshirt,fellow:templekilledkixktixri,,,,0,item;flag,a fellowship without templekilledibrexijikti|a fellowship without templekilledjexkiki
+templewitchosen,talk,Player has been chosen to solve the Wit puzzle.,26566,talk,,0,0,0,0,0,0,0,none,26511:1,templewitchosen,0,,fellow:templearbiterspoken,,,,0,item;flag,a fellowship without templewitcomplete|a fellowship without templewitspoken
 tentaclestthuuncomplete0408,talk,Player has completed Blightfinger,37400,talk,,0,70,0,0,0,0,0,none,,tentaclestthuunstarted0408;contractquestcounter_0511,72000,tentaclestthuuncomplete0408,,,,,0,flag,a check of type 102
 tentaclestthuuncomplete0408,item,Player has completed Blightfinger,37400,give,87475,1,0,0,20700000,0,0,0,all,37402:1;20630:2,tentaclestthuuncomplete0408,72000,handofblightfinger_pickup,,Hand of Blightfinger,80,0,0,xp;item;flag;takes,
 thearchivist_repeat,item,Player has alread completed The Archivist Quest once,35562,give,35565,1,0,0,96549429,0,0,0,all,35566:1,thearchivist_repeat,-1,thearchivist_repeat,,Observations: Harraag,2000,0,0,xp;item;flag;title;takes,

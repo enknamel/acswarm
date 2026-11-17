@@ -37,6 +37,9 @@ AWARD_LUMINANCE = 113
 BRANCHING = {20, 21, 30, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 51, 58, 59, 60, 67, 71,
              75, 76, 79, 80, 82, 89, 102, 103, 104, 105, 114, 121}
 LEVEL_STAT = 25
+# InqFellowQuest, asking the fellowship's quests, and its reply out of one (EmoteType.cs,
+# EmoteCategory.cs; EmoteManager.cs:500-517).
+INQ_FELLOW, NO_FELLOW = 58, 30
 # InqEvent, asking whether a server event runs, and its replies (EmoteType.cs, EmoteCategory.cs).
 INQ_EVENT, EVENT_OK, EVENT_NO = 51, 27, 28
 EVENT_UNREAD = "a check of type %d" % INQ_EVENT
@@ -243,7 +246,7 @@ class Data:
                                                     int(lo), int(hi), quest)
         self.event_name = {}
         self.start_needs = defaultdict(set)
-        self.starts, self.summons, self.stamps = event_starts(self)
+        self.starts, self.summons, self.stamps, self.fellow_stamps = event_starts(self)
         # The events a generator portal waits on (event_portal_rows): their starters are written.
         self.portal_events = set()
         # Who sends each signal as it dies (lower case: a set's key matches it whatever its case,
@@ -341,6 +344,12 @@ class Data:
 
     def level(self, wcid):
         return self.ints[wcid].get(25, 0)
+
+    def fellow_holds(self, quest):
+        """Whether one stamp of `quest` on a fellowship answers InqFellowQuest yes from then on: had
+        and not solvable again, a missing quest never solvable (QuestManager.cs:266-276, 334-362)."""
+        delta, solves, _ = self.quest.get(quest, (0, 0, ""))
+        return quest not in self.quest or delta > 0 or 0 <= solves <= 1
 
     def clears(self, obj, event):
         """The creatures whose deaths start `event` that `obj` itself generates, through a
@@ -806,6 +815,8 @@ def walk(data, root):
                     cats = ((TEST_OK, True), (TEST_NO, False))
                 elif t == INQ_EVENT:
                     cats = ((EVENT_OK, True), (EVENT_NO, False))
+                elif t == INQ_FELLOW:
+                    cats = ((QUEST_OK, True), (QUEST_NO, False), (NO_FELLOW, "no fellowship"))
                 else:
                     # A check the client cannot read: every reply keyed on it is a path.
                     alts = [x for x in data.outcomes(obj, None, a["msg"]) if x["id"] not in seen]
@@ -843,12 +854,14 @@ def event_starts(data):
     `obj`), kill (`obj`'s death) or use; what a creature's death summons, {creature: (portal,
     cell, x, y, z)} (its CastSpellInstant of a portal summon: Relic Watchman's Aerfalle Keep);
     and whose death stamps each flag on its killer, {flag: {creature}} (lower case: the Guardian
-    of the Singularity's VirindiIsland; EmoteManager.cs:1998-2008 runs it for the last damager)."""
+    of the Singularity's VirindiIsland; EmoteManager.cs:1998-2008 runs it for the last damager),
+    and on its killer's fellowship (StampFellowQuest, EmoteManager.cs:1252-1263: Kivik Lir's)."""
     starts, summons, stamps = defaultdict(set), {}, defaultdict(set)
+    fellows = defaultdict(set)
     kinds = {GIVE: "give", DEATH: "kill", USE: "use"}
     objs = {s["obj"] for s in data.sets.values()
             if any(a["type"] in (START_EVENT, CAST_INSTANT) for a in s["acts"])
-            or s["cat"] == DEATH and any(a["type"] == STAMP for a in s["acts"])}
+            or s["cat"] == DEATH and any(a["type"] in (STAMP, STAMP_FELLOW) for a in s["acts"])}
     for obj in sorted(objs):
         for s in data.by_obj[obj]:
             kind = kinds.get(s["cat"])
@@ -873,7 +886,9 @@ def event_starts(data):
                             summons[obj] = data.link_portal[(obj, did)]
                     elif a["type"] == STAMP and kind == "kill" and a["msg"]:
                         stamps[a["msg"].lower()].add(obj)
-    return starts, summons, stamps
+                    elif a["type"] == STAMP_FELLOW and kind == "kill" and a["msg"]:
+                        fellows[qname(a["msg"])].add(obj)
+    return starts, summons, stamps, fellows
 
 
 def reached(data, obj, s, depth=0):
@@ -1044,6 +1059,7 @@ def read_path(data, root, branches, effects, never):
     if root["cat"] in (GIVE, REFUSE) or signal:
         r["items"].append((root["wcid"], 1))
     stat_needs = []
+    outside = []
     for t, ok, a in branches:
         if isinstance(ok, str):
             r["unread"].append(ok)
@@ -1086,7 +1102,7 @@ def read_path(data, root, branches, effects, never):
             elif hi >= at_hi:
                 at_hi = min(at_hi, lo - 1)
             else:
-                r["unread"].append("two level bands")  # outside a band in the middle
+                outside.append((lo, hi))  # a band in the middle: read once the band is known
                 continue
             if at_lo > at_hi:
                 r["unread"].append("an empty level band")
@@ -1158,9 +1174,38 @@ def read_path(data, root, branches, effects, never):
             else:
                 r["unread"].append("asks a flag it stamps itself: %s" % q)
                 continue
+        elif t == INQ_FELLOW:
+            if not ok:
+                r["unread"].append("a fellowship without %s" % q)
+            elif data.fellow_holds(q):
+                r["needs"].append("fellow:" + q)
+            else:
+                r["unread"].append("a fellowship flag that never holds: %s" % q)
+            continue
         else:
             r["unread"].append("a check of type %d" % t)
             continue
+    # A middle band failed trims the band at an end, or lies wholly outside it: a ladder's rungs
+    # failed on the way to its last (Kivik Lir's 60-79 and 80-99 under 100 and up).
+    while outside:
+        at_lo, at_hi = r["band"][0], r["band"][1] or MAX_LEVEL
+        left = []
+        for lo, hi in outside:
+            if hi < at_lo or lo > at_hi:
+                continue
+            if lo <= max(at_lo, 1):
+                at_lo = hi + 1
+            elif hi >= at_hi:
+                at_hi = lo - 1
+            else:
+                left.append((lo, hi))
+            r["band"] = [at_lo, at_hi]
+        if len(left) == len(outside):
+            r["unread"].append("two level bands")
+            break
+        outside = left
+    if r["band"][1] and r["band"][0] > r["band"][1]:
+        r["unread"].append("an empty level band")
     if r["band"][1] >= MAX_LEVEL:
         r["band"][1] = 0
     # A stat's value first: what sets it is a floor below the flags beside it (Aetheria's 322).
@@ -1433,6 +1478,7 @@ def build(data, never):
                    | {str(w) for w in learnt} | {str(w) for w in data.gems}
                    | {"flag:" + f for f in data.stamps}
                    | {"flag:" + f for f in data.portal_stamps}
+                   | {"fellow:" + f for f in data.fellow_stamps}
                    | {"event:" + e for e in data.portal_events})
     # And the spell components no shop sells: what an item goal is set for (Chorizite).
     rewards = reward_items(rows_out)
@@ -1529,6 +1575,11 @@ def build(data, never):
                 if placed_at(data, p):
                     kind = "portal" if standing(data, p) else "revealed"
                     src.append((want, kind, p, 1.0, ""))
+        elif want.startswith("fellow:"):
+            # Stamped on the fellowship of whoever deals a creature its last blow.
+            for c in sorted(data.fellow_stamps.get(want[7:], ())):
+                if data.spawns.get(c):
+                    src.append((want, "kill", c, 1.0, ""))
         else:
             for c in sorted(data.counter_of[want]):
                 if data.spawns.get(c):
@@ -2050,8 +2101,10 @@ QUESTS_HEADER = """\
 # are open. xp is fixed; xp_level is a share of the XP to the next level, clamped to
 # xp_min/xp_max when not 0. share: all, none or allegiance. gives: wcid:count;..., and for a
 # random reply every alternative |-separated (an empty one gives nothing). stamps and needs:
-# quest flags, or intSTAT=VALUE (a character stat set to, or asked to be, that value). repeat:
-# seconds before another solve, 0 any time, -1 once; timer: the quest its wait is kept under.
+# quest flags, or intSTAT=VALUE (a character stat set to, or asked to be, that value); a need
+# may be fellow:QUEST, the quest stamped on the character's fellowship (InqFellowQuest; its
+# stampers are quest_sources.csv's fellow:QUEST rows). repeat: seconds before another solve, 0
+# any time, -1 once; timer: the quest its wait is kept under.
 # item, item_type (hex), item_value: the wanted item. luminance: what the path awards. does:
 # what the path does (xp, item, flag, spell, skill, luminance, title, teleport, takes, stat,
 # contract, enlightenment, type N). unread: conditions the client cannot check, |-separated
@@ -2070,9 +2123,10 @@ SOURCES_HEADER = """\
 # want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn[,count]
 # want: an item wcid or a kill counter, as quests.csv names it, a key a container or use
 # below needs, or event:NAME, a server event a source below needs, or flag:NAME, a flag stamped
-# on a creature's killer or a portal's user (both lower case). kind: drop (a corpse drop, chance
-# per kill), kill (a creature counting for the counter, or whose death starts the event, itself
-# or heard by a watcher there, or stamps the flag), give (an NPC handed its keys starts the
+# on a creature's killer or a portal's user, or fellow:NAME, a quest stamped on the fellowship
+# of a creature's killer (all lower case). kind: drop (a corpse drop, chance per kill), kill (a
+# creature counting for the counter, or whose death starts the event, itself or heard by a
+# watcher there, or stamps the flag), give (an NPC handed its keys starts the
 # event), portal (going through it stamps the flag), revealed (as portal, made by a generator
 # once something reveals it: the Colosseum's, arenas.csv), npc (a placed NPC, or an object a generator
 # puts out, whose talk gives the item), start (an object whose use starts the event, once the

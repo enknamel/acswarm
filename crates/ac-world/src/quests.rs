@@ -45,6 +45,9 @@ pub enum Want {
     /// A flag a creature's death stamps on its killer (EmoteManager.cs:1998-2008), lower case:
     /// what a portal asks (the Guardian of the Singularity's VirindiIsland).
     Flag(String),
+    /// A quest a creature's death stamps on its killer's fellowship (StampFellowQuest,
+    /// EmoteManager.cs:1252-1263), lower case: what a `fellow:` need asks (Kivik Lir's).
+    Fellow(String),
     Nothing,
 }
 
@@ -139,7 +142,8 @@ pub struct Row {
     pub repeat: Repeat,
     /// The quest the wait or once-flag is kept under; empty when it repeats any time.
     pub timer: &'static str,
-    /// Flags held first; a kill row needs its own counter, which its start row stamps.
+    /// Flags held first; a kill row needs its own counter, which its start row stamps. Also
+    /// `intSTAT=VALUE` ([`stat_need`]) and `fellow:QUEST` ([`fellow_need`]).
     pub needs: Vec<String>,
     pub item: Option<Item>,
     /// Luminance the path awards (AwardLuminance, EmoteManager.cs:135-140).
@@ -546,6 +550,12 @@ pub fn stat_need(flag: &str) -> Option<(u32, i32)> {
     Some((stat.parse().ok()?, value.parse().ok()?))
 }
 
+/// The quest a `fellow:QUEST` need asks stamped on the character's fellowship (InqFellowQuest:
+/// in one, and holding it: EmoteManager.cs:500-517). `None` for any other need.
+pub fn fellow_need(need: &str) -> Option<&str> {
+    need.strip_prefix("fellow:")
+}
+
 fn parse_spots(cells: &[(u32, u32)], at: &str) -> Option<Vec<Place>> {
     if at.is_empty() {
         return Some(Vec::new());
@@ -633,6 +643,7 @@ fn parse_source(line: &str) -> Option<Source> {
         want: match (f[0].strip_prefix("event:"), f[0].strip_prefix("flag:")) {
             (Some(event), _) => Want::Event(event.to_string()),
             (_, Some(flag)) => Want::Flag(flag.to_string()),
+            _ if fellow_need(f[0]).is_some() => Want::Fellow(f[0][7..].to_string()),
             _ if kind == Yield::Kill => Want::Kill(f[0].to_string()),
             _ => Want::Item(f[0].parse().ok()?),
         },
