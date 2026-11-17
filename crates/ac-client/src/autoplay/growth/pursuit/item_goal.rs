@@ -51,7 +51,7 @@ impl Ask<'_> {
                     }
                     h.paces.first()?.pace.soonest()
                 }
-                step if step_item(step) == Some(target) => GOAL_FETCH_SECS,
+                step if step_item(step) == Some(target) => GOAL_FETCH_SECS / step_chance(step),
                 _ => return None,
             };
             pace.is_finite().then_some(pace / per)
@@ -112,6 +112,19 @@ fn step_item(step: &PursuitStep) -> Option<u32> {
     match source.want {
         Want::Item(w) => Some(w),
         _ => None,
+    }
+}
+
+/// A fetch step's chance a try yields: its source's, clamped as [`super::fetch::try_cost`]
+/// does; a pickup or a buy is sure.
+fn step_chance(step: &PursuitStep) -> f32 {
+    match step {
+        PursuitStep::OpenChest { chest: s, .. }
+        | PursuitStep::UseOn { source: s, .. }
+        | PursuitStep::AskFor { source: s, .. }
+        | PursuitStep::GiveTo { source: s, .. }
+        | PursuitStep::Combine { source: s, .. } => s.chance.clamp(0.001, 1.0),
+        _ => 1.0,
     }
 }
 

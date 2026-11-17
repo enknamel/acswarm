@@ -101,7 +101,7 @@ enum Heard {
 }
 
 impl Ask<'_> {
-    /// The nearest fetched source of `wants`: a shop, the floor, a chest open or with its key
+    /// The fetched source of `wants` costing least a find ([`try_cost`]): a shop, the floor, a chest open or with its key
     /// carried, an object with its item carried. Missing keys or items go in `locked`, got first.
     pub(super) fn fetch_step(
         &self,
@@ -246,14 +246,24 @@ impl Ask<'_> {
                         PursuitStep::OpenChest { chest: s, at, key }
                     }
                 };
-                let away = me.map_or(0.0, |m| at.at.distance(m));
-                if best.as_ref().is_none_or(|b| away < b.0) {
-                    best = Some((away, step));
+                let cost = try_cost(me.map_or(0.0, |m| at.at.distance(m)), s.chance);
+                if best.as_ref().is_none_or(|b| cost < b.0) {
+                    best = Some((cost, step));
                 }
             }
         }
         best.map(|b| b.1)
     }
+}
+
+/// What one try at a source costs, in metres walked, before its chance: the way in and the
+/// opening, so a near 1-in-500 chest is not a sure find.
+const TRY_METRES: f32 = 100.0;
+
+/// Metres walked a find at a source `away` metres off whose try yields at `chance`: a 0.2%
+/// Black Marrow Reliquary 500 tries (a_rare_chest_is_not_preferred_to_a_sure_source).
+pub(super) fn try_cost(away: f32, chance: f32) -> f32 {
+    (away + TRY_METRES) / chance.clamp(0.001, 1.0)
 }
 
 /// The event the source a fetch step works needs, when it has one.
@@ -797,5 +807,18 @@ impl Client {
         self.autoplay.note(why, now);
         self.quest_board_at = None;
         true
+    }
+}
+
+#[cfg(test)]
+mod try_cost_tests {
+    use super::try_cost;
+
+    #[test]
+    fn a_rare_chest_is_not_preferred_to_a_sure_source() {
+        // A Black Marrow Reliquary 50 m off at 0.2% against a sure source 2 km off.
+        assert!(try_cost(2_000.0, 1.0) < try_cost(50.0, 0.002));
+        // Two sure sources: the nearer.
+        assert!(try_cost(50.0, 1.0) < try_cost(60.0, 1.0));
     }
 }
