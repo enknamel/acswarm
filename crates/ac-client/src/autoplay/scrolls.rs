@@ -107,9 +107,9 @@ impl Client {
         }
     }
 
-    /// A carried scroll tagged [`LEARNABLE`] whose spell no longer is (or whose spell an earlier
-    /// copy teaches) takes what the rules say of it, else goes to the counter: it was taken only
-    /// to be read, and kept it is clutter.
+    /// A carried scroll tagged [`LEARNABLE`](crate::autoplay::loot::judge::LEARNABLE) whose spell
+    /// no longer is (or whose spell an earlier copy teaches) takes what the rules say of it, else
+    /// goes to the counter: it was taken only to be read, and kept it is clutter.
     fn judge_scrolls_again(&mut self) {
         use crate::autoplay::loot::judge::{judge_loot, LEARNABLE};
         use crate::autoplay::LootAction;
