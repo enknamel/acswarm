@@ -182,8 +182,12 @@ pub struct Recovery {
     pub phase: Phase,
     /// When the phase began.
     pub since: Instant,
-    /// The place of the death, cell and floor ([`View::place`]).
+    /// The place of the death, cell and floor: where the body last stood alive, else
+    /// [`View::place`].
     pub death: Option<Place>,
+    /// Where the body last stood alive, every frame (`tick_player`): the death may be seen only
+    /// once the server has moved it to the lifestone (a_death_seen_at_the_lifestone_keeps_where_it_fell).
+    pub alive_at: Option<Place>,
     /// The corpse being gone back for, once seen.
     pub corpse: Option<u32>,
     /// What was in the hands at death.
@@ -223,6 +227,7 @@ impl Default for Recovery {
             phase: Phase::None,
             since: Instant::now(),
             death: None,
+            alive_at: None,
             corpse: None,
             wielded: Vec::new(),
             trip: None,
@@ -299,7 +304,7 @@ impl Recovery {
         // death dropped what was left. Both lie at the death spot, so
         // the spot is the newer one, and the hands are remembered
         // across both.
-        self.death = Some(v.place);
+        self.death = Some(self.alive_at.unwrap_or(v.place));
         for g in &v.wielded {
             if !self.wielded.contains(g) {
                 self.wielded.push(*g);
@@ -1129,6 +1134,23 @@ mod tests {
     }
 
     #[test]
+    fn a_death_seen_at_the_lifestone_keeps_where_it_fell() {
+        // Blargerton killed in Kivik Lir's gallery while the player steered: the death was seen
+        // only at Holtburg's lifestone, recorded there, and the corpse never gone back for.
+        let t0 = Instant::now();
+        let mut r = Recovery::default();
+        let gallery = Place {
+            at: Vec3::new(494.0, 22_808.0, 0.0),
+            cell: 0x0277_0180,
+        };
+        r.alive_at = Some(gallery);
+        let mut v = view(t0);
+        v.dead = true;
+        r.step(&v);
+        assert_eq!(r.death, Some(gallery), "recorded where it was seen");
+    }
+
+    #[test]
     fn a_death_upstairs_is_walked_back_to_upstairs() {
         // Upstairs beside Archmage Cindrue, no corpse in view: the way back is that floor's cell.
         let mut c = crate::testkit::offline_client();
@@ -1398,6 +1420,33 @@ mod tests {
             c.tick_player(crate::player::Input::default(), dt, now);
         }
         panic!("never opened: {}", c.autoplay.status);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_death_seen_after_the_lifestone_teleport_is_gone_back_to() {
+        // The whole client: the body stood alive by the spot, died there, and the server had it
+        // at the lifestone before autoplay looked (the player steering, autoplay paused).
+        let t0 = Instant::now();
+        let fell = glam::Vec3::new(84.0, 84.0, 94.0);
+        let mut c = crate::testkit::standing_at(0xA9B4_0019, fell);
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.world.stats.name = "Blargerton".into();
+        c.world.stats.attributes[1].base = 100;
+        c.world.stats.vitals[0].current = 50;
+        c.tick_player(crate::player::Input::default(), 0.05, t0);
+        let spot = c.my_position().unwrap();
+        c.world.stats.vitals[0].current = 0;
+        c.tick_player(crate::player::Input::default(), 0.05, t0);
+        crate::testkit::stand(&mut c, 0xA9B4_0019, glam::Vec3::new(30.0, 30.0, 94.0));
+        assert!(c.my_position().unwrap().distance(spot) > 50.0);
+        c.autoplay_recover(t0);
+        let death = c.autoplay.recovery.death.expect("no death noted");
+        assert!(
+            death.at.distance(spot) < 1.0,
+            "the death put at {:?}, not where it fell",
+            death.at
+        );
     }
 
     #[test]

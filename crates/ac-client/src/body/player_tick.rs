@@ -22,6 +22,16 @@ impl Client {
     ) -> PlayerFrame {
         self.held_run = input.run;
         self.frame_at = now;
+        // Where the body stands alive, for the corpse's spot: whatever autoplay is doing.
+        if !self.is_dead() {
+            if let Some(pl) = &self.player {
+                let at = ac_world::Place {
+                    at: pl.world_position(),
+                    cell: pl.cell,
+                };
+                self.autoplay.recovery.alive_at = Some(at);
+            }
+        }
         // The user taking the controls ends an overland trip. Autoplay on, its journey is put
         // down for its row to walk on once the keys are let go, not read as no way there
         // (a_journey_put_down_while_the_player_steers_is_walked_on_once_the_keys_are_let_go).
