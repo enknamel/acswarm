@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 use super::*;
 use crate::quest_log::{considered_rows, quest_board};
 
+mod ranking;
+
 const NOW: u64 = 1_000_000;
 
 /// Chains a test writes out: what `quest_chain` will answer once its data is in.
@@ -51,6 +53,16 @@ impl Chains for Fake {
 
 fn leak<T>(t: T) -> &'static T {
     Box::leak(Box::new(t))
+}
+
+/// A journey's seconds as the trip planner prices a walk: the straight line from `me`.
+fn walked(me: Option<Vec3>) -> impl Fn(Place, bool) -> Leg {
+    use ac_world::trip::{DETOUR, WALK_SPEED};
+    move |p: Place, _| {
+        Leg::Planned(Some(
+            me.map_or(0.0, |m| p.at.distance(m)) * DETOUR / WALK_SPEED,
+        ))
+    }
 }
 
 /// A creature dropping `want` every kill.
@@ -223,6 +235,9 @@ fn work_in(
         kill_secs,
         event_on,
         arena,
+        journey: &walked(f.me),
+        spendable: u32::MAX,
+        chosen: Default::default(),
     };
     pursuit_of(&board, &chained, &ask)
 }
@@ -1921,6 +1936,18 @@ fn in_the_pack(c: &mut Client, guid: u32, wcid: u32, name: &str, count: u32) {
 fn again(c: &mut Client, now: std::time::Instant) -> PursuitStep {
     c.quest_board_at = None;
     c.refresh_quests(now);
+    c.pursuit[0].step.clone()
+}
+
+/// Work the board out until every way's journey is planned (a few a board), as the boards
+/// after the first would: the step the ranking settles on.
+fn settled(c: &mut Client, now: std::time::Instant) -> PursuitStep {
+    for _ in 0..40 {
+        again(c, now);
+        if !c.autoplay.growth.journeys.is_planning() {
+            break;
+        }
+    }
     c.pursuit[0].step.clone()
 }
 
@@ -4005,6 +4032,9 @@ fn a_flag_a_standing_portal_stamps_is_had_by_going_through_it() {
         kill_secs: &|_| Some(20.0),
         event_on: &|_| false,
         arena: &arena,
+        journey: &walked(f.me),
+        spendable: u32::MAX,
+        chosen: Default::default(),
     };
     match ask.flag_step("HarbingerEssenceless", 0).0 {
         PursuitStep::GoThrough {
@@ -4763,18 +4793,22 @@ fn an_item_goal_hunts_its_fastest_way_hands_in_and_stops_at_its_count() {
     c.autoplay.config.quests.pursue_item(7299, 10, 0);
     let now = std::time::Instant::now();
     c.refresh_quests(now);
+    settled(&mut c, now);
     let line = |c: &Client| c.pursuit[0].clone();
     let l = line(&c);
     assert_eq!(l.title, "Diamond Scarab 0/10");
+    // Two Glowing Mosswart Shrouds (5 each): each a Virindi Essence out of a chest the Sturdy
+    // Iron Key opens, the key a Virindi Inquisitor's 60% drop, with a Torn Mosswart Shroud from
+    // a Gragghk; about 36 min with the journeys, where four Diamond Hearts take about 54.
     match &l.step {
-        PursuitStep::Hunt { creature, .. } => assert!(creature.contains("Golem"), "{creature}"),
-        other => panic!("not hunting golems: {other:?}"),
+        PursuitStep::Hunt { creature, .. } => assert_eq!(creature, "Virindi Inquisitor"),
+        other => panic!("not hunting the key: {other:?}"),
     }
     assert!(l.working);
     assert_eq!(
         c.autoplay.growth.pursuit_items,
-        vec![7338],
-        "not for the Diamond Heart"
+        vec![6876],
+        "not for the Sturdy Iron Key"
     );
     // The scarab and what its ways take are kept; not what quests further down give.
     let kept: Vec<String> = c
@@ -4930,6 +4964,9 @@ fn the_browerk_flag_is_had_from_the_watcher_a_generator_puts_out() {
         kill_secs: &|_| Some(20.0),
         event_on: &|_| false,
         arena: &arena,
+        journey: &walked(f.me),
+        spendable: u32::MAX,
+        chosen: Default::default(),
     };
     let step = ask.flag_step_by("OnBrowerkQuest", 0, true).0;
     assert!(format!("{step:?}").contains("29731"), "{step:?}");
@@ -5013,6 +5050,9 @@ fn the_font_event_has_each_valve_used_then_the_font_guardian() {
             kill_secs: &|_| Some(20.0),
             event_on: on,
             arena: &arena,
+            journey: &walked(f.me),
+            spendable: u32::MAX,
+            chosen: Default::default(),
         };
         let want = Want::Event("eventfontbrowerkstopgap".into());
         match ask.obtain(&[want], 1, "the font event", 0).0 {

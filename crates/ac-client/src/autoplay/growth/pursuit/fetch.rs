@@ -100,18 +100,39 @@ enum Heard {
     Again,
 }
 
+/// A fetched source of what is wanted: its step, where it is (none for a combine), or the keys
+/// or items had first when one is missing (any one; `each` for a combine).
+pub(super) struct Fetched {
+    pub(super) source: &'static Source,
+    pub(super) step: Option<PursuitStep>,
+    pub(super) at: Option<Place>,
+    pub(super) first: Vec<(u32, &'static str)>,
+    pub(super) each: bool,
+}
+
 impl Ask<'_> {
-    /// The fetched source of `wants` costing least a find ([`try_cost`]): a shop, the floor, a chest open or with its key
-    /// carried, an object with its item carried. Missing keys or items go in `locked`, got first.
-    pub(super) fn fetch_step(
+    /// Every fetched source of `wants`: a shop, the floor, a chest open or with its key carried,
+    /// an object with its item carried, or one whose key or item is had first (`fastest` ranks
+    /// them). What only an event puts out goes in `events`.
+    pub(super) fn fetch_ways(
         &self,
         wants: &[Want],
         more: u32,
-        locked: &mut Vec<(u32, &'static str)>,
         events: &mut Vec<&'static str>,
-    ) -> Option<PursuitStep> {
+    ) -> Vec<Fetched> {
         let me = self.facts.me;
-        let mut best: Option<(f32, PursuitStep)> = None;
+        let mut out: Vec<Fetched> = Vec::new();
+        let keyed =
+            |s: &'static Source, at: Option<Place>, first: Vec<(u32, &'static str)>| Fetched {
+                source: s,
+                step: None,
+                at,
+                each: at.is_none(),
+                first,
+            };
+        let keys = |s: &'static Source| -> Vec<(u32, &'static str)> {
+            s.keys.iter().map(|k| (k.0, k.1.as_str())).collect()
+        };
         for want in wants {
             let wcid = match *want {
                 Want::Item(w) => w,
@@ -187,11 +208,7 @@ impl Ask<'_> {
                         },
                         None if gives_held => continue,
                         None => {
-                            for (k, name) in &s.keys {
-                                if !locked.iter().any(|l| l.0 == *k) {
-                                    locked.push((*k, name.as_str()));
-                                }
-                            }
+                            out.push(keyed(s, Some(at), keys(s)));
                             continue;
                         }
                     },
@@ -209,11 +226,8 @@ impl Ask<'_> {
                                 on: on.0,
                             },
                             _ => {
-                                for (k, name) in missing {
-                                    if !locked.iter().any(|l| l.0 == *k) {
-                                        locked.push((*k, name.as_str()));
-                                    }
-                                }
+                                let missing = missing.iter().map(|k| (k.0, k.1.as_str()));
+                                out.push(keyed(s, None, missing.collect()));
                                 continue;
                             }
                         }
@@ -225,45 +239,30 @@ impl Ask<'_> {
                             with,
                         },
                         None => {
-                            for (k, name) in &s.keys {
-                                if !locked.iter().any(|l| l.0 == *k) {
-                                    locked.push((*k, name.as_str()));
-                                }
-                            }
+                            out.push(keyed(s, Some(at), keys(s)));
                             continue;
                         }
                     },
                     _ => {
                         let key = s.keys.iter().map(|k| k.0).find(carried);
                         if key.is_none() && !s.keys.is_empty() && !(self.unlocked)(s) {
-                            for (k, name) in &s.keys {
-                                if !locked.iter().any(|l| l.0 == *k) {
-                                    locked.push((*k, name.as_str()));
-                                }
-                            }
+                            out.push(keyed(s, Some(at), keys(s)));
                             continue;
                         }
                         PursuitStep::OpenChest { chest: s, at, key }
                     }
                 };
-                let cost = try_cost(me.map_or(0.0, |m| at.at.distance(m)), s.chance);
-                if best.as_ref().is_none_or(|b| cost < b.0) {
-                    best = Some((cost, step));
-                }
+                out.push(Fetched {
+                    source: s,
+                    step: Some(step),
+                    at: combine.is_none().then_some(at),
+                    first: Vec::new(),
+                    each: false,
+                });
             }
         }
-        best.map(|b| b.1)
+        out
     }
-}
-
-/// What one try at a source costs, in metres walked, before its chance: the way in and the
-/// opening, so a near 1-in-500 chest is not a sure find.
-const TRY_METRES: f32 = 100.0;
-
-/// Metres walked a find at a source `away` metres off whose try yields at `chance`: a 0.2%
-/// Black Marrow Reliquary 500 tries (a_rare_chest_is_not_preferred_to_a_sure_source).
-pub(super) fn try_cost(away: f32, chance: f32) -> f32 {
-    (away + TRY_METRES) / chance.clamp(0.001, 1.0)
 }
 
 /// The event the source a fetch step works needs, when it has one.
@@ -278,12 +277,27 @@ fn step_event(step: &PursuitStep) -> Option<&'static str> {
 
 /// The name the shop `s` sells `wcid` under.
 pub(super) fn ware_name(s: &Source, wcid: u32) -> Option<String> {
+    ware_of(s, wcid).map(|(_, w)| w.name.clone())
+}
+
+/// What the shop `s` charges for one `wcid`.
+pub(super) fn ware_charge(s: &Source, wcid: u32) -> Option<u32> {
+    ware_of(s, wcid).map(|(shop, w)| shop.charges_for(w))
+}
+
+/// The shop `s` and its ware `wcid`.
+fn ware_of(
+    s: &Source,
+    wcid: u32,
+) -> Option<(
+    &'static ac_world::shops::Shop,
+    &'static ac_world::shops::Ware,
+)> {
     let cell = s.landblocks.first().map_or(0, |l| l.0);
     let shop = ac_world::shops::all()
         .iter()
-        .find(|p| p.wcid == s.wcid && p.cell == cell);
-    let ware = shop.and_then(|p| p.sells.iter().find(|w| w.wcid == wcid));
-    ware.map(|w| w.name.clone())
+        .find(|p| p.wcid == s.wcid && p.cell == cell)?;
+    Some((shop, shop.sells.iter().find(|w| w.wcid == wcid)?))
 }
 
 /// The wanted item and the source a fetch step works.
@@ -807,18 +821,5 @@ impl Client {
         self.autoplay.note(why, now);
         self.quest_board_at = None;
         true
-    }
-}
-
-#[cfg(test)]
-mod try_cost_tests {
-    use super::try_cost;
-
-    #[test]
-    fn a_rare_chest_is_not_preferred_to_a_sure_source() {
-        // A Black Marrow Reliquary 50 m off at 0.2% against a sure source 2 km off.
-        assert!(try_cost(2_000.0, 1.0) < try_cost(50.0, 0.002));
-        // Two sure sources: the nearer.
-        assert!(try_cost(50.0, 1.0) < try_cost(60.0, 1.0));
     }
 }

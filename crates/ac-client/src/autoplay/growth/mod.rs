@@ -240,6 +240,10 @@ pub struct State {
     /// Seconds on from a gem's exit to a goal, by the plan's inputs hashed, and when planned
     /// (see `pursuit::gem_way`): planned afresh each board, they froze the window 15 s.
     onward_memo: std::collections::HashMap<u64, (Option<f32>, std::time::Instant)>,
+    /// Journey seconds to each way's place a pursuit chose, as planned (`pursuit::fastest`).
+    journeys: pursuit::Journeys,
+    /// The fastest-way choice last logged for each pursued line, by id (`pursuit::Choice`).
+    fastest_said: std::collections::BTreeMap<String, pursuit::Choice>,
     /// The flag each pursued quest, by id, has first, the only way on (see `pursuit::flag_way`).
     pursuit_flags: std::collections::BTreeMap<String, String>,
     /// The event each pursued quest, by id, starts first: only its portal leads on (see

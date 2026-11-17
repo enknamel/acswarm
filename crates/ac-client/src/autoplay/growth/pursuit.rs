@@ -1,7 +1,7 @@
 //! Quests the player asked for, worked before hunting for XP: each pursued quest's step for this
 //! character, worked out with the board; the town run calls on givers, `grow_hunt` hunts sources.
 //! A flag a way on asks is earned first: from an unlock NPC, by a kill (`flag_way`), or by the quest
-//! stamping it, worked ahead of the one that needs it (`with_chain`). An item is fetched before it is hunted (`fetch`).
+//! stamping it, worked ahead of the one that needs it (`with_chain`). An item is had the fastest way (`fastest`).
 //! What a chain needs is kept and bought only through the profile's Quests section (`section`).
 
 use std::collections::BTreeMap;
@@ -20,6 +20,7 @@ use crate::Client;
 
 pub(crate) mod arena;
 mod events;
+mod fastest;
 mod fellow_stamp;
 mod fetch;
 mod field;
@@ -32,6 +33,7 @@ mod portal_way;
 mod section;
 mod step_words;
 mod sweep;
+pub(crate) use fastest::{Choice, Journeys, Leg};
 pub(crate) use fetch::Fetching;
 pub(crate) use field::Using;
 pub(crate) use gem_way::GemWanted;
@@ -281,6 +283,8 @@ pub(crate) struct Pursued {
     pub(crate) droppers: Vec<(u32, f32, f32)>,
     /// The hunt's items, by weenie class.
     pub(crate) items: Vec<u32>,
+    /// The fastest way each line's step was chosen by, by quest id and title (`fastest`).
+    pub(crate) choices: Vec<(String, String, Choice)>,
 }
 
 /// What each line's step is worked out from, besides the board.
@@ -322,17 +326,30 @@ pub(crate) struct Ask<'a> {
     pub(crate) event_on: &'a dyn Fn(&str) -> bool,
     /// What an arena run's stage is read from (`arena`).
     pub(crate) arena: &'a arena::ArenaView,
+    /// The journey from here to a place as planned, and with `true` planned now (`Journeys`).
+    pub(crate) journey: &'a dyn Fn(Place, bool) -> Leg,
+    /// Coin and trade notes carried: a buy past them is not open yet (`fastest`).
+    pub(crate) spendable: u32,
+    /// The way the last step worked out was chosen by (`fastest`), for the log.
+    pub(crate) chosen: std::cell::RefCell<Option<Choice>>,
 }
 
 /// Each line's step, worked out with the `board` the chained list's facts gave; the first that
 /// can go on is the one worked. One worked first waits while the quest it is for is not due.
 pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) -> Pursued {
     let mut lines: Vec<(PursuitLine, Option<Hunting>)> = Vec::new();
+    let mut choices = Vec::new();
+    let mut chose = |line: &PursuitLine| {
+        if let Some(c) = ask.chosen.take() {
+            choices.push((line.id.clone(), line.title.clone(), c));
+        }
+    };
     for c in chained {
         let id = c.pursuit.id.as_str();
         let line = board.iter().find(|l| l.id == id);
         if let Some(item) = c.pursuit.goal_item() {
             lines.push(ask.goal_line(&c.pursuit, item));
+            chose(&lines[lines.len() - 1].0);
             continue;
         }
         let title = line.map_or_else(
@@ -366,6 +383,7 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
             working: false,
             via: c.via.clone(),
         };
+        chose(&line);
         lines.push((line, hunt));
     }
     // The quest a line is worked first for comes after it: its step is known only now.
@@ -407,7 +425,10 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
         .iter()
         .position(|(l, h)| l.step.can_progress() && on_ground(l, h))
         .or_else(|| lines.iter().position(|(l, _)| fetched_here(l)));
-    let mut out = Pursued::default();
+    let mut out = Pursued {
+        choices,
+        ..Pursued::default()
+    };
     for (i, (mut line, hunt)) in lines.into_iter().enumerate() {
         line.working = match first {
             Some(f) => i == f,
@@ -568,75 +589,6 @@ impl Ask<'_> {
             return self.portal_hunt(*portal, name);
         }
         step
-    }
-
-    /// `wants` fetched where nothing is hunted, else hunted where they drop, else the key a chest
-    /// holding one asks obtained first, [`OBTAIN_DEPTH`] deep; else why not.
-    fn obtain(
-        &self,
-        wants: &[Want],
-        more: u32,
-        what: &str,
-        depth: usize,
-    ) -> (PursuitStep, Option<Hunting>) {
-        // An item whose pickup stamp waits is not gone for: the server turns the pickup down (the
-        // Ancient Key hunted with novquest1 2.6 h off). With every one so, the quest waits. One
-        // carried is had: its stamp bars only another (the Sacrificial Dagger held for the Ghost).
-        let carried = |i: &u32| self.facts.carried.get(i).is_some_and(|n| *n > 0);
-        let waits = |w: &Want| match w {
-            Want::Item(i) if !carried(i) => self.facts.log.pickup_wait(*i, self.facts.now),
-            _ => None,
-        };
-        let open: Vec<Want> = wants
-            .iter()
-            .filter(|w| waits(w).is_none())
-            .cloned()
-            .collect();
-        if open.is_empty() {
-            if let Some(until) = wants.iter().filter_map(waits).min() {
-                return (PursuitStep::Waiting { until }, None);
-            }
-        }
-        let wants = &open[..];
-        let mut locked: Vec<(u32, &'static str)> = Vec::new();
-        let mut events: Vec<&'static str> = Vec::new();
-        if let Some(step) = self.fetch_step(wants, more, &mut locked, &mut events) {
-            return (step, None);
-        }
-        let hunted = self.ground_step(wants, more, what, &mut events, depth);
-        if !matches!(hunted.0, PursuitStep::Stuck { .. }) || depth >= OBTAIN_DEPTH {
-            return hunted;
-        }
-        // Another quest's reward: quests chain (a Singularity Scepter handed in for the Bound one).
-        if let Some(got) = self.reward_step(wants, depth) {
-            return got;
-        }
-        let mut first_why = None;
-        for (key, name) in locked {
-            let got = self.obtain(&[Want::Item(key)], 1, name, depth + 1);
-            match got.0 {
-                PursuitStep::Stuck { why } => {
-                    first_why.get_or_insert((name.to_string(), why));
-                }
-                _ => return got,
-            }
-        }
-        // What only an event puts out: the event started first, as a key is had.
-        for e in events {
-            let name = format!("the {e} event");
-            let got = self.obtain(&[Want::Event(e.to_string())], 1, &name, depth + 1);
-            match got.0 {
-                PursuitStep::Stuck { why } => {
-                    first_why.get_or_insert((name, why));
-                }
-                _ => return got,
-            }
-        }
-        // What is missing is a chest's key or an item used to make it: named, as either.
-        match first_why {
-            Some((name, why)) => (stuck(format!("{what} needs {name} first: {why}")), None),
-            None => hunted,
-        }
     }
 
     /// `wants` had as another quest's reward: its hand-in made when what it takes is carried, else
@@ -882,6 +834,21 @@ impl Client {
             .retain(|_, f| !held_flags.iter().any(|h| h.eq_ignore_ascii_case(f)));
         let flag_ways = st.pursuit_flags.clone();
         let event_ways = self.event_ways(now);
+        // Each way's journey is the planner's own, planned once a place (`fastest::Journeys`).
+        self.tell_building_cells();
+        let underground = self.underground();
+        let mut journeys = std::mem::take(&mut self.autoplay.growth.journeys);
+        journeys.start(now);
+        let journeys = std::cell::RefCell::new(journeys);
+        let quests_held = self.travel.quests_done.clone();
+        let journey = |p: Place, plan: bool| {
+            let planner = || {
+                let goal = self.planning_place_seen(p);
+                let trip = self.plan_from_here(goal, &quests_held, None, underground);
+                trip.map(|t| t.seconds)
+            };
+            journeys.borrow_mut().leg(p, plan, now, planner)
+        };
         let st = &self.autoplay.growth;
         // A gem carried is the way already: the planner takes it.
         let ways: BTreeMap<String, (u32, String)> = st
@@ -954,12 +921,29 @@ impl Client {
             bound: self.autoplay.growth.bound_landblock(),
             kill_secs: &kill_secs,
             event_on: &event_on,
+            journey: &journey,
+            spendable: self.spendable(),
+            chosen: Default::default(),
         };
         let pursued = pursuit_of(&self.quest_board, chained, &ask);
+        drop(ask);
         drop(killing);
+        self.autoplay.growth.journeys = journeys.into_inner();
         self.log_stuck_lines(&pursued.lines);
         self.pursuit = pursued.lines;
         let st = &mut self.autoplay.growth;
+        // Said once a choice changes, every journey it read planned: why this way, not the next.
+        let settled = !st.journeys.is_planning();
+        for (id, title, c) in pursued.choices.into_iter().filter(|_| settled) {
+            if st
+                .fastest_said
+                .get(&id)
+                .is_none_or(|said| said.key() != c.key())
+            {
+                tracing::info!("pursuit: {title}: {}", c.words());
+                st.fastest_said.insert(id, c);
+            }
+        }
         // Another hunt, or its droppers another: the plan set off on is not its plan.
         let classes = |d: &[(u32, f32, f32)]| d.iter().map(|d| d.0).collect::<Vec<u32>>();
         if classes(&st.pursuit_droppers) != classes(&pursued.droppers) {
